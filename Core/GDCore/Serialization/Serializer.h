@@ -8,7 +8,6 @@
 #define GDCORE_SERIALIZER_H
 #include <string>
 #include "GDCore/Serialization/SerializerElement.h"
-class TiXmlElement;
 
 namespace gd {
 
@@ -22,11 +21,7 @@ class GD_CORE_API Serializer {
  * Convert a gd::SerializerElement from/to XML.
  */
 ///@{
-#if !defined(EMSCRIPTEN)
-  static void ToXML(SerializerElement& element, TiXmlElement* xmlElement);
-  static void FromXML(SerializerElement& element,
-                      const TiXmlElement* xmlElement);
-#endif
+
   /**
    * \brief Escape a string for inclusion in a XML tag
    */
@@ -57,10 +52,36 @@ class GD_CORE_API Serializer {
   }
   ///@}
 
+  /** \name Canonical serialization mode.
+   * When enabled, ToJSON writes object keys in alphabetical order and
+   * various SerializeTo helpers write default values (false, "", []) for
+   * properties that would otherwise be omitted.
+   *
+   * This makes git diffs minimal and shift-free when toggling boolean
+   * flags or adding/removing optional sub-structures (e.g. sub-events,
+   * local variables).
+   */
+  ///@{
+  /**
+   * \brief Enable/disable canonical serialization mode globally.
+   *
+   * Affects ToJSON (alphabetical key order) and various SerializeTo helpers
+   * (always writing default values for optional properties).
+   */
+  static void SetCanonicalMode(bool canonical) { canonicalMode = canonical; }
+
+  /**
+   * \brief Returns true if canonical serialization mode is currently active.
+   */
+  static bool IsCanonicalMode() { return canonicalMode; }
+  ///@}
+
   virtual ~Serializer(){};
 
  private:
   Serializer(){};
+
+  static bool canonicalMode;
 };
 
 }  // namespace gd

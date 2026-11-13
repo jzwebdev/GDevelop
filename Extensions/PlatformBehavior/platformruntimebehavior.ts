@@ -8,34 +8,31 @@ namespace gdjs {
 
   /**
    * Manages the common objects shared by objects having a
-   * platform behavior: in particular, the platforms behaviors are required to declare
-   * themselves (see PlatformObjectsManager.addPlatform) to the manager of their associated scene
-   * (see PlatformRuntimeBehavior.getManager).
+   * platform behavior: in particular, the platforms behaviors are required to
+   * declare themselves (see PlatformObjectsManager.addPlatform) to the manager
+   * of their associated container (see PlatformObjectsManager.getManager).
+   * @category Behaviors > Platform
    */
   export class PlatformObjectsManager {
     private _platformRBush: any;
 
-    /**
-     * @param object The object
-     */
-    constructor(runtimeScene: gdjs.RuntimeScene) {
+    constructor(instanceContainer: gdjs.RuntimeInstanceContainer) {
       this._platformRBush = new rbush();
     }
 
     /**
-     * Get the platforms manager of a scene.
+     * Get the platforms manager of an instance container.
      */
-    static getManager(runtimeScene: gdjs.RuntimeScene) {
+    static getManager(instanceContainer: gdjs.RuntimeInstanceContainer) {
       // @ts-ignore
-      if (!runtimeScene.platformsObjectsManager) {
+      if (!instanceContainer.platformsObjectsManager) {
         //Create the shared manager if necessary.
         // @ts-ignore
-        runtimeScene.platformsObjectsManager = new gdjs.PlatformObjectsManager(
-          runtimeScene
-        );
+        instanceContainer.platformsObjectsManager =
+          new gdjs.PlatformObjectsManager(instanceContainer);
       }
       // @ts-ignore
-      return runtimeScene.platformsObjectsManager;
+      return instanceContainer.platformsObjectsManager;
     }
 
     /**
@@ -67,7 +64,7 @@ namespace gdjs {
     getAllPlatformsAround(
       object: gdjs.RuntimeObject,
       maxMovementLength: number,
-      result: gdjs.BehaviorRBushAABB<PlatformRuntimeBehavior>[]
+      result: PlatformRuntimeBehavior[]
     ): any {
       // TODO: This would better be done using the object AABB (getAABB), as (`getCenterX`;`getCenterY`) point
       // is not necessarily in the middle of the object (for sprites for example).
@@ -82,9 +79,8 @@ namespace gdjs {
       searchArea.minY = y - oh / 2 - maxMovementLength;
       searchArea.maxX = x + ow / 2 + maxMovementLength;
       searchArea.maxY = y + oh / 2 + maxMovementLength;
-      const nearbyPlatforms: gdjs.BehaviorRBushAABB<
-        PlatformRuntimeBehavior
-      >[] = this._platformRBush.search(searchArea);
+      const nearbyPlatforms: gdjs.BehaviorRBushAABB<PlatformRuntimeBehavior>[] =
+        this._platformRBush.search(searchArea);
 
       result.length = 0;
 
@@ -92,8 +88,8 @@ namespace gdjs {
       // TODO: PR https://github.com/4ian/GDevelop/pull/2602 should remove the need
       // for this extra check once merged.
       for (let i = 0; i < nearbyPlatforms.length; i++) {
-        const platform = nearbyPlatforms[i];
-        const platformAABB = platform.behavior.owner.getAABB();
+        const platform = nearbyPlatforms[i].behavior;
+        const platformAABB = platform.owner.getAABB();
         const platformIsStillAround =
           platformAABB.min[0] <= searchArea.maxX &&
           platformAABB.min[1] <= searchArea.maxY &&
@@ -112,6 +108,7 @@ namespace gdjs {
   /**
    * PlatformRuntimeBehavior represents a behavior allowing objects to be
    * considered as a platform by objects having PlatformerObject Behavior.
+   * @category Behaviors > Platform
    */
   export class PlatformRuntimeBehavior extends gdjs.RuntimeBehavior {
     //Load the platform type
@@ -125,62 +122,44 @@ namespace gdjs {
     _oldWidth: float = 0;
     _oldHeight: float = 0;
     _oldAngle: float = 0;
-    currentRBushAABB: gdjs.BehaviorRBushAABB<
-      PlatformRuntimeBehavior
-    > | null = null;
+    currentRBushAABB: gdjs.BehaviorRBushAABB<PlatformRuntimeBehavior> | null =
+      null;
     _manager: gdjs.PlatformObjectsManager;
     _registeredInManager: boolean = false;
 
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
+      instanceContainer: gdjs.RuntimeInstanceContainer,
       behaviorData,
       owner: gdjs.RuntimeObject
     ) {
-      super(runtimeScene, behaviorData, owner);
+      super(instanceContainer, behaviorData, owner);
       this._platformType = behaviorData.platformType;
       if (behaviorData.platformType === 'Ladder') {
         this._platformType = PlatformRuntimeBehavior.LADDER;
       } else if (behaviorData.platformType === 'Jumpthru') {
         this._platformType = PlatformRuntimeBehavior.JUMPTHRU;
       } else {
-        this._platformType = PlatformRuntimeBehavior.NORMALPLAFTORM;
+        this._platformType = PlatformRuntimeBehavior.NORMALPLATFORM;
       }
       this._canBeGrabbed = behaviorData.canBeGrabbed || false;
       this._yGrabOffset = behaviorData.yGrabOffset || 0;
-      this._manager = PlatformObjectsManager.getManager(runtimeScene);
+      this._manager = PlatformObjectsManager.getManager(instanceContainer);
     }
 
-    updateFromBehaviorData(oldBehaviorData, newBehaviorData): boolean {
-      if (oldBehaviorData.platformType !== newBehaviorData.platformType) {
-        this.changePlatformType(newBehaviorData.platformType);
+    override applyBehaviorOverriding(behaviorData): boolean {
+      if (behaviorData.platformType !== undefined) {
+        this.changePlatformType(behaviorData.platformType);
       }
-      if (oldBehaviorData.canBeGrabbed !== newBehaviorData.canBeGrabbed) {
-        this._canBeGrabbed = newBehaviorData.canBeGrabbed;
+      if (behaviorData.canBeGrabbed !== undefined) {
+        this._canBeGrabbed = behaviorData.canBeGrabbed;
       }
-      if (oldBehaviorData.yGrabOffset !== newBehaviorData.yGrabOffset) {
-        this._yGrabOffset = newBehaviorData.yGrabOffset;
+      if (behaviorData.yGrabOffset !== undefined) {
+        this._yGrabOffset = behaviorData.yGrabOffset;
       }
       return true;
     }
 
-    onDestroy() {
-      if (this._manager && this._registeredInManager) {
-        this._manager.removePlatform(this);
-      }
-    }
-
-    doStepPreEvents(runtimeScene: gdjs.RuntimeScene) {
-      //Scene change is not supported
-      /*if ( parentScene != &scene ) //Parent scene has changed
-            {
-                if ( sceneManager ) //Remove the object from any old scene manager.
-                    sceneManager->RemovePlatform(this);
-                parentScene = &scene;
-                sceneManager = parentScene ? &ScenePlatformObjectsManager::managers[&scene] : NULL;
-                registeredInManager = false;
-            }*/
-
-      //Make sure the platform is or is not in the platforms manager.
+    trackChangesAndUpdateManagerIfNeeded() {
       if (!this.activated() && this._registeredInManager) {
         this._manager.removePlatform(this);
         this._registeredInManager = false;
@@ -191,7 +170,6 @@ namespace gdjs {
         }
       }
 
-      //Track changes in size or position
       if (
         this._oldX !== this.owner.getX() ||
         this._oldY !== this.owner.getY() ||
@@ -211,7 +189,49 @@ namespace gdjs {
       }
     }
 
-    doStepPostEvents(runtimeScene: gdjs.RuntimeScene) {}
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): BehaviorNetworkSyncData {
+      return super.getNetworkSyncData(syncOptions);
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: BehaviorNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      this.trackChangesAndUpdateManagerIfNeeded();
+    }
+
+    onCreated(): void {
+      // Register it right away if activated,
+      // so it can be used by platformer objects in that same frame.
+      this.trackChangesAndUpdateManagerIfNeeded();
+    }
+
+    onDestroy() {
+      if (this._manager && this._registeredInManager) {
+        this._manager.removePlatform(this);
+      }
+    }
+
+    doStepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {
+      //Scene change is not supported
+      /*if ( parentScene != &scene ) //Parent scene has changed
+            {
+                if ( sceneManager ) //Remove the object from any old scene manager.
+                    sceneManager->RemovePlatform(this);
+                parentScene = &scene;
+                sceneManager = parentScene ? &ScenePlatformObjectsManager::managers[&scene] : NULL;
+                registeredInManager = false;
+            }*/
+
+      //Make sure the platform is or is not in the platforms manager.
+      this.trackChangesAndUpdateManagerIfNeeded();
+    }
+
+    doStepPostEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {}
 
     onActivate() {
       if (this._registeredInManager) {
@@ -235,7 +255,7 @@ namespace gdjs {
       } else if (platformType === 'Jumpthru') {
         this._platformType = PlatformRuntimeBehavior.JUMPTHRU;
       } else {
-        this._platformType = PlatformRuntimeBehavior.NORMALPLAFTORM;
+        this._platformType = PlatformRuntimeBehavior.NORMALPLATFORM;
       }
     }
 
@@ -251,7 +271,9 @@ namespace gdjs {
       return this._yGrabOffset;
     }
 
-    static NORMALPLAFTORM = 0;
+    static NORMALPLATFORM = 0;
+    /** @deprecated Use NORMALPLATFORM instead. */
+    static NORMALPLAFTORM = PlatformRuntimeBehavior.NORMALPLATFORM;
     static JUMPTHRU = 1;
     static LADDER = 2;
 
@@ -263,6 +285,9 @@ namespace gdjs {
       const behavior1 = object1.getBehavior(
         behaviorName
       ) as PlatformerObjectRuntimeBehavior;
+      if (!behavior1) {
+        return false;
+      }
       return behavior1.isOnFloorObject(object2);
     }
   }

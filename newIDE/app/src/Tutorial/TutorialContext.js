@@ -11,11 +11,13 @@ type TutorialState = {|
   error: ?Error,
 |};
 
-export const TutorialContext = React.createContext<TutorialState>({
-  tutorials: null,
-  fetchTutorials: () => {},
-  error: null,
-});
+export const TutorialContext: React.Context<TutorialState> = React.createContext<TutorialState>(
+  {
+    tutorials: null,
+    fetchTutorials: () => {},
+    error: null,
+  }
+);
 
 type TutorialStateProviderProps = {|
   children: React.Node,
@@ -23,7 +25,7 @@ type TutorialStateProviderProps = {|
 
 export const TutorialStateProvider = ({
   children,
-}: TutorialStateProviderProps) => {
+}: TutorialStateProviderProps): React.MixedElement => {
   const [tutorials, setTutorials] = React.useState<?(Tutorial[])>(null);
   const [error, setError] = React.useState<?Error>(null);
   const isLoading = React.useRef<boolean>(false);
@@ -41,7 +43,9 @@ export const TutorialStateProvider = ({
         try {
           const allTutorials: Array<Tutorial> = await listAllTutorials();
 
-          console.info(`Loaded ${allTutorials.length} tutorials.`);
+          console.info(
+            `Loaded ${allTutorials ? allTutorials.length : 0} tutorials.`
+          );
           setTutorials(allTutorials);
         } catch (error) {
           console.error(`Unable to load the tutorials:`, error);

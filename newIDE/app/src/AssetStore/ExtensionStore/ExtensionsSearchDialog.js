@@ -1,14 +1,15 @@
 // @flow
 import { Trans } from '@lingui/macro';
+import { t } from '@lingui/macro';
 import { I18n } from '@lingui/react';
+import { type I18n as I18nType } from '@lingui/core';
 import * as React from 'react';
 import Dialog from '../../UI/Dialog';
 import FlatButton from '../../UI/FlatButton';
-import CloudDownload from '@material-ui/icons/CloudDownload';
 import { ExtensionStore } from '.';
 import EventsFunctionsExtensionsContext from '../../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
 import HelpButton from '../../UI/HelpButton';
-import { importExtension, installExtension } from './InstallExtension';
+import { useImportExtension } from './InstallExtension';
 import DismissableInfoBar from '../../UI/Messages/DismissableInfoBar';
 import { type ExtensionShortHeader } from '../../Utils/GDevelopServices/Extension';
 import AuthenticatedUserContext from '../../Profile/AuthenticatedUserContext';
@@ -16,23 +17,38 @@ import {
   addCreateBadgePreHookIfNotClaimed,
   TRIVIAL_FIRST_EXTENSION,
 } from '../../Utils/GDevelopServices/Badge';
+import { useResponsiveWindowSize } from '../../UI/Responsive/ResponsiveWindowMeasurer';
+import Download from '../../UI/CustomSvgIcons/Download';
+import Add from '../../UI/CustomSvgIcons/Add';
+import ErrorBoundary from '../../UI/ErrorBoundary';
+import { showErrorBox } from '../../UI/Messages/MessageBox';
+import ShareExternalIcon from '../../UI/CustomSvgIcons/ShareExternal';
+import Window from '../../Utils/Window';
+import PreferencesContext from '../../MainFrame/Preferences/PreferencesContext';
+import { useInstallExtensionWithDependencies } from '../../ProjectManager/InstalledExtensionDetails';
 
 type Props = {|
   project: gdProject,
   onClose: () => void,
-  onInstallExtension: ExtensionShortHeader => void,
-  onExtensionInstalled?: (extensionShortHeader?: ExtensionShortHeader) => void,
+  onWillInstallExtension: (extensionNames: Array<string>) => void,
+  onExtensionInstalled: (extensionNames: Array<string>) => void,
+  onCreateNewExtension?: () => void,
 |};
 
 /**
  * Allows to browse and install events based extensions.
  */
-export default function ExtensionsSearchDialog({
+const ExtensionsSearchDialog = ({
   project,
   onClose,
-  onInstallExtension,
+  onWillInstallExtension,
   onExtensionInstalled,
-}: Props) {
+  onCreateNewExtension,
+}: Props) => {
+  const preferences = React.useContext(PreferencesContext);
+  const { isMobile } = useResponsiveWindowSize();
+  const installExtensionWithDependencies = useInstallExtensionWithDependencies();
+  const importExtension = useImportExtension();
   const [isInstalling, setIsInstalling] = React.useState(false);
   const [extensionWasInstalled, setExtensionWasInstalled] = React.useState(
     false
@@ -42,11 +58,59 @@ export default function ExtensionsSearchDialog({
   );
   const authenticatedUser = React.useContext(AuthenticatedUserContext);
 
-  const installDisplayedExtension = addCreateBadgePreHookIfNotClaimed(
+  const createBadgeFirstExtension = addCreateBadgePreHookIfNotClaimed(
     authenticatedUser,
     TRIVIAL_FIRST_EXTENSION,
-    installExtension
+    () => {}
   );
+
+  const installOrImportExtension = async (
+    i18n: I18nType,
+    extensionShortHeader?: ExtensionShortHeader
+  ): Promise<boolean> => {
+    setIsInstalling(true);
+    try {
+      if (extensionShortHeader) {
+        try {
+          const wasExtensionInstalled = await installExtensionWithDependencies({
+            project,
+            extensionShortHeader,
+            onWillInstallExtension,
+            onExtensionInstalled,
+          });
+          if (!wasExtensionInstalled) {
+            return false;
+          }
+          createBadgeFirstExtension();
+          setExtensionWasInstalled(true);
+        } catch (rawError) {
+          showErrorBox({
+            message: i18n._(
+              t`Unable to download and install the extension and its dependencies. Verify that your internet connection is working or try again later.`
+            ),
+            rawError,
+            errorId: 'download-extension-error',
+          });
+          return false;
+        }
+      } else {
+        const installedOrImportedExtensionNames = await importExtension({
+          i18n,
+          project,
+          onWillInstallExtension,
+          onExtensionInstalled,
+        });
+        if (installedOrImportedExtensionNames.length > 0) {
+          setExtensionWasInstalled(true);
+          onExtensionInstalled(installedOrImportedExtensionNames);
+          return true;
+        }
+      }
+      return false;
+    } finally {
+      setIsInstalling(false);
+    }
+  };
 
   const eventsFunctionsExtensionOpener = eventsFunctionsExtensionsState.getEventsFunctionsExtensionOpener();
 
@@ -54,10 +118,12 @@ export default function ExtensionsSearchDialog({
     <I18n>
       {({ i18n }) => (
         <Dialog
-          fullHeight
           title={<Trans>Search for New Extensions</Trans>}
+          id="extension-search-dialog"
+          fullHeight
           actions={[
             <FlatButton
+              id="close-button"
               key="close"
               label={<Trans>Close</Trans>}
               primary
@@ -69,51 +135,58 @@ export default function ExtensionsSearchDialog({
             <HelpButton key="help" helpPagePath="/extensions/search" />,
             eventsFunctionsExtensionOpener ? (
               <FlatButton
-                icon={<CloudDownload />}
+                leftIcon={<Download />}
                 key="import"
-                label={<Trans>Import extension</Trans>}
+                label={
+                  isMobile ? (
+                    <Trans>Import</Trans>
+                  ) : (
+                    <Trans>Import extension</Trans>
+                  )
+                }
                 onClick={() => {
-                  (async () => {
-                    setIsInstalling(true);
-                    const wasExtensionImported = await importExtension(
-                      i18n,
-                      eventsFunctionsExtensionsState,
-                      project
-                    );
-                    if (wasExtensionImported && onExtensionInstalled)
-                      onExtensionInstalled();
-
-                    setExtensionWasInstalled(wasExtensionImported);
-                    setIsInstalling(false);
-                  })();
+                  installOrImportExtension(i18n);
                 }}
                 disabled={isInstalling}
               />
             ) : null,
+            onCreateNewExtension ? (
+              <FlatButton
+                key="create-new"
+                onClick={onCreateNewExtension}
+                label={
+                  isMobile ? (
+                    <Trans>Create</Trans>
+                  ) : (
+                    <Trans>Create a new extension</Trans>
+                  )
+                }
+                leftIcon={<Add />}
+              />
+            ) : null,
+            preferences.values.showExperimentalExtensions ? (
+              <FlatButton
+                leftIcon={<ShareExternalIcon />}
+                key="open-community-list"
+                label={<Trans>Community list</Trans>}
+                onClick={() => {
+                  Window.openExternalURL(
+                    'https://github.com/GDevelopApp/GDevelop-community-list'
+                  );
+                }}
+              />
+            ) : null,
           ]}
-          cannotBeDismissed={true}
           flexBody
           open
-          noMargin
+          cannotBeDismissed={isInstalling}
           onRequestClose={onClose}
         >
           <ExtensionStore
             isInstalling={isInstalling}
-            onInstall={async extensionShortHeader => {
-              setIsInstalling(true);
-              onInstallExtension(extensionShortHeader);
-              const wasExtensionInstalled = await installDisplayedExtension(
-                i18n,
-                project,
-                eventsFunctionsExtensionsState,
-                extensionShortHeader
-              );
-              if (wasExtensionInstalled && onExtensionInstalled)
-                onExtensionInstalled(extensionShortHeader);
-
-              setExtensionWasInstalled(wasExtensionInstalled);
-              setIsInstalling(false);
-            }}
+            onInstall={extensionShortHeader =>
+              installOrImportExtension(i18n, extensionShortHeader)
+            }
             project={project}
             showOnlyWithBehaviors={false}
           />
@@ -132,4 +205,16 @@ export default function ExtensionsSearchDialog({
       )}
     </I18n>
   );
-}
+};
+
+const ExtensionsSearchDialogWithErrorBoundary = (props: Props): React.Node => (
+  <ErrorBoundary
+    componentTitle={<Trans>Extensions search</Trans>}
+    scope="extensions-search-dialog"
+    onClose={props.onClose}
+  >
+    <ExtensionsSearchDialog {...props} />
+  </ErrorBoundary>
+);
+
+export default ExtensionsSearchDialogWithErrorBoundary;

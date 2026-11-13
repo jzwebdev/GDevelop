@@ -10,7 +10,7 @@ type Props = {|
   project: gdProject,
 |};
 
-function ExtensionsProperties(props: Props) {
+function ExtensionsProperties(props: Props): React.Node | null {
   const { project } = props;
   const allExtensions = project.getCurrentPlatform().getAllPlatformExtensions();
   const propertyList = [];
@@ -20,13 +20,16 @@ function ExtensionsProperties(props: Props) {
       .getExtensionProperties()
       .getAllExtensionProperties(extension.getName(), project);
     if (properties.keys().size() === 0) continue;
-    const propertiesSchema = propertiesMapToSchema(
+    const propertiesSchema = propertiesMapToSchema({
       properties,
-      instance =>
+      defaultValueProperties: null,
+      getPropertyValue: (instance, name) =>
         project
           .getExtensionProperties()
-          .getAllExtensionProperties(extension.getName(), project),
-      (instance, propertyName, newValue) => {
+          .getAllExtensionProperties(extension.getName(), project)
+          .get(name)
+          .getValue(),
+      onUpdateProperty: (instance, propertyName, newValue) => {
         if (
           project
             .getExtensionProperties()
@@ -46,12 +49,14 @@ function ExtensionsProperties(props: Props) {
             .getExtensionProperties()
             .setValue(extension.getName(), propertyName, newValue);
         }
-      }
-    );
+      },
+      layersContainer: null,
+      shouldDisabledFieldsWithMixedValues: false,
+    });
 
     propertyList.push(
       <ColumnStackLayout key={extension.getName()} noMargin>
-        <Text size="title">{extension.getFullName()}</Text>
+        <Text size="block-title">{extension.getFullName()}</Text>
         <PropertiesEditor
           schema={propertiesSchema}
           instances={[extension.getAllProperties()]}

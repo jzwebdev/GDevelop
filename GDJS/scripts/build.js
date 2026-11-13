@@ -7,12 +7,14 @@ const {
 } = require('./lib/runtime-files-list');
 const args = require('minimist')(process.argv.slice(2), {
   string: ['out'],
+  boolean: ['debug'],
+  default: { debug: false }
 });
 const fs = require('fs').promises;
 
 /** @param {string} outPath */
 const renameBuiltFile = (outPath) => {
-  return outPath.replace(/\.ts$/, '.js');
+  return outPath.replace(/\.tsx?$/, '.js');
 };
 
 const bundledOutPath =
@@ -52,7 +54,7 @@ shell.mkdir('-p', bundledOutPath);
         return build({
           sourcemap: true,
           entryPoints: [inPath],
-          minify: true,
+          minify: !args.debug,
           outfile: renameBuiltFile(outPath),
         }).catch(() => {
           // Error is already logged by esbuild.

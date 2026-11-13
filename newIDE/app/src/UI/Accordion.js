@@ -1,48 +1,85 @@
 // @flow
 import * as React from 'react';
+import { makeStyles } from '@material-ui/styles';
 import MUIAccordion from '@material-ui/core/Accordion';
 import MUIAccordionSummary from '@material-ui/core/AccordionSummary';
 import MUIAccordionDetails from '@material-ui/core/AccordionDetails';
 import MUIAccordionActions from '@material-ui/core/AccordionActions';
-import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import IconButton from './IconButton';
-import GDevelopThemeContext from './Theme/ThemeContext';
+import GDevelopThemeContext from './Theme/GDevelopThemeContext';
+import { Column, Line } from '../UI/Grid';
+import ChevronArrowRight from './CustomSvgIcons/ChevronArrowRight';
+
+const useStylesForExpandIcon = () =>
+  makeStyles(theme => ({
+    root: {
+      '& .Mui-expanded svg': {
+        transform: 'rotate(-90deg)',
+      },
+    },
+    content: {
+      minWidth: 0,
+    },
+  }))();
 
 const styles = {
   bodyRoot: {
     // Remove body padding
     padding: 0,
   },
+  accordionSummaryWithExpandOnLeft: {
+    flexDirection: 'row-reverse',
+    paddingLeft: 0,
+    paddingRight: 0,
+  },
+  accordionSummaryContent: {
+    flexGrow: 1,
+    display: 'flex',
+    alignItems: 'center',
+    // Avoids the summary content to overlap the expand icon that was put on the left
+    marginLeft: 16,
+    minWidth: 0,
+  },
+  actionsContainer: { flexGrow: 0, flexShrink: 0, alignSelf: 'center' },
 };
 
 type AccordionHeadProps = {|
   children: React.Node,
   actions?: Array<React.Node>,
   expandIcon?: React.Node,
+  noMargin?: boolean,
 |};
 
 /**
  * The header of an accordion section.
- * Based on Material-UI AccordionSummary.
+ * Based on Material-UI AccordionSummary (but we could almost remove it).
  */
-export const AccordionHeader = (props: AccordionHeadProps) => {
+export const AccordionHeader = (props: AccordionHeadProps): React.Node => {
+  const classes = useStylesForExpandIcon();
+
   return (
-    <MUIAccordionSummary
-      expandIcon={
-        props.expandIcon || (
-          <IconButton size="small">
-            <ExpandMoreIcon />
-          </IconButton>
-        )
-      }
-    >
-      <div style={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-        {props.children}
-      </div>
-      {props.actions && (
-        <div style={{ flexGrow: 0, alignSelf: 'center' }}>{props.actions}</div>
-      )}
-    </MUIAccordionSummary>
+    <Column noMargin={props.noMargin} expand noOverflowParent>
+      <Line noMargin expand alignItems="center">
+        <Column noMargin expand noOverflowParent>
+          <MUIAccordionSummary
+            classes={classes}
+            style={styles.accordionSummaryWithExpandOnLeft}
+            expandIcon={
+              props.expandIcon || (
+                <IconButton size="small">
+                  <ChevronArrowRight />
+                </IconButton>
+              )
+            }
+          >
+            <div style={styles.accordionSummaryContent}>{props.children}</div>
+          </MUIAccordionSummary>
+        </Column>
+        {props.actions && (
+          <div style={styles.actionsContainer}>{props.actions}</div>
+        )}
+      </Line>
+    </Column>
   );
 };
 
@@ -58,7 +95,7 @@ type AccordionBodyProps = {|
  * The collapsible contents of an accordion section.
  * Based on Material-UI AccordionDetails.
  */
-export const AccordionBody = (props: AccordionBodyProps) => {
+export const AccordionBody = (props: AccordionBodyProps): React.Node => {
   return (
     <MUIAccordionDetails
       style={{ ...(props.disableGutters && styles.bodyRoot), ...props.style }}
@@ -78,7 +115,7 @@ type AccordionActionsProps = {|
  * actions specific to the accordion contents.
  * Based on Material-UI AccordionActions.
  */
-export const AccordionActions = (props: AccordionActionsProps) => {
+export const AccordionActions = (props: AccordionActionsProps): React.Node => {
   const accordionActions = props.secondaryActions ? (
     <React.Fragment>
       <div key="secondary-actions">{props.secondaryActions}</div>
@@ -97,13 +134,16 @@ type AccordionProps = {|
 
   defaultExpanded?: boolean,
   disabled?: boolean,
+  kind?: 'answer',
 
   // If `true`, renders body only if accordion is open
   costlyBody?: boolean,
 
   // Use accordion in controlled mode
   expanded?: boolean,
-  onChange?: (open: boolean) => void,
+  onChange?: (event: any, open: boolean) => void,
+  id?: string,
+  noMargin?: boolean,
 |};
 
 /**
@@ -111,17 +151,39 @@ type AccordionProps = {|
  * and accordion-specific actions.
  * Based on Material-UI Accordion.
  */
-export const Accordion = (props: AccordionProps) => {
-  const { costlyBody, ...otherProps } = props;
-  const theme = React.useContext(GDevelopThemeContext);
+export const Accordion: React.ComponentType<{
+  ...AccordionProps,
+  +ref?: React.RefSetter<any>,
+  // $FlowFixMe[value-as-type]
+}> = React.forwardRef<AccordionProps, MUIAccordion>((props, ref) => {
+  const { costlyBody, noMargin, kind, ...otherProps } = props;
+  const gdevelopTheme = React.useContext(GDevelopThemeContext);
+
+  const style = {
+    backgroundColor:
+      kind === 'answer'
+        ? gdevelopTheme.message.answer.backgroundColor
+        : gdevelopTheme.paper.backgroundColor.medium,
+    marginLeft: 0,
+    border:
+      kind === 'answer'
+        ? `2px solid ${gdevelopTheme.message.answer.borderColor}`
+        : noMargin
+        ? '0px'
+        : `1px solid ${gdevelopTheme.toolbar.separatorColor}`,
+    padding: noMargin ? `0px` : undefined,
+    margin: noMargin ? `0px` : undefined,
+    borderRadius: kind === 'answer' ? 4 : 0,
+  };
 
   return (
     <MUIAccordion
       {...otherProps}
-      square
+      ref={ref}
+      square={kind !== 'answer'}
       elevation={0}
-      style={{ border: `1px solid ${theme.toolbar.separatorColor}` }}
+      style={style}
       TransitionProps={{ unmountOnExit: !!costlyBody }}
     />
   );
-};
+});

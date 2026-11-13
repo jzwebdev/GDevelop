@@ -20,30 +20,50 @@ void DeclareDraggableBehaviorExtension(gd::PlatformExtension& extension) {
             "or disable the behavior when needed."),
           "Florian Rival",
           "Open source (MIT License)")
+      .SetShortDescription("Drag objects with mouse/touch. Enable/disable at runtime. Multi-touch aware.")
+      .SetCategory("User interface")
+      .SetTags("drag")
       .SetExtensionHelpPath("/behaviors/draggable");
 
   gd::BehaviorMetadata& aut = extension.AddBehavior(
       "Draggable",
       _("Draggable object"),
-      _("Draggable"),
-      _("Allows objects to be moved using the mouse (or touch)."),
+      "Draggable",
+      _("Move objects by holding a mouse button (or touch)."),
       "",
       "CppPlatform/Extensions/draggableicon.png",
       "DraggableBehavior",
       std::make_shared<DraggableBehavior>(),
       std::shared_ptr<gd::BehaviorsSharedData>());
 
-#if defined(GD_IDE_ONLY)
-  aut.AddCondition("Dragged",
-                   _("Being dragged"),
-                   _("Check if the object is being dragged"),
-                   _("_PARAM0_ is being dragged"),
-                   "",
-                   "CppPlatform/Extensions/draggableicon24.png",
-                   "CppPlatform/Extensions/draggableicon16.png")
+  aut.AddCondition(
+         "Dragged",
+         _("Being dragged"),
+         _("Check if the object is being dragged. This means the mouse button "
+           "or touch is pressed on it. When the mouse button or touch is "
+           "released,  the object is no longer being considered dragged (use "
+           "the condition \"Was just dropped\" to check when the dragging is "
+           "ending)."),
+         _("_PARAM0_ is being dragged"),
+         _("Draggable"),
+         "CppPlatform/Extensions/draggableicon24.png",
+         "CppPlatform/Extensions/draggableicon16.png")
 
       .AddParameter("object", _("Object"))
       .AddParameter("behavior", _("Behavior"), "Draggable")
       .SetFunctionName("IsDragged");
-#endif
+
+  aut.AddCondition(
+         "Dropped",
+         _("Was just dropped"),
+         _("Check if the object was just dropped after being dragged (the "
+           "mouse button or touch was just released this frame)."),
+         _("_PARAM0_ was just dropped"),
+         _("Draggable"),
+         "CppPlatform/Extensions/draggableicon24.png",
+         "CppPlatform/Extensions/draggableicon16.png")
+
+      .AddParameter("object", _("Object"))
+      .AddParameter("behavior", _("Behavior"), "Draggable")
+      .SetFunctionName("WasJustDropped");
 }

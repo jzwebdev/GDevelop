@@ -1,8 +1,7 @@
 namespace gdjs {
-  import PIXI = GlobalPIXIModule.PIXI;
-
   /**
    * The PIXI.js renderer for the Bitmap Text runtime object.
+   * @category Renderers > Bitmap Text
    */
   export class BitmapTextRuntimeObjectPixiRenderer {
     _object: gdjs.BitmapTextRuntimeObject;
@@ -10,16 +9,16 @@ namespace gdjs {
 
     /**
      * @param runtimeObject The object to render
-     * @param runtimeScene The gdjs.RuntimeScene in which the object is
+     * @param instanceContainer The container in which the object is
      */
     constructor(
       runtimeObject: gdjs.BitmapTextRuntimeObject,
-      runtimeScene: gdjs.RuntimeScene
+      instanceContainer: gdjs.RuntimeInstanceContainer
     ) {
       this._object = runtimeObject;
 
       // Obtain the bitmap font to use in the object.
-      const bitmapFont = runtimeScene
+      const bitmapFont = instanceContainer
         .getGame()
         .getBitmapFontManager()
         .obtainBitmapFont(
@@ -32,17 +31,10 @@ namespace gdjs {
       });
 
       // Set the object on the scene
-      runtimeScene
+      instanceContainer
         .getLayer('')
         .getRenderer()
         .addRendererObject(this._pixiObject, runtimeObject.getZOrder());
-
-      // Set the anchor in the center, so that the object rotates around
-      // its center.
-      // @ts-ignore
-      this._pixiObject.anchor.x = 0.5;
-      // @ts-ignore
-      this._pixiObject.anchor.y = 0.5;
 
       this.updateAlignment();
       this.updateTextContent();
@@ -58,13 +50,19 @@ namespace gdjs {
     }
 
     onDestroy() {
-      // Mark the font from the object as not used anymore.
-      this._object._runtimeScene
+      // Save the font name before destroying the PIXI object.
+      const fontName = this._pixiObject.fontName;
+      // Destroy the PIXI object first, while the font is still available in
+      // PIXI.BitmapFont.available (PIXI.BitmapText.destroy accesses font
+      // properties like distanceFieldType during cleanup).
+      this._pixiObject.destroy();
+      // Then mark the font as not used anymore (which may uninstall it if
+      // no other object references it).
+      this._object
+        .getInstanceContainer()
         .getGame()
         .getBitmapFontManager()
-        .releaseBitmapFont(this._pixiObject.fontName);
-
-      this._pixiObject.destroy();
+        .releaseBitmapFont(fontName);
     }
 
     getFontSize() {
@@ -73,7 +71,8 @@ namespace gdjs {
 
     updateFont(): void {
       // Get the new bitmap font to use
-      const bitmapFont = this._object._runtimeScene
+      const bitmapFont = this._object
+        .getInstanceContainer()
         .getGame()
         .getBitmapFontManager()
         .obtainBitmapFont(
@@ -81,15 +80,20 @@ namespace gdjs {
           this._object._textureAtlasResourceName
         );
 
-      // Mark the old font as not used anymore
-      this._object._runtimeScene
-        .getGame()
-        .getBitmapFontManager()
-        .releaseBitmapFont(this._pixiObject.fontName);
+      const oldFontName = this._pixiObject.fontName;
 
-      // Update the font used by the object:
+      // Update the font on the PIXI object first, so that if releasing the
+      // old font uninstalls it, the PIXI object already references the new one.
       this._pixiObject.fontName = bitmapFont.font;
       this._pixiObject.fontSize = bitmapFont.size;
+
+      // Mark the old font as not used anymore.
+      this._object
+        .getInstanceContainer()
+        .getGame()
+        .getBitmapFontManager()
+        .releaseBitmapFont(oldFontName);
+
       this.updatePosition();
     }
 
@@ -117,7 +121,10 @@ namespace gdjs {
     }
 
     updateScale(): void {
-      this._pixiObject.scale.set(Math.max(this._object._scale, 0));
+      this._pixiObject.scale.set(
+        Math.max(this._object._scaleX, 0),
+        Math.max(this._object._scaleY, 0)
+      );
       this.updatePosition();
     }
 
@@ -126,9 +133,9 @@ namespace gdjs {
     }
 
     updateWrappingWidth(): void {
-      if (this._object._wordWrap) {
+      if (this._object._wrapping) {
         this._pixiObject.maxWidth =
-          this._object._wrappingWidth / this._object._scale;
+          this._object._wrappingWidth / this._object._scaleX;
         this._pixiObject.dirty = true;
       } else {
         this._pixiObject.maxWidth = 0;
@@ -144,13 +151,41 @@ namespace gdjs {
 
     updateAlignment(): void {
       // @ts-ignore - assume align is always a valid value.
-      this._pixiObject.align = this._object._align;
+      this._pixiObject.align = this._object._textAlign;
       this.updatePosition();
     }
 
     updatePosition(): void {
-      this._pixiObject.position.x = this._object.x + this.getWidth() / 2;
-      this._pixiObject.position.y = this._object.y + this.getHeight() / 2;
+      if (this._object.isWrapping() && this.getWidth() !== 0) {
+        const alignmentX =
+          this._object._textAlign === 'right'
+            ? 1
+            : this._object._textAlign === 'center'
+              ? 0.5
+              : 0;
+
+        const width = this._object.getWrappingWidth();
+        const renderedWidth = this.getWidth();
+
+        // A vector from the custom size center to the renderer center.
+        const centerToCenterX = (width - renderedWidth) * (alignmentX - 0.5);
+
+        this._pixiObject.position.x = this._object.x + width / 2;
+        this._pixiObject.anchor.x = 0.5 - centerToCenterX / renderedWidth;
+      } else {
+        this._pixiObject.position.x = this._object.x + this.getWidth() / 2;
+        this._pixiObject.anchor.x = 0.5;
+      }
+
+      const alignmentY =
+        this._object._verticalTextAlignment === 'bottom'
+          ? 1
+          : this._object._verticalTextAlignment === 'center'
+            ? 0.5
+            : 0;
+      this._pixiObject.position.y =
+        this._object.y + this.getHeight() * (0.5 - alignmentY);
+      this._pixiObject.anchor.y = 0.5;
     }
 
     updateAngle(): void {
@@ -169,5 +204,10 @@ namespace gdjs {
       return this._pixiObject.textHeight * this.getScale();
     }
   }
-  export const BitmapTextRuntimeObjectRenderer = BitmapTextRuntimeObjectPixiRenderer;
+
+  /**
+   * @category Renderers > Bitmap Text
+   */
+  export const BitmapTextRuntimeObjectRenderer =
+    BitmapTextRuntimeObjectPixiRenderer;
 }

@@ -1,4 +1,5 @@
-// @flow
+//@ts-check
+/// <reference path="../JsExtensionTypes.d.ts" />
 /**
  * This is a declaration of an extension for GDevelop 5.
  *
@@ -12,30 +13,28 @@
  * More information on https://github.com/4ian/GDevelop/blob/master/newIDE/README-extensions.md
  */
 
-/*::
-// Import types to allow Flow to do static type checking on this file.
-// Extensions declaration are typed using Flow (like the editor), but the files
-// for the game engine are checked with TypeScript annotations.
-import { type ObjectsRenderingService, type ObjectsEditorService } from '../JsExtensionTypes.flow.js'
-*/
-
+/** @type {ExtensionModule} */
 module.exports = {
-  createExtension: function (
-    _ /*: (string) => string */,
-    gd /*: libGDevelop */
-  ) {
+  createExtension: function (_, gd) {
     const extension = new gd.PlatformExtension();
-    extension.setExtensionInformation(
-      'Lighting',
-      _('Lights'),
+    extension
+      .setExtensionInformation(
+        'Lighting',
+        _('Lights'),
 
-      'This provides a light object, and a behavior to mark other objects as being obstacles for the lights. This is a great way to create a special atmosphere to your game, along with effects, make it more realistic or to create gameplays based on lights.',
-      'Harsimran Virk',
-      'MIT'
-    );
+        'This provides a 2D light object, and a behavior to mark other 2D objects as being obstacles for the lights. This is a great way to create a special atmosphere to your game, along with effects, make it more realistic or to create gameplays based on lights.',
+        'Harsimran Virk',
+        'MIT'
+      )
+      .setShortDescription(
+        '2D light objects with configurable radius, color, and optional texture. Obstacle behavior blocks light.'
+      )
+      .setDimension('2D')
+      .setCategory('Visual effect')
+      .setExtensionHelpPath('/objects/light')
+      .setTags('light');
 
     const lightObstacleBehavior = new gd.BehaviorJsImplementation();
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     lightObstacleBehavior.updateProperty = function (
       behaviorContent,
       propertyName,
@@ -44,14 +43,12 @@ module.exports = {
       return false;
     };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     lightObstacleBehavior.getProperties = function (behaviorContent) {
       const behaviorProperties = new gd.MapStringPropertyDescriptor();
 
       return behaviorProperties;
     };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     lightObstacleBehavior.initializeContent = function (behaviorContent) {};
     extension
       .addBehavior(
@@ -59,11 +56,12 @@ module.exports = {
         _('Light Obstacle Behavior'),
         'LightObstacleBehavior',
         _(
-          'This behavior makes the object an obstacle to the light. The light emitted by light objects will be stopped by the object.'
+          'Flag objects as being obstacles to 2D lights. The light emitted by light objects will be stopped by the object. This does not work on 3D objects and 3D games.'
         ),
         '',
         'CppPlatform/Extensions/lightObstacleIcon32.png',
         'LightObstacleBehavior',
+        //@ts-ignore The class hierarchy is incorrect leading to a type error, but this is valid.
         lightObstacleBehavior,
         new gd.BehaviorsSharedData()
       )
@@ -75,12 +73,8 @@ module.exports = {
 
     const lightObject = new gd.ObjectJsImplementation();
 
-    // $FlowExpectedError - ignore Flow warning as we're creating an object.
-    lightObject.updateProperty = function (
-      objectContent,
-      propertyName,
-      newValue
-    ) {
+    lightObject.updateProperty = function (propertyName, newValue) {
+      const objectContent = this.content;
       if (propertyName === 'radius') {
         objectContent.radius = parseFloat(newValue);
         return true;
@@ -104,9 +98,9 @@ module.exports = {
       return false;
     };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating an object.
-    lightObject.getProperties = function (objectContent) {
+    lightObject.getProperties = function () {
       const objectProperties = new gd.MapStringPropertyDescriptor();
+      const objectContent = this.content;
 
       objectProperties.set(
         'radius',
@@ -132,6 +126,7 @@ module.exports = {
               'When activated, display the lines used to render the light - useful to understand how the light is rendered on screen.'
             )
           )
+          .setGroup(_('Advanced'))
       );
 
       objectProperties
@@ -148,34 +143,22 @@ module.exports = {
 
       return objectProperties;
     };
-    lightObject.setRawJSONContent(
-      JSON.stringify({
-        radius: 50,
-        color: '255;255;255',
-        debugMode: false,
-        texture: '',
-      })
-    );
+    lightObject.content = {
+      radius: 50,
+      color: '255;255;255',
+      debugMode: false,
+      texture: '',
+    };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating an object.
     lightObject.updateInitialInstanceProperty = function (
-      objectContent,
       instance,
       propertyName,
-      newValue,
-      project,
-      layout
+      newValue
     ) {
       return false;
     };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating an object.
-    lightObject.getInitialInstanceProperties = function (
-      content,
-      instance,
-      project,
-      layout
-    ) {
+    lightObject.getInitialInstanceProperties = function (instance) {
       const instanceProperties = new gd.MapStringPropertyDescriptor();
 
       return instanceProperties;
@@ -186,19 +169,27 @@ module.exports = {
         'LightObject',
         _('Light'),
         _(
-          'Displays a light on the scene, with a customizable radius and color. Add then the Light Obstacle behavior to the objects that must act as obstacle to the lights.'
+          'Displays a 2D light on the scene, with a customizable radius and color. Then add the Light Obstacle behavior to the objects that must act as obstacle to the lights.'
         ),
         'CppPlatform/Extensions/lightIcon32.png',
         lightObject
       )
       .setIncludeFile('Extensions/Lighting/lightruntimeobject.js')
       .addIncludeFile('Extensions/Lighting/lightruntimeobject-pixi-renderer.js')
-      .addIncludeFile('Extensions/Lighting/lightobstacleruntimebehavior.js');
+      .addIncludeFile('Extensions/Lighting/lightobstacleruntimebehavior.js')
+      .setCategory('Visual effect')
+      .addDefaultBehavior('EffectCapability::EffectBehavior');
+
+    object
+      .addInGameEditorResource()
+      .setResourceName('InGameEditor-LightIcon')
+      .setFilePath('Extensions/Lighting/InGameEditor/LightIcon.png')
+      .setKind('image');
 
     object
       .addAction(
         'SetRadius',
-        _('Set the radius of light object'),
+        _('Light radius'),
         _('Set the radius of light object'),
         _('Set the radius of _PARAM0_ to: _PARAM1_'),
         '',
@@ -213,7 +204,7 @@ module.exports = {
     object
       .addAction(
         'SetColor',
-        _('Set the color of light object'),
+        _('Light color'),
         _('Set the color of light object in format "R;G;B" string.'),
         _('Set the color of _PARAM0_ to: _PARAM1_'),
         '',
@@ -228,20 +219,15 @@ module.exports = {
     return extension;
   },
 
-  runExtensionSanityTests: function (
-    gd /*: libGDevelop */,
-    extension /*: gdPlatformExtension*/
-  ) {
+  runExtensionSanityTests: function (gd, extension) {
     return [];
   },
 
-  registerEditorConfigurations: function (
-    objectsEditorService /*: ObjectsEditorService */
-  ) {
+  registerEditorConfigurations: function (objectsEditorService) {
     objectsEditorService.registerEditorConfiguration(
       'Lighting::LightObject',
       objectsEditorService.getDefaultObjectJsImplementationPropertiesEditor({
-        helpPagePath: '/objects/light',
+        helpPagePath: '/all-features/lighting/reference',
       })
     );
   },
@@ -250,173 +236,126 @@ module.exports = {
    *
    * ℹ️ Run `node import-GDJS-Runtime.js` (in newIDE/app/scripts) if you make any change.
    */
-  registerInstanceRenderers: function (
-    objectsRenderingService /*: ObjectsRenderingService */
-  ) {
+  registerInstanceRenderers: function (objectsRenderingService) {
     const RenderedInstance = objectsRenderingService.RenderedInstance;
     const PIXI = objectsRenderingService.PIXI;
 
     /**
      * Renderer for instances of LightObject inside the IDE.
-     *
-     * @extends RenderedInstance
-     * @class RenderedLightObjectInstance
-     * @constructor
      */
-    function RenderedLightObjectInstance(
-      project,
-      layout,
-      instance,
-      associatedObject,
-      pixiContainer,
-      pixiResourcesLoader
-    ) {
-      RenderedInstance.call(
-        this,
+    class RenderedLightObjectInstance extends RenderedInstance {
+      _radius = 0;
+      _color = 0;
+      /** @type {PIXI.Graphics} The circle to show the radius of the light */
+      _radiusGraphics;
+
+      constructor(
         project,
-        layout,
         instance,
-        associatedObject,
+        associatedObjectConfiguration,
         pixiContainer,
         pixiResourcesLoader
-      );
-      this._radius = parseFloat(
-        this._associatedObject
-          .getProperties(this.project)
-          .get('radius')
-          .getValue()
-      );
-      if (this._radius <= 0) this._radius = 1;
-      const colorHex = objectsRenderingService.rgbOrHexToHexNumber(
-        this._associatedObject
-          .getProperties(this.project)
-          .get('color')
-          .getValue()
-      );
-      this._color = [
-        ((colorHex >> 16) & 0xff) / 255,
-        ((colorHex >> 8) & 0xff) / 255,
-        (colorHex & 0xff) / 255,
-      ];
+      ) {
+        super(
+          project,
+          instance,
+          associatedObjectConfiguration,
+          pixiContainer,
+          pixiResourcesLoader
+        );
 
-      const geometry = new PIXI.Geometry();
-      const shader = PIXI.Shader.from(
-        `
-    precision mediump float;
-    attribute vec2 aVertexPosition;
+        // The icon in the middle.
+        const lightIconSprite = new PIXI.Sprite(
+          PIXI.Texture.from('CppPlatform/Extensions/lightIcon32.png')
+        );
+        lightIconSprite.anchor.x = 0.5;
+        lightIconSprite.anchor.y = 0.5;
 
-    uniform mat3 translationMatrix;
-    uniform mat3 projectionMatrix;
-    varying vec2 vPos;
+        this._radiusGraphics = new PIXI.Graphics();
 
-    void main() {
-        vPos = aVertexPosition;
-        gl_Position = vec4((projectionMatrix * translationMatrix * vec3(aVertexPosition, 1.0)).xy, 0.0, 1.0);
-    }`,
-        `
-    precision mediump float;
-    uniform vec2 center;
-    uniform float radius;
-    uniform vec3 color;
-    uniform mat3 translationMatrix;
-    uniform mat3 projectionMatrix;
+        this._pixiObject = new PIXI.Container();
+        this._pixiObject.addChild(lightIconSprite);
+        this._pixiObject.addChild(this._radiusGraphics);
+        this._pixiContainer.addChild(this._pixiObject);
+        this.update();
+      }
 
-    varying vec2 vPos;
+      onRemovedFromScene() {
+        super.onRemovedFromScene();
+        // Keep textures because they are shared by all sprites.
+        this._pixiObject.destroy({ children: true });
+      }
 
-    void main() {
-        float l = length(vPos - center);
-        float intensity = 0.0;
-        if(l < radius)
-          intensity = clamp((radius - l)*(radius - l)/(radius*radius), 0.0, 1.0);
-        gl_FragColor = vec4(color*intensity, 1.0);
-    }
-    `,
-        {
-          center: [this._instance.getX(), this._instance.getY()],
-          radius: this._radius,
-          color: this._color,
+      /**
+       * Return the path to the thumbnail of the specified object.
+       */
+      static getThumbnail(project, resourcesLoader, objectConfiguration) {
+        return 'CppPlatform/Extensions/lightIcon32.png';
+      }
+
+      /**
+       * This is called to update the PIXI object on the scene editor
+       */
+      update() {
+        const object = gd.castObject(
+          this._associatedObjectConfiguration,
+          gd.ObjectJsImplementation
+        );
+
+        this._pixiObject.position.x = this._instance.getX();
+        this._pixiObject.position.y = this._instance.getY();
+
+        let radiusGraphicsDirty = false;
+
+        let radius = object.content.radius;
+        if (radius <= 0) radius = 1;
+        if (radius !== this._radius) {
+          this._radius = radius;
+          radiusGraphicsDirty = true;
         }
-      );
 
-      this._vertexBuffer = new Float32Array([
-        this._instance.getX() - this._radius,
-        this._instance.getY() + this._radius,
-        this._instance.getX() + this._radius,
-        this._instance.getY() + this._radius,
-        this._instance.getX() + this._radius,
-        this._instance.getY() - this._radius,
-        this._instance.getX() - this._radius,
-        this._instance.getY() - this._radius,
-      ]);
+        const color = objectsRenderingService.rgbOrHexToHexNumber(
+          object.content.color
+        );
+        if (color !== this._color) {
+          this._color = color;
+          radiusGraphicsDirty = true;
+        }
 
-      geometry
-        .addAttribute('aVertexPosition', this._vertexBuffer, 2)
-        .addIndex([0, 1, 2, 2, 3, 0]);
+        if (radiusGraphicsDirty) {
+          const radiusBorderWidth = 2;
+          this._radiusGraphics.clear();
+          this._radiusGraphics.lineStyle(radiusBorderWidth, color, 0.8);
+          this._radiusGraphics.drawCircle(
+            0,
+            0,
+            Math.max(1, this._radius - radiusBorderWidth)
+          );
+        }
+      }
 
-      this._pixiObject = new PIXI.Mesh(geometry, shader);
-      this._pixiObject.blendMode = PIXI.BLEND_MODES.ADD;
-      this._pixiContainer.addChild(this._pixiObject);
-      this.update();
+      /**
+       * Return the width of the instance, when it's not resized.
+       */
+      getDefaultWidth() {
+        return this._radius * 2;
+      }
+
+      /**
+       * Return the height of the instance, when it's not resized.
+       */
+      getDefaultHeight() {
+        return this._radius * 2;
+      }
+
+      getOriginX() {
+        return (this._radius / this.getDefaultWidth()) * this.getWidth();
+      }
+
+      getOriginY() {
+        return (this._radius / this.getDefaultHeight()) * this.getHeight();
+      }
     }
-    RenderedLightObjectInstance.prototype = Object.create(
-      RenderedInstance.prototype
-    );
-
-    /**
-     * Return the path to the thumbnail of the specified object.
-     */
-    RenderedLightObjectInstance.getThumbnail = function (
-      project,
-      resourcesLoader,
-      object
-    ) {
-      return 'CppPlatform/Extensions/lightIcon32.png';
-    };
-
-    /**
-     * This is called to update the PIXI object on the scene editor
-     */
-    RenderedLightObjectInstance.prototype.update = function () {
-      this._pixiObject.shader.uniforms.center = new Float32Array([
-        this._instance.getX(),
-        this._instance.getY(),
-      ]);
-
-      this._vertexBuffer[0] = this._instance.getX() - this._radius;
-      this._vertexBuffer[1] = this._instance.getY() + this._radius;
-      this._vertexBuffer[2] = this._instance.getX() + this._radius;
-      this._vertexBuffer[3] = this._instance.getY() + this._radius;
-      this._vertexBuffer[4] = this._instance.getX() + this._radius;
-      this._vertexBuffer[5] = this._instance.getY() - this._radius;
-      this._vertexBuffer[6] = this._instance.getX() - this._radius;
-      this._vertexBuffer[7] = this._instance.getY() - this._radius;
-
-      this._pixiObject.geometry
-        .getBuffer('aVertexPosition')
-        .update(this._vertexBuffer);
-    };
-
-    /**
-     * Return the width of the instance, when it's not resized.
-     */
-    RenderedLightObjectInstance.prototype.getDefaultWidth = function () {
-      return this._pixiObject.width;
-    };
-
-    /**
-     * Return the height of the instance, when it's not resized.
-     */
-    RenderedLightObjectInstance.prototype.getDefaultHeight = function () {
-      return this._pixiObject.height;
-    };
-
-    RenderedLightObjectInstance.prototype.getOriginX = function () {
-      return this._radius;
-    };
-
-    RenderedLightObjectInstance.prototype.getOriginY = function () {
-      return this._radius;
-    };
 
     objectsRenderingService.registerInstanceRenderer(
       'Lighting::LightObject',

@@ -14,7 +14,7 @@ namespace gdjs {
         /**
          * Uploads a file as string to the firebase storage bucket.
          * @param file - The entire file as string.
-         * @param onlinePath - The path under wich the file will be accessible on the bucket.
+         * @param onlinePath - The path under which the file will be accessible on the bucket.
          * @param [type] - The type/format of the string to upload.
          * @param [callbackStateVariable] - The variable where to store if the operation was successful.
          * @param [callbackValueVariable] - The variable where to store the result (url to the file).
@@ -34,7 +34,7 @@ namespace gdjs {
               .putString(file, type === 'none' ? undefined : type);
           } catch (e) {
             if (typeof callbackStateVariable !== 'undefined')
-              callbackStateVariable.setString(e.message);
+              callbackStateVariable.setString((e as Error).message);
             return;
           }
 

@@ -1,20 +1,19 @@
 // @flow
 import * as React from 'react';
-import { action } from '@storybook/addon-actions';
 
-import muiDecorator from '../ThemeDecorator';
 import paperDecorator from '../PaperDecorator';
 
 import MainFrameToolbar, {
   type MainFrameToolbarProps,
   type ToolbarInterface,
 } from '../../MainFrame/Toolbar';
-import ToolbarIcon from '../../UI/ToolbarIcon';
+import IconButton from '../../UI/IconButton';
+import DebugIcon from '../../UI/CustomSvgIcons/Debug';
 
 export default {
   title: 'MainFrameToolbar',
   component: MainFrameToolbar,
-  decorators: [paperDecorator, muiDecorator],
+  decorators: [paperDecorator],
 };
 
 const fakeEditorToolbar = (
@@ -25,29 +24,45 @@ const fakeEditorToolbar = (
       justifyContent: 'flex-end',
     }}
   >
-    <ToolbarIcon src="res/ribbon_default/bug32.png" tooltip="test tooltip" />
-    <ToolbarIcon src="res/ribbon_default/bug32.png" tooltip="test tooltip" />
-    <ToolbarIcon src="res/ribbon_default/bug32.png" tooltip="test tooltip" />
-    <ToolbarIcon src="res/ribbon_default/bug32.png" tooltip="test tooltip" />
+    <IconButton size="small" tooltip={'Test tooltip'} color="default">
+      <DebugIcon />
+    </IconButton>
+    <IconButton size="small" tooltip={'Test tooltip'} color="default">
+      <DebugIcon />
+    </IconButton>
+    <IconButton size="small" tooltip={'Test tooltip'} color="default" selected>
+      <DebugIcon />
+    </IconButton>
+    <IconButton size="small" tooltip={'Test tooltip'} disabled color="default">
+      <DebugIcon />
+    </IconButton>
+    <IconButton size="small" tooltip={'Test tooltip'} color="default">
+      <DebugIcon />
+    </IconButton>
   </span>
 );
 
 const defaultProps: MainFrameToolbarProps = {
-  showProjectIcons: true,
-  hasProject: false,
-  toggleProjectManager: () => {},
-  requestUpdate: () => {},
-  simulateUpdateDownloaded: () => {},
-  simulateUpdateAvailable: () => {},
-  exportProject: () => {},
-  onPreviewWithoutHotReload: () => {},
+  showProjectButtons: true,
+  showPreviewAndShareButtons: true,
+  openShareDialog: () => {},
+  isSharingEnabled: true,
+  hidden: false,
+
+  onPreviewWithoutHotReload: async () => {},
   onOpenDebugger: () => {},
-  onNetworkPreview: () => {},
-  onHotReloadPreview: () => {},
+  onNetworkPreview: async () => {},
+  onHotReloadPreview: async () => {},
+  onLaunchPreviewWithDiagnosticReport: async () => {},
   setPreviewOverride: () => {},
   canDoNetworkPreview: true,
   isPreviewEnabled: false,
   hasPreviewsRunning: false,
+  canSave: true,
+  onSave: async () => {},
+  onOpenVersionHistory: () => {},
+  canQuitVersionHistory: true,
+  onQuitVersionHistory: async () => {},
   previewState: {
     isPreviewOverriden: false,
     previewLayoutName: null,
@@ -55,21 +70,41 @@ const defaultProps: MainFrameToolbarProps = {
     overridenPreviewLayoutName: null,
     overridenPreviewExternalLayoutName: null,
   },
-  exportProject: () => {},
-  hasProject: false,
+  toolbarButtons: [],
+  projectPath: '',
+  triggerNpmScript: () => {},
 };
 
-export const EditorNotLoaded = () => (
-  <MainFrameToolbar {...defaultProps} showProjectIcons={false} />
+export const NoProjectOpen = (): React.Node => (
+  <MainFrameToolbar {...defaultProps} showProjectButtons={false} />
 );
 
-export const NoProjectLoaded = () => <MainFrameToolbar {...defaultProps} />;
+export const NoProjectOpenWithFakeButtons = (): React.Node => {
+  const toolbar = React.useRef<?ToolbarInterface>(null);
+  React.useEffect(
+    () => {
+      if (toolbar.current) {
+        toolbar.current.setEditorToolbar(fakeEditorToolbar);
+      }
+    },
+    [toolbar]
+  );
+  return (
+    <MainFrameToolbar
+      {...defaultProps}
+      showProjectButtons={false}
+      ref={toolbar}
+    />
+  );
+};
 
-export const ProjectOpenOnScene = () => (
+export const ProjectOpen = (): React.Node => {
+  return <MainFrameToolbar {...defaultProps} isPreviewEnabled />;
+};
+
+export const ProjectOpenPreviewDisabled = (): React.Node => (
   <MainFrameToolbar
     {...defaultProps}
-    isPreviewEnabled
-    hasProject
     previewState={{
       isPreviewOverriden: false,
       overridenPreviewExternalLayoutName: null,
@@ -80,11 +115,24 @@ export const ProjectOpenOnScene = () => (
   />
 );
 
-export const ProjectOpenOnExternalLayout = () => (
+export const ProjectOpenOnScene = (): React.Node => (
   <MainFrameToolbar
     {...defaultProps}
     isPreviewEnabled
-    hasProject
+    previewState={{
+      isPreviewOverriden: false,
+      overridenPreviewExternalLayoutName: null,
+      overridenPreviewLayoutName: null,
+      previewExternalLayoutName: null,
+      previewLayoutName: 'testLayout',
+    }}
+  />
+);
+
+export const ProjectOpenOnExternalLayout = (): React.Node => (
+  <MainFrameToolbar
+    {...defaultProps}
+    isPreviewEnabled
     previewState={{
       isPreviewOverriden: false,
       overridenPreviewExternalLayoutName: null,
@@ -95,11 +143,10 @@ export const ProjectOpenOnExternalLayout = () => (
   />
 );
 
-export const PreviewOverridenOnScene = () => (
+export const ProjectOpenPreviewOverridenOnScene = (): React.Node => (
   <MainFrameToolbar
     {...defaultProps}
     isPreviewEnabled
-    hasProject
     previewState={{
       isPreviewOverriden: true,
       overridenPreviewExternalLayoutName: null,
@@ -110,11 +157,10 @@ export const PreviewOverridenOnScene = () => (
   />
 );
 
-export const PreviewOverridenOnExternalLayout = () => (
+export const ProjectOpenPreviewOverridenOnExternalLayout = (): React.Node => (
   <MainFrameToolbar
     {...defaultProps}
     isPreviewEnabled
-    hasProject
     previewState={{
       isPreviewOverriden: true,
       overridenPreviewExternalLayoutName: 'testExternalLayout',
@@ -125,7 +171,7 @@ export const PreviewOverridenOnExternalLayout = () => (
   />
 );
 
-export const ProjectOpenWithOtherToolbar = () => {
+export const ProjectOpenWithFakeButtons = (): React.Node => {
   const toolbar = React.useRef<?ToolbarInterface>(null);
   React.useEffect(
     () => {
@@ -135,23 +181,11 @@ export const ProjectOpenWithOtherToolbar = () => {
     },
     [toolbar]
   );
-  const component = (
-    <MainFrameToolbar
-      {...defaultProps}
-      ref={toolbar}
-      isPreviewEnabled
-      hasProject
-    />
-  );
-
-  return component;
+  return <MainFrameToolbar {...defaultProps} ref={toolbar} isPreviewEnabled />;
 };
 
-export const PreviewRunning = () => (
-  <MainFrameToolbar
-    {...defaultProps}
-    isPreviewEnabled
-    hasProject
-    hasPreviewsRunning
-  />
-);
+export const ProjectOpenPreviewRunning = (): React.Node => {
+  return (
+    <MainFrameToolbar {...defaultProps} isPreviewEnabled hasPreviewsRunning />
+  );
+};

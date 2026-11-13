@@ -1,5 +1,9 @@
 // @flow
 import { getObjectParameterIndex } from './EnumerateInstructions';
+import { ProjectScopedContainersAccessor } from '../InstructionOrExpression/EventsScope';
+import { mapTypeToOperators } from '../EventsSheet/ParameterFields/OperatorField';
+import { mapTypeToRelationalOperators } from '../EventsSheet/ParameterFields/RelationalOperatorField';
+
 const gd: libGDevelop = global.gd;
 
 /**
@@ -8,80 +12,56 @@ const gd: libGDevelop = global.gd;
  * and set up the behavior name (if a behavior instruction was chosen).
  */
 export const setupInstructionParameters = (
-  globalObjectsContainer: gdObjectsContainer,
-  objectsContainer: gdObjectsContainer,
+  project: gdProject,
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
   instruction: gdInstruction,
   instructionMetadata: gdInstructionMetadata,
   objectName: ?string
-) => {
+): boolean => {
+  let hasChangeAnyParameterValue = false;
+
   instruction.setParametersCount(instructionMetadata.getParametersCount());
 
-  // For free instructions (not linked to an object or behavior), we can stop there.
-  // In the future, we could set up default values for parameters.
-  if (!objectName) return;
-
-  // Set the object name.
-  const objectParameterIndex = getObjectParameterIndex(instructionMetadata);
-  if (objectParameterIndex === -1) {
-    console.error(
-      `Instruction "${instructionMetadata.getFullName()}" is used for an object, but does not have an object as first parameter`
-    );
-    return;
-  }
-
-  instruction.setParameter(objectParameterIndex, objectName);
-
-  // Set the behavior name, if any.
-  const maybeBehaviorParameterIndex = objectParameterIndex + 1;
-  if (maybeBehaviorParameterIndex < instructionMetadata.getParametersCount()) {
-    const maybeBehaviorParameterMetadata = instructionMetadata.getParameter(
-      maybeBehaviorParameterIndex
-    );
-    if (
-      !gd.ParameterMetadata.isBehavior(maybeBehaviorParameterMetadata.getType())
-    ) {
-      // The parameter after the object is not a behavior, there is nothing to complete.
-      return;
-    }
-
-    const allowedBehaviorType = maybeBehaviorParameterMetadata.getExtraInfo();
-    const behaviorNames = gd
-      .getBehaviorsOfObject(
-        globalObjectsContainer,
-        objectsContainer,
-        objectName,
-        true
-      )
-      .toJSArray()
-      .filter(behaviorName => {
-        return (
-          !allowedBehaviorType ||
-          gd.getTypeOfBehavior(
-            globalObjectsContainer,
-            objectsContainer,
-            behaviorName,
-            false
-          ) === allowedBehaviorType
-        );
-      });
-
-    if (behaviorNames.length > 0) {
-      const currentParameterValue = instruction.getParameter(
-        maybeBehaviorParameterIndex
+  if (objectName) {
+    // Set the object name.
+    const objectParameterIndex = getObjectParameterIndex(instructionMetadata);
+    if (objectParameterIndex === -1) {
+      console.error(
+        `Instruction "${instructionMetadata.getFullName()}" is used for an object, but does not have an object as first parameter`
       );
+      return false;
+    }
+    instruction.setParameter(objectParameterIndex, objectName);
+    hasChangeAnyParameterValue = true;
+  }
+  const hasFilledAnyBehaviorParameter = gd.BehaviorParameterFiller.fillBehaviorParameters(
+    project.getCurrentPlatform(),
+    projectScopedContainersAccessor.get(),
+    instructionMetadata,
+    instruction
+  );
+  hasChangeAnyParameterValue =
+    hasChangeAnyParameterValue || hasFilledAnyBehaviorParameter;
 
-      // Set the behavior to the first matching behavior, in case a matching behavior name
-      // is not already set.
-      if (
-        !behaviorNames.some(
-          behaviorName => currentParameterValue === behaviorName
-        )
-      ) {
-        instruction.setParameter(maybeBehaviorParameterIndex, behaviorNames[0]);
+  for (let i = 0; i < instructionMetadata.getParametersCount(); i++) {
+    const parameterMetadata = instructionMetadata.getParameter(i);
+    if (!instruction.getParameter(i).getPlainString()) {
+      const type = parameterMetadata.getType();
+      const extraInfo = parameterMetadata.getExtraInfo();
+      if (type === 'operator') {
+        const operators =
+          mapTypeToOperators[extraInfo] || mapTypeToOperators.unknown;
+        instruction.setParameter(i, operators[0]);
+        hasChangeAnyParameterValue = true;
+      } else if (type === 'relationalOperator') {
+        const operators =
+          mapTypeToRelationalOperators[extraInfo] ||
+          mapTypeToRelationalOperators.unknown;
+        instruction.setParameter(i, operators[0]);
+        hasChangeAnyParameterValue = true;
       }
-    } else {
-      // Ignore - this will be shown as an error in the BehaviorField (the required
-      // behavior is not attached to the object).
     }
   }
+
+  return hasChangeAnyParameterValue;
 };

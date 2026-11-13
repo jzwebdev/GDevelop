@@ -1,24 +1,48 @@
 // @flow
 import * as React from 'react';
-import InstructionsList from '../InstructionsList.js';
+import InstructionsList from '../InstructionsList';
+import VariableDeclarationsList from '../VariableDeclarationsList';
 import classNames from 'classnames';
 import {
   selectableArea,
   largeSelectableArea,
   largeSelectedArea,
-  executableEventContainer,
+  conditionsActionsContainer,
   disabledText,
   instructionParameter,
   nameAndIconContainer,
   icon,
+  eventLabel,
 } from '../ClassNames';
 import InlinePopover from '../../InlinePopover';
-import SceneVariableField from '../../ParameterFields/SceneVariableField';
+import AnyVariableField from '../../ParameterFields/AnyVariableField';
+import { getVariableSourceIcon } from '../../ParameterFields/VariableField';
+import { getVariableSourceFromIdentifier } from '../../ParameterFields/AnyVariableField';
+
+import { type ParameterFieldInterface } from '../../ParameterFields/ParameterFieldCommons';
 import { type EventRendererProps } from './EventRenderer';
 import ConditionsActionsColumns from '../ConditionsActionsColumns';
 import { Trans } from '@lingui/macro';
-import { shouldActivate } from '../../../UI/KeyboardShortcuts/InteractionKeys.js';
+import { shouldActivate } from '../../../UI/KeyboardShortcuts/InteractionKeys';
+import { ProjectScopedContainersAccessor } from '../../../InstructionOrExpression/EventsScope';
+import ParameterRenderingService from '../../ParameterRenderingService';
+
 const gd: libGDevelop = global.gd;
+
+export const getVariableSourceOrSceneIcon = (
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
+  variableName: string
+): any => {
+  const variablesContainerSourceType = getVariableSourceFromIdentifier(
+    variableName,
+    projectScopedContainersAccessor.get()
+  );
+  return getVariableSourceIcon(
+    variablesContainerSourceType === gd.VariablesContainer.Unknown
+      ? gd.VariablesContainer.Scene
+      : variablesContainerSourceType
+  );
+};
 
 const styles = {
   container: {
@@ -35,10 +59,10 @@ const styles = {
     marginLeft: '3px',
     marginRight: '2px',
   },
-  eventLabel: {
-    marginLeft: '5px',
-    whiteSpace: 'normal',
-    wordWrap: 'break-word',
+  labelText: {
+    // Add an extra pixel so that it alignes with variables and other event labels
+    // (which are selectable areas, so has an extra pixel of border)
+    paddingLeft: '1px',
   },
 };
 
@@ -54,10 +78,11 @@ export default class ForEachChildVariableEvent extends React.Component<
   EventRendererProps,
   State
 > {
-  _valueIteratorField: ?SceneVariableField = null;
-  _keyIteratorField: ?SceneVariableField = null;
-  _iterableField: ?SceneVariableField = null;
+  _valueIteratorField: ?ParameterFieldInterface = null;
+  _keyIteratorField: ?ParameterFieldInterface = null;
+  _iterableField: ?ParameterFieldInterface = null;
 
+  // $FlowFixMe[missing-local-annot]
   state = {
     editingValueIteratorVariableName: false,
     editingKeyIteratorVariableName: false,
@@ -144,7 +169,7 @@ export default class ForEachChildVariableEvent extends React.Component<
   endEditing = () => {
     const { anchorEl } = this.state;
     // Put back the focus after closing the inline popover.
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-type]
     if (anchorEl) anchorEl.focus();
 
     this.setState({
@@ -156,7 +181,35 @@ export default class ForEachChildVariableEvent extends React.Component<
     });
   };
 
-  render() {
+  applyEditing = () => {
+    const forEachChildVariableEvent = gd.asForEachChildVariableEvent(
+      this.props.event
+    );
+    const {
+      editingPreviousValue,
+      editingIterableVariableName,
+      editingValueIteratorVariableName,
+      editingKeyIteratorVariableName,
+    } = this.state;
+    const currentValue = editingIterableVariableName
+      ? forEachChildVariableEvent.getIterableVariableName()
+      : editingValueIteratorVariableName
+      ? forEachChildVariableEvent.getValueIteratorVariableName()
+      : editingKeyIteratorVariableName
+      ? forEachChildVariableEvent.getKeyIteratorVariableName()
+      : null;
+    if (
+      editingPreviousValue != null &&
+      currentValue != null &&
+      editingPreviousValue !== currentValue
+    ) {
+      // Value changed: record the change in the history (this also flags the project as having unsaved changes).
+      this.props.onEndEditingEvent();
+    }
+    this.endEditing();
+  };
+
+  render(): any {
     const forEachChildVariableEvent = gd.asForEachChildVariableEvent(
       this.props.event
     );
@@ -164,21 +217,49 @@ export default class ForEachChildVariableEvent extends React.Component<
     const keyIteratorName = forEachChildVariableEvent.getKeyIteratorVariableName();
     const iterableName = forEachChildVariableEvent.getIterableVariableName();
 
+    const ValueIteratorVariableIcon = getVariableSourceOrSceneIcon(
+      this.props.projectScopedContainersAccessor,
+      valueIteratorName
+    );
+
+    const KeyIteratorVariableIcon = getVariableSourceOrSceneIcon(
+      this.props.projectScopedContainersAccessor,
+      keyIteratorName
+    );
+
+    const IterableVariableIcon = getVariableSourceOrSceneIcon(
+      this.props.projectScopedContainersAccessor,
+      iterableName
+    );
+
     return (
       <div
         style={styles.container}
         className={classNames({
-          [executableEventContainer]: true,
           [largeSelectableArea]: true,
           [largeSelectedArea]: this.props.selected,
         })}
       >
-        <div style={styles.eventLabel}>
+        <VariableDeclarationsList
+          variablesContainer={forEachChildVariableEvent.getVariables()}
+          loopIndexVariableName={forEachChildVariableEvent.getLoopIndexVariableName()}
+          onVariableDeclarationClick={this.props.onVariableDeclarationClick}
+          onVariableDeclarationDoubleClick={
+            this.props.onVariableDeclarationDoubleClick
+          }
+          className={'local-variables-container'}
+          disabled={this.props.disabled}
+          screenType={this.props.screenType}
+          windowSize={this.props.windowSize}
+          idPrefix={this.props.idPrefix}
+        />
+        <div className={eventLabel}>
           <Trans>
             <span
               className={classNames({
                 [disabledText]: this.props.disabled,
               })}
+              style={styles.labelText}
             >
               For every child in
               <span
@@ -197,10 +278,10 @@ export default class ForEachChildVariableEvent extends React.Component<
                 }}
                 tabIndex={0}
               >
-                <img
-                  className={icon}
-                  src="res/types/scenevar.png"
-                  alt="Scene variable"
+                <IterableVariableIcon
+                  className={classNames({
+                    [icon]: true,
+                  })}
                 />
                 {iterableName.length !== 0 ? (
                   <span>{iterableName}</span>
@@ -227,10 +308,10 @@ export default class ForEachChildVariableEvent extends React.Component<
                 }}
                 tabIndex={0}
               >
-                <img
-                  className={icon}
-                  src="res/types/scenevar.png"
-                  alt="Scene variable"
+                <ValueIteratorVariableIcon
+                  className={classNames({
+                    [icon]: true,
+                  })}
                 />
                 {valueIteratorName.length !== 0 ? (
                   <span>{valueIteratorName}</span>
@@ -257,10 +338,10 @@ export default class ForEachChildVariableEvent extends React.Component<
                 }}
                 tabIndex={0}
               >
-                <img
-                  className={icon}
-                  src="res/types/scenevar.png"
-                  alt="Scene variable"
+                <KeyIteratorVariableIcon
+                  className={classNames({
+                    [icon]: true,
+                  })}
                 />
                 {keyIteratorName.length !== 0 ? (
                   <span>{keyIteratorName}</span>
@@ -276,9 +357,14 @@ export default class ForEachChildVariableEvent extends React.Component<
         </div>
         <ConditionsActionsColumns
           leftIndentWidth={this.props.leftIndentWidth}
-          windowWidth={this.props.windowWidth}
+          windowSize={this.props.windowSize}
+          eventsSheetWidth={this.props.eventsSheetWidth}
+          className={classNames({
+            [conditionsActionsContainer]: true,
+          })}
           renderConditionsList={({ style, className }) => (
             <InstructionsList
+              platform={this.props.project.getCurrentPlatform()}
               instrsList={forEachChildVariableEvent.getConditions()}
               style={style}
               className={className}
@@ -298,11 +384,22 @@ export default class ForEachChildVariableEvent extends React.Component<
               disabled={this.props.disabled}
               renderObjectThumbnail={this.props.renderObjectThumbnail}
               screenType={this.props.screenType}
-              windowWidth={this.props.windowWidth}
+              windowSize={this.props.windowSize}
+              scope={this.props.scope}
+              resourcesManager={this.props.project.getResourcesManager()}
+              globalObjectsContainer={this.props.globalObjectsContainer}
+              objectsContainer={this.props.objectsContainer}
+              projectScopedContainersAccessor={
+                this.props.projectScopedContainersAccessor
+              }
+              idPrefix={this.props.idPrefix}
+              highlightedSearchText={this.props.highlightedSearchText}
+              highlightedSearchMatchCase={this.props.highlightedSearchMatchCase}
             />
           )}
           renderActionsList={({ className }) => (
             <InstructionsList
+              platform={this.props.project.getCurrentPlatform()}
               instrsList={forEachChildVariableEvent.getActions()}
               style={
                 {
@@ -326,7 +423,17 @@ export default class ForEachChildVariableEvent extends React.Component<
               disabled={this.props.disabled}
               renderObjectThumbnail={this.props.renderObjectThumbnail}
               screenType={this.props.screenType}
-              windowWidth={this.props.windowWidth}
+              windowSize={this.props.windowSize}
+              scope={this.props.scope}
+              resourcesManager={this.props.project.getResourcesManager()}
+              globalObjectsContainer={this.props.globalObjectsContainer}
+              objectsContainer={this.props.objectsContainer}
+              projectScopedContainersAccessor={
+                this.props.projectScopedContainersAccessor
+              }
+              idPrefix={this.props.idPrefix}
+              highlightedSearchText={this.props.highlightedSearchText}
+              highlightedSearchMatchCase={this.props.highlightedSearchMatchCase}
             />
           )}
         />
@@ -334,13 +441,16 @@ export default class ForEachChildVariableEvent extends React.Component<
           open={this.state.editingValueIteratorVariableName}
           anchorEl={this.state.anchorEl}
           onRequestClose={this.cancelEditing}
-          onApply={this.endEditing}
+          onApply={this.applyEditing}
         >
-          <SceneVariableField
+          <AnyVariableField
             project={this.props.project}
             scope={this.props.scope}
             globalObjectsContainer={this.props.globalObjectsContainer}
             objectsContainer={this.props.objectsContainer}
+            projectScopedContainersAccessor={
+              this.props.projectScopedContainersAccessor
+            }
             value={valueIteratorName}
             onChange={text => {
               forEachChildVariableEvent.setValueIteratorVariableName(text);
@@ -348,21 +458,25 @@ export default class ForEachChildVariableEvent extends React.Component<
             }}
             isInline
             onRequestClose={this.cancelEditing}
-            onApply={this.endEditing}
+            onApply={this.applyEditing}
             ref={iteratorField => (this._valueIteratorField = iteratorField)}
+            parameterRenderingService={ParameterRenderingService}
           />
         </InlinePopover>
         <InlinePopover
           open={this.state.editingKeyIteratorVariableName}
           anchorEl={this.state.anchorEl}
           onRequestClose={this.cancelEditing}
-          onApply={this.endEditing}
+          onApply={this.applyEditing}
         >
-          <SceneVariableField
+          <AnyVariableField
             project={this.props.project}
             scope={this.props.scope}
             globalObjectsContainer={this.props.globalObjectsContainer}
             objectsContainer={this.props.objectsContainer}
+            projectScopedContainersAccessor={
+              this.props.projectScopedContainersAccessor
+            }
             value={keyIteratorName}
             onChange={text => {
               forEachChildVariableEvent.setKeyIteratorVariableName(text);
@@ -370,21 +484,25 @@ export default class ForEachChildVariableEvent extends React.Component<
             }}
             isInline
             onRequestClose={this.cancelEditing}
-            onApply={this.endEditing}
+            onApply={this.applyEditing}
             ref={iteratorField => (this._keyIteratorField = iteratorField)}
+            parameterRenderingService={ParameterRenderingService}
           />
         </InlinePopover>
         <InlinePopover
           open={this.state.editingIterableVariableName}
           anchorEl={this.state.anchorEl}
           onRequestClose={this.cancelEditing}
-          onApply={this.endEditing}
+          onApply={this.applyEditing}
         >
-          <SceneVariableField
+          <AnyVariableField
             project={this.props.project}
             scope={this.props.scope}
             globalObjectsContainer={this.props.globalObjectsContainer}
             objectsContainer={this.props.objectsContainer}
+            projectScopedContainersAccessor={
+              this.props.projectScopedContainersAccessor
+            }
             value={iterableName}
             onChange={text => {
               forEachChildVariableEvent.setIterableVariableName(text);
@@ -392,8 +510,10 @@ export default class ForEachChildVariableEvent extends React.Component<
             }}
             isInline
             onRequestClose={this.cancelEditing}
-            onApply={this.endEditing}
+            onApply={this.applyEditing}
             ref={iterableField => (this._iterableField = iterableField)}
+            parameterRenderingService={ParameterRenderingService}
+            expressionTypeExtraInfo={'collection'}
           />
         </InlinePopover>
       </div>

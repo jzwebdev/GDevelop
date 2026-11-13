@@ -27,14 +27,16 @@ FileExtension::FileExtension() {
       "gdjs.evtTools.storage.writeStringInJSONFile");
   GetAllActions()["LireFichierExp"].SetFunctionName(
       "gdjs.evtTools.storage.readNumberFromJSONFile");
+  GetAllActions()["ReadNumberFromStorage"].SetFunctionName(
+      "gdjs.evtTools.storage.readNumberFromJSONFile");
   GetAllActions()["LireFichierTxt"].SetFunctionName(
+      "gdjs.evtTools.storage.readStringFromJSONFile");
+  GetAllActions()["ReadStringFromStorage"].SetFunctionName(
       "gdjs.evtTools.storage.readStringFromJSONFile");
   GetAllActions()["DeleteGroupFichier"].SetFunctionName(
       "gdjs.evtTools.storage.deleteElementFromJSONFile");
   GetAllActions()["DeleteFichier"]
-      .SetGroup(_("Storage"))
       .SetFunctionName("gdjs.evtTools.storage.clearJSONFile");
-  GetAllActions()["LaunchFile"].SetFunctionName("gdjs.evtTools.window.openURL");
 
   StripUnimplementedInstructionsAndExpressions();  // Unimplemented things are
                                                    // listed here:

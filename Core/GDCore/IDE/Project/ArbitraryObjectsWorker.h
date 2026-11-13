@@ -4,8 +4,7 @@
  * reserved. This project is released under the MIT License.
  */
 
-#ifndef ARBITRARYOBJECTSWORKER_H
-#define ARBITRARYOBJECTSWORKER_H
+#pragma once
 
 #include <map>
 #include <memory>
@@ -15,7 +14,7 @@
 namespace gd {
 class Object;
 class ObjectsContainer;
-class BehaviorContent;
+class Behavior;
 }  // namespace gd
 
 namespace gd {
@@ -33,14 +32,19 @@ class GD_CORE_API ArbitraryObjectsWorker {
   virtual ~ArbitraryObjectsWorker();
 
   /**
-   * \brief Launch the worker on the specified events list.
+   * \brief Launch the worker on the specified object container.
    */
   void Launch(gd::ObjectsContainer& objects) { VisitObjectContainer(objects); };
+
+  /**
+   * \brief Launch the worker on the specified object.
+   */
+  void Launch(gd::Object& object) { VisitObject(object); };
 
  private:
   void VisitObjectContainer(gd::ObjectsContainer& objects);
   void VisitObject(gd::Object& object);
-  void VisitBehavior(gd::BehaviorContent& instruction);
+  void VisitBehavior(gd::Behavior& behavior);
 
   /**
    * Called to do some work on an object container.
@@ -55,9 +59,8 @@ class GD_CORE_API ArbitraryObjectsWorker {
   /**
    * Called to do some work on a behavior.
    */
-  virtual void DoVisitBehavior(gd::BehaviorContent& instruction){};
+  virtual void DoVisitBehavior(gd::Behavior& behavior){};
 };
 
 }  // namespace gd
 
-#endif  // ARBITRARYOBJECTSWORKER_H

@@ -2,7 +2,6 @@
 import { Trans } from '@lingui/macro';
 import { t } from '@lingui/macro';
 import { I18n } from '@lingui/react';
-import { type I18n as I18nType } from '@lingui/core';
 
 import * as React from 'react';
 import Toggle from '../../UI/Toggle';
@@ -10,28 +9,39 @@ import { mapFor } from '../../Utils/MapFor';
 import EmptyMessage from '../../UI/EmptyMessage';
 import ParameterRenderingService from '../ParameterRenderingService';
 import HelpButton from '../../UI/HelpButton';
+import HelpIcon from '../../UI/HelpIcon';
 import {
-  type ResourceSource,
-  type ChooseResourceFunction,
-} from '../../ResourcesList/ResourceSource';
-import { type ResourceExternalEditor } from '../../ResourcesList/ResourceExternalEditor.flow';
+  isRelativePathToDocumentationRoot,
+  isDocumentationAbsoluteUrl,
+} from '../../Utils/HelpLink';
+import { type ResourceManagementProps } from '../../ResourcesList/ResourceSource';
 import { Column, Line, Spacer } from '../../UI/Grid';
 import AlertMessage from '../../UI/AlertMessage';
 import DismissableAlertMessage from '../../UI/DismissableAlertMessage';
-import Window from '../../Utils/Window';
+import useAlertDialog from '../../UI/Alert/useAlertDialog';
 import { getExtraInstructionInformation } from '../../Hints';
 import DismissableTutorialMessage from '../../Hints/DismissableTutorialMessage';
 import { isAnEventFunctionMetadata } from '../../EventsFunctionsExtensionsLoader';
-import OpenInNew from '@material-ui/icons/OpenInNew';
-import IconButton from '../../UI/IconButton';
-import { type EventsScope } from '../../InstructionOrExpression/EventsScope.flow';
+import { type EventsScope } from '../../InstructionOrExpression/EventsScope';
 import { getObjectParameterIndex } from '../../InstructionOrExpression/EnumerateInstructions';
 import Text from '../../UI/Text';
-import { getInstructionMetadata } from './NewInstructionEditor';
+import { getInstructionMetadata } from './InstructionEditor';
 import { ColumnStackLayout } from '../../UI/Layout';
 import { setupInstructionParameters } from '../../InstructionOrExpression/SetupInstructionParameters';
 import ScrollView from '../../UI/ScrollView';
 import { getInstructionTutorialIds } from '../../Utils/GDevelopServices/Tutorial';
+import useForceUpdate from '../../Utils/UseForceUpdate';
+import GDevelopThemeContext from '../../UI/Theme/GDevelopThemeContext';
+import PreferencesContext from '../../MainFrame/Preferences/PreferencesContext';
+import FlatButton from '../../UI/FlatButton';
+import {
+  type ParameterFieldInterface,
+  type FieldFocusFunction,
+} from '../ParameterFields/ParameterFieldCommons';
+import Edit from '../../UI/CustomSvgIcons/Edit';
+import { ProjectScopedContainersAccessor } from '../../InstructionOrExpression/EventsScope';
+import { type VariableDialogOpeningProps } from '../../VariablesList/VariablesEditorDialog';
+
 const gd: libGDevelop = global.gd;
 
 const styles = {
@@ -48,7 +58,7 @@ const styles = {
     width: 24,
     height: 24,
     marginRight: 8,
-    paddingTop: 12,
+    paddingTop: 6,
     flexShrink: 0,
   },
   invertToggle: {
@@ -59,205 +69,269 @@ const styles = {
   },
 };
 
+export type InstructionParametersEditorInterface = {|
+  focus: FieldFocusFunction,
+|};
+
 type Props = {|
   project: gdProject,
   scope: EventsScope,
   globalObjectsContainer: gdObjectsContainer,
   objectsContainer: gdObjectsContainer,
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
   objectName?: ?string,
   instruction: gdInstruction,
   isCondition: boolean,
   focusOnMount?: boolean,
-  resourceSources: Array<ResourceSource>,
-  onChooseResource: ChooseResourceFunction,
-  resourceExternalEditors: Array<ResourceExternalEditor>,
+  resourceManagementProps: ResourceManagementProps,
   style?: Object,
-  openInstructionOrExpression: (
-    extension: gdPlatformExtension,
-    type: string
-  ) => void,
+  openInstructionOrExpression: (type: string) => void,
   noHelpButton?: boolean,
-|};
-type State = {|
-  isDirty: boolean,
+  id?: string,
+  openEventsBasedEntityPropertyEditorDialog:
+    | (VariableDialogOpeningProps => void)
+    | null,
 |};
 
 const isParameterVisible = (
   parameterMetadata: gdParameterMetadata,
   parameterIndex: number,
-  objectParameterIndex: ?number
+  objectParameterIndex: number,
+  objectName: ?string,
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor
 ) => {
   // Hide parameters that are used only for code generation
   if (parameterMetadata.isCodeOnly()) return false;
 
   // For objects, hide the first object parameter, which is by convention the object name.
-  if (parameterIndex === objectParameterIndex) return false;
+  if (
+    parameterIndex === objectParameterIndex &&
+    objectName &&
+    projectScopedContainersAccessor
+      .get()
+      .getObjectsContainersList()
+      .hasObjectOrGroupNamed(objectName)
+  )
+    return false;
 
   return true;
 };
 
-export default class InstructionParametersEditor extends React.Component<
-  Props,
-  State
-> {
-  _firstVisibleField: ?any = {};
-  state = {
-    isDirty: false,
-  };
-
-  componentDidMount() {
-    if (this.props.focusOnMount) {
-      setTimeout(() => {
-        this.focus();
-      }, 300); // Let the time to the dialog that is potentially containing the InstructionParametersEditor to finish its transition.
-    }
-  }
-
-  focus() {
-    const { instruction, isCondition, project } = this.props;
-
-    // Verify that there is a field to focus.
-    if (
-      this._getVisibleParametersCount(
-        getInstructionMetadata({
-          instructionType: instruction.getType(),
-          isCondition,
-          project,
-        }),
-        this.props.objectName
-      ) !== 0
-    ) {
-      if (this._firstVisibleField && this._firstVisibleField.focus) {
-        this._firstVisibleField.focus();
-      }
-    }
-  }
-
-  _getVisibleParametersCount(
-    instructionMetadata: ?gdInstructionMetadata,
-    objectName: ?string
-  ) {
-    if (!instructionMetadata) return 0;
-
-    const objectParameterIndex = objectName
-      ? getObjectParameterIndex(instructionMetadata)
-      : -1;
-
-    return mapFor(0, instructionMetadata.getParametersCount(), i => {
-      if (!instructionMetadata) return false;
-      const parameterMetadata = instructionMetadata.getParameter(i);
-
-      return isParameterVisible(parameterMetadata, i, objectParameterIndex);
-    }).filter(isVisible => isVisible).length;
-  }
-
-  _openExtension = (i18n: I18nType) => {
-    if (this.state.isDirty) {
-      const answer = Window.showConfirmDialog(
-        i18n._(
-          t`You've made some changes here. Are you sure you want to discard them and open the function?`
-        )
-      );
-      if (!answer) return;
-    }
-
-    const { instruction, isCondition, project } = this.props;
-    const instructionType = instruction.getType();
-    if (!instructionType) return null;
-
-    const extension = isCondition
-      ? gd.MetadataProvider.getExtensionAndConditionMetadata(
-          project.getCurrentPlatform(),
-          instructionType
-        ).getExtension()
-      : gd.MetadataProvider.getExtensionAndActionMetadata(
-          project.getCurrentPlatform(),
-          instructionType
-        ).getExtension();
-
-    this.props.openInstructionOrExpression(extension, instructionType);
-  };
-
-  _renderEmpty() {
-    return (
-      <div style={{ ...styles.emptyContainer, ...this.props.style }}>
-        <EmptyMessage>
-          {this.props.isCondition ? (
-            <Trans>
-              Choose a condition (or an object then a condition) on the left
-            </Trans>
-          ) : (
-            <Trans>
-              Choose an action (or an object then an action) on the left
-            </Trans>
-          )}
-        </EmptyMessage>
-      </div>
-    );
-  }
-
-  render() {
-    const {
+const InstructionParametersEditor: React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<InstructionParametersEditorInterface>,
+}> = React.forwardRef<Props, InstructionParametersEditorInterface>(
+  (
+    {
       instruction,
       project,
       globalObjectsContainer,
       objectsContainer,
+      projectScopedContainersAccessor,
       noHelpButton,
       objectName,
       isCondition,
       scope,
-    } = this.props;
+      focusOnMount,
+      style,
+      openInstructionOrExpression,
+      resourceManagementProps,
+      id,
+      openEventsBasedEntityPropertyEditorDialog,
+    },
+    ref
+  ) => {
+    const firstVisibleField = React.useRef<?ParameterFieldInterface>(null);
+    const [isDirty, setIsDirty] = React.useState<boolean>(false);
+    const {
+      palette: { type: paletteType },
+    } = React.useContext(GDevelopThemeContext);
+    const preferences = React.useContext(PreferencesContext);
+    const showDeprecatedInstructionWarning =
+      preferences.values.showDeprecatedInstructionWarning;
+    const { showConfirmation } = useAlertDialog();
+
+    const forceUpdate = useForceUpdate();
+
+    const getVisibleParametersCount = React.useCallback(
+      (instructionMetadata: ?gdInstructionMetadata, objectName: ?string) => {
+        if (!instructionMetadata) return 0;
+
+        const objectParameterIndex = getObjectParameterIndex(
+          instructionMetadata
+        );
+
+        return mapFor(0, instructionMetadata.getParametersCount(), i => {
+          if (!instructionMetadata) return false;
+          const parameterMetadata = instructionMetadata.getParameter(i);
+
+          return isParameterVisible(
+            parameterMetadata,
+            i,
+            objectParameterIndex,
+            objectName,
+            projectScopedContainersAccessor
+          );
+        }).filter(isVisible => isVisible).length;
+      },
+      [projectScopedContainersAccessor]
+    );
+
+    const focus: FieldFocusFunction = React.useCallback(
+      options => {
+        // Verify that there is a field to focus.
+        if (
+          getVisibleParametersCount(
+            getInstructionMetadata({
+              instructionType: instruction.getType(),
+              isCondition,
+              project,
+            }),
+            objectName
+          ) !== 0
+        ) {
+          if (firstVisibleField.current && firstVisibleField.current.focus) {
+            firstVisibleField.current.focus(options);
+          }
+        }
+      },
+      [getVisibleParametersCount, instruction, isCondition, project, objectName]
+    );
+
+    React.useImperativeHandle(ref, () => ({
+      focus,
+    }));
+
+    const openExtension = async () => {
+      if (isDirty) {
+        const answer = await showConfirmation({
+          title: t`Discard changes?`,
+          message: t`You've made some changes here. Are you sure you want to discard them and open the function?`,
+        });
+        if (!answer) return;
+      }
+
+      const instructionType = instruction.getType();
+      if (!instructionType) return null;
+
+      openInstructionOrExpression(instructionType);
+    };
+
+    const renderEmpty = () => {
+      return <div style={{ ...styles.emptyContainer, ...style }} />;
+    };
+
+    React.useEffect(
+      () => {
+        if (focusOnMount) {
+          const timeoutId = setTimeout(() => {
+            focus();
+          }, 300); // Let the time to the dialog that is potentially containing the InstructionParametersEditor to finish its transition.
+          return () => clearTimeout(timeoutId);
+        }
+      },
+      [focus, focusOnMount]
+    );
+
+    gd.VariableInstructionSwitcher.switchBetweenUnifiedInstructionIfNeeded(
+      project.getCurrentPlatform(),
+      projectScopedContainersAccessor.get(),
+      instruction
+    );
 
     const instructionType = instruction.getType();
+
     const instructionMetadata = getInstructionMetadata({
       instructionType,
       isCondition,
       project,
     });
-    if (!instructionMetadata) return this._renderEmpty();
+    React.useEffect(
+      () => {
+        if (!instructionMetadata) {
+          return;
+        }
+        const hasChangeAnyParameterValue = setupInstructionParameters(
+          project,
+          projectScopedContainersAccessor,
+          instruction,
+          instructionMetadata,
+          objectName
+        );
+        if (hasChangeAnyParameterValue) {
+          forceUpdate();
+        }
+      },
+      [
+        forceUpdate,
+        instruction,
+        instructionMetadata,
+        objectName,
+        project,
+        projectScopedContainersAccessor,
+      ]
+    );
+
+    if (!instructionMetadata) return renderEmpty();
 
     const helpPage = instructionMetadata.getHelpPath();
     const instructionExtraInformation = getExtraInstructionInformation(
       instructionType
     );
     const tutorialIds = getInstructionTutorialIds(instructionType);
-    const objectParameterIndex = objectName
-      ? getObjectParameterIndex(instructionMetadata)
-      : -1;
+    const objectParameterIndex = getObjectParameterIndex(instructionMetadata);
 
-    setupInstructionParameters(
-      globalObjectsContainer,
-      objectsContainer,
-      instruction,
-      instructionMetadata,
-      objectName
-    );
+    // For some reason, iconFileName can sometimes be undefined. see https://github.com/4ian/GDevelop/issues/5958.
+    const iconFilename = instructionMetadata.getIconFilename() || '';
+    const shouldInvertGrayScale =
+      paletteType === 'dark' &&
+      (iconFilename.startsWith('data:image/svg+xml') ||
+        iconFilename.includes('_black'));
 
     let parameterFieldIndex = 0;
     return (
       <I18n>
         {({ i18n }) => (
-          <ScrollView autoHideScrollbar>
-            <Column expand>
-              <Line alignItems="flex-start">
+          <ScrollView autoHideScrollbar id={id}>
+            <ColumnStackLayout expand>
+              <Line alignItems="flex-start" noMargin>
                 <img
-                  src={instructionMetadata.getIconFilename()}
+                  src={iconFilename}
                   alt=""
-                  style={styles.icon}
+                  style={{
+                    ...styles.icon,
+                    filter: shouldInvertGrayScale
+                      ? 'grayscale(1) invert(1)'
+                      : undefined,
+                  }}
                 />
-                <Text style={styles.description}>
-                  {instructionMetadata.getDescription()}
-                </Text>
-                {isAnEventFunctionMetadata(instructionMetadata) && (
-                  <IconButton
-                    onClick={() => {
-                      this._openExtension(i18n);
-                    }}
-                  >
-                    <OpenInNew />
-                  </IconButton>
-                )}
+                <Column expand>
+                  <Line noMargin alignItems="flex-start">
+                    {/* $FlowFixMe[incompatible-type] */}
+                    <Text style={styles.description} noMargin>
+                      {instructionMetadata.getDescription()}
+                    </Text>
+                    {helpPage && isDocumentationAbsoluteUrl(helpPage) && (
+                      <HelpIcon size="small" helpPagePath={helpPage} />
+                    )}
+                  </Line>
+                </Column>
               </Line>
+              {showDeprecatedInstructionWarning !== 'no' &&
+                instructionMetadata.isHidden() && (
+                  <Line>
+                    <AlertMessage kind="warning">
+                      {instructionMetadata.getDeprecationMessage() ? (
+                        <>
+                          <Trans>Deprecated:</Trans>{' '}
+                          {instructionMetadata.getDeprecationMessage()}
+                        </>
+                      ) : (
+                        <Trans>Deprecated</Trans>
+                      )}
+                    </AlertMessage>
+                  </Line>
+                )}
               {instructionExtraInformation && (
                 <Line>
                   {instructionExtraInformation.identifier === undefined ? (
@@ -287,7 +361,11 @@ export default class InstructionParametersEditor extends React.Component<
                 </Line>
               ) : null}
               <Spacer />
-              <div key={instructionType} style={styles.parametersContainer}>
+              <div
+                key={instructionType}
+                style={styles.parametersContainer}
+                id="instruction-parameters-container"
+              >
                 <ColumnStackLayout noMargin>
                   {mapFor(0, instructionMetadata.getParametersCount(), i => {
                     const parameterMetadata = instructionMetadata.getParameter(
@@ -297,14 +375,17 @@ export default class InstructionParametersEditor extends React.Component<
                       !isParameterVisible(
                         parameterMetadata,
                         i,
-                        objectParameterIndex
+                        objectParameterIndex,
+                        objectName,
+                        projectScopedContainersAccessor
                       )
                     )
                       return null;
 
                     const parameterMetadataType = parameterMetadata.getType();
                     const ParameterComponent = ParameterRenderingService.getParameterComponent(
-                      parameterMetadataType
+                      parameterMetadataType,
+                      parameterMetadata
                     );
 
                     // Track the field count on screen, to affect the ref to the
@@ -319,74 +400,118 @@ export default class InstructionParametersEditor extends React.Component<
                         instruction={instruction}
                         parameterMetadata={parameterMetadata}
                         parameterIndex={i}
-                        value={instruction.getParameter(i)}
+                        value={instruction.getParameter(i).getPlainString()}
                         onChange={value => {
-                          if (instruction.getParameter(i) !== value) {
+                          if (
+                            instruction.getParameter(i).getPlainString() !==
+                            value
+                          ) {
                             instruction.setParameter(i, value);
-                            this.setState({
-                              isDirty: true,
-                            });
+                            setIsDirty(true);
+                            forceUpdate();
                           }
                         }}
+                        onInstructionTypeChanged={forceUpdate}
                         project={project}
                         scope={scope}
                         globalObjectsContainer={globalObjectsContainer}
                         objectsContainer={objectsContainer}
+                        projectScopedContainersAccessor={
+                          projectScopedContainersAccessor
+                        }
                         key={i}
                         parameterRenderingService={ParameterRenderingService}
-                        resourceSources={this.props.resourceSources}
-                        onChooseResource={this.props.onChooseResource}
-                        resourceExternalEditors={
-                          this.props.resourceExternalEditors
-                        }
+                        resourceManagementProps={resourceManagementProps}
                         ref={field => {
                           if (isFirstVisibleParameterField) {
-                            this._firstVisibleField = field;
+                            firstVisibleField.current = field;
                           }
                         }}
+                        openEventsBasedEntityPropertyEditorDialog={
+                          openEventsBasedEntityPropertyEditorDialog
+                        }
                       />
                     );
                   })}
                 </ColumnStackLayout>
-                {this._getVisibleParametersCount(
-                  instructionMetadata,
-                  objectName
-                ) === 0 && (
+                {getVisibleParametersCount(instructionMetadata, objectName) ===
+                  0 && (
                   <EmptyMessage>
                     <Trans>There is nothing to configure.</Trans>
                   </EmptyMessage>
                 )}
-                {this.props.isCondition && (
+                {isCondition && (
                   <Toggle
                     label={<Trans>Invert condition</Trans>}
                     labelPosition="right"
                     toggled={instruction.isInverted()}
+                    // $FlowFixMe[incompatible-type]
                     style={styles.invertToggle}
                     onToggle={(e, enabled) => {
                       instruction.setInverted(enabled);
-                      this.forceUpdate();
+                      forceUpdate();
                     }}
                   />
                 )}
-              </div>
-              <Line>
-                {!noHelpButton && helpPage && (
-                  <HelpButton
-                    helpPagePath={instructionMetadata.getHelpPath()}
+                {instructionMetadata.isOptionallyAsync() && (
+                  <Toggle
                     label={
-                      this.props.isCondition ? (
-                        <Trans>Help for this condition</Trans>
-                      ) : (
-                        <Trans>Help for this action</Trans>
-                      )
+                      <Trans>
+                        Wait for the action to end before executing the actions
+                        (and subevents) following it
+                      </Trans>
                     }
+                    labelPosition="right"
+                    toggled={instruction.isAwaited()}
+                    // $FlowFixMe[incompatible-type]
+                    style={styles.invertToggle}
+                    onToggle={(e, enabled) => {
+                      instruction.setAwaited(enabled);
+                      forceUpdate();
+                    }}
                   />
                 )}
+                {isAnEventFunctionMetadata(instructionMetadata) && (
+                  <Line>
+                    <FlatButton
+                      key={'open-extension'}
+                      label={
+                        isCondition ? (
+                          <Trans>Edit this condition events</Trans>
+                        ) : (
+                          <Trans>Edit this action events</Trans>
+                        )
+                      }
+                      onClick={() => {
+                        openExtension();
+                      }}
+                      leftIcon={<Edit />}
+                    />
+                  </Line>
+                )}
+              </div>
+              <Line>
+                {!noHelpButton &&
+                  helpPage &&
+                  isRelativePathToDocumentationRoot(helpPage) && (
+                    <HelpButton
+                      helpPagePath={helpPage}
+                      label={
+                        isCondition ? (
+                          <Trans>Help for this condition</Trans>
+                        ) : (
+                          <Trans>Help for this action</Trans>
+                        )
+                      }
+                    />
+                  )}
               </Line>
-            </Column>
+            </ColumnStackLayout>
           </ScrollView>
         )}
       </I18n>
     );
   }
-}
+);
+
+export default InstructionParametersEditor;

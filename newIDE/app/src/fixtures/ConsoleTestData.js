@@ -37,10 +37,10 @@ class MockLogsManager extends LogsManager {
       internal: false,
     },
   ];
-  groups = new Set<string>(['Grouped error', 'Regular group']);
+  groups: Set<string> = new Set<string>(['Grouped error', 'Regular group']);
   on() {}
   off() {}
   addLog() {}
 }
 
-export default new MockLogsManager();
+export default (new MockLogsManager(): MockLogsManager);

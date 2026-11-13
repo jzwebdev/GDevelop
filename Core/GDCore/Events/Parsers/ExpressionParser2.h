@@ -13,10 +13,12 @@
 #include "ExpressionParser2Node.h"
 #include "GDCore/Extensions/Metadata/ExpressionMetadata.h"
 #include "GDCore/Extensions/Metadata/MetadataProvider.h"
+#include "GDCore/Extensions/Metadata/ObjectMetadata.h"
 #include "GDCore/Project/Layout.h"  // For GetTypeOfObject and GetTypeOfBehavior
 #include "GDCore/String.h"
 #include "GDCore/Tools/Localization.h"
 #include "GDCore/Tools/MakeUnique.h"
+#include "GrammarTerminals.h"
 namespace gd {
 class Expression;
 class ObjectsContainer;
@@ -27,6 +29,8 @@ class ExpressionMetadata;
 
 namespace gd {
 
+using namespace gd::GrammarTerminals;
+
 /** \brief Parse an expression, returning a tree of node corresponding
  * to the parsed expression.
  *
@@ -34,36 +38,34 @@ namespace gd {
  * parser by refactoring out the dependency on gd::MetadataProvider (injecting
  * instead functions to be called to query supported functions).
  *
- * \see gd::ExpressionParserDiagnostic
+ * \see gd::ExpressionParserError
  * \see gd::ExpressionNode
  */
 class GD_CORE_API ExpressionParser2 {
  public:
-  ExpressionParser2(const gd::Platform &platform_,
-                    const gd::ObjectsContainer &globalObjectsContainer_,
-                    const gd::ObjectsContainer &objectsContainer_);
+  ExpressionParser2();
   virtual ~ExpressionParser2(){};
 
   /**
-   * Parse the given expression with the specified type.
+   * Parse the given expression into a tree of nodes.
    *
-   * \param type Type of the expression: "string", "number",
-   * type supported by gd::ParameterMetadata::IsObject, types supported by
-   * gd::ParameterMetadata::IsExpression or "unknown".
-   * \param expression The expression to parse
-   * \param objectName Specify the object name, only for the
-   * case of "objectvar" type.
+   * \param expression The expression to parse.
    *
    * \return The node representing the expression as a parsed tree.
    */
   std::unique_ptr<ExpressionNode> ParseExpression(
-      const gd::String &type,
-      const gd::String &expression_,
-      const gd::String &objectName = "") {
-    expression = expression_;
+      const gd::String &expression) {
+    // Parse over a UTF-32 (fixed-width) copy of the expression: gd::String is
+    // UTF-8, so indexing it by character position (operator[]) and computing
+    // its size() are both O(position)/O(length). Doing that for every
+    // character would make parsing O(N^2) in the expression length (which is
+    // catastrophic for very large expressions). std::u32string gives O(1)
+    // random access and size, while keeping the same character indices (and so
+    // the same node locations) as gd::String.
+    expressionUtf32 = expression.ToUTF32();
 
     currentPosition = 0;
-    return Start(type, objectName);
+    return Start();
   }
 
   /**
@@ -87,18 +89,16 @@ class GD_CORE_API ExpressionParser2 {
    * Each method is a part of the grammar.
    */
   ///@{
-  std::unique_ptr<ExpressionNode> Start(const gd::String &type,
-                                        const gd::String &objectName = "") {
+  std::unique_ptr<ExpressionNode> Start() {
     size_t expressionStartPosition = GetCurrentPosition();
-    auto expression = Expression(type, objectName);
-
-    const gd::String &inferredType = expression->type;
+    auto expression = Expression();
 
     // Check for extra characters at the end of the expression
     if (!IsEndReached()) {
-      auto op = gd::make_unique<OperatorNode>(inferredType, ' ');
+      auto op = gd::make_unique<OperatorNode>(' ');
       op->leftHandSide = std::move(expression);
-      op->rightHandSide = ReadUntilEnd("unknown");
+      op->rightHandSide = ReadUntilEnd();
+      op->rightHandSide->parent = op.get();
 
       op->rightHandSide->diagnostic = RaiseSyntaxError(
           _("The expression has extra character at the end that should be "
@@ -112,61 +112,49 @@ class GD_CORE_API ExpressionParser2 {
     return expression;
   }
 
-  std::unique_ptr<ExpressionNode> Expression(
-      const gd::String &type, const gd::String &objectName = "") {
+  std::unique_ptr<ExpressionNode> Expression() {
     SkipAllWhitespaces();
 
     size_t expressionStartPosition = GetCurrentPosition();
-    std::unique_ptr<ExpressionNode> leftHandSide = Term(type, objectName);
-
-    const gd::String &inferredType = leftHandSide->type;
+    std::unique_ptr<ExpressionNode> leftHandSide = Term();
 
     SkipAllWhitespaces();
 
     if (IsEndReached()) return leftHandSide;
     if (CheckIfChar(IsExpressionEndingChar)) return leftHandSide;
     if (CheckIfChar(IsExpressionOperator)) {
-      auto op = gd::make_unique<OperatorNode>(inferredType, GetCurrentChar());
+      auto op = gd::make_unique<OperatorNode>(GetCurrentChar());
       op->leftHandSide = std::move(leftHandSide);
-      op->diagnostic = ValidateOperator(inferredType, GetCurrentChar());
+      op->leftHandSide->parent = op.get();
+      op->diagnostic = ValidateOperator(GetCurrentChar());
       SkipChar();
-      op->rightHandSide = Expression(inferredType, objectName);
+      op->rightHandSide = Expression();
+      op->rightHandSide->parent = op.get();
 
       op->location = ExpressionParserLocation(expressionStartPosition,
                                               GetCurrentPosition());
       return std::move(op);
     }
 
-    if (inferredType == "string") {
-      leftHandSide->diagnostic = RaiseSyntaxError(
-          "You must add the operator + between texts or expressions. For "
-          "example: \"Your name: \" + VariableString(PlayerName).");
-    } else if (inferredType == "number") {
-      leftHandSide->diagnostic = RaiseSyntaxError(
-          "No operator found. Did you forget to enter an operator (like +, -, "
-          "* or /) between numbers or expressions?");
-    } else {
-      leftHandSide->diagnostic = RaiseSyntaxError(
-          "More than one term was found. Verify that your expression is "
-          "properly written.");
-    }
+    leftHandSide->diagnostic = RaiseSyntaxError(
+        "More than one term was found. Verify that your expression is "
+        "properly written.");
 
-    auto op = gd::make_unique<OperatorNode>(inferredType, ' ');
+    auto op = gd::make_unique<OperatorNode>(' ');
     op->leftHandSide = std::move(leftHandSide);
-    op->rightHandSide = Expression(inferredType, objectName);
+    op->leftHandSide->parent = op.get();
+    op->rightHandSide = Expression();
+    op->rightHandSide->parent = op.get();
     op->location =
         ExpressionParserLocation(expressionStartPosition, GetCurrentPosition());
     return std::move(op);
   }
 
-  std::unique_ptr<ExpressionNode> Term(const gd::String &type,
-                                       const gd::String &objectName) {
+  std::unique_ptr<ExpressionNode> Term() {
     SkipAllWhitespaces();
 
     size_t expressionStartPosition = GetCurrentPosition();
-    std::unique_ptr<ExpressionNode> factor = Factor(type, objectName);
-
-    const gd::String &inferredType = factor->type;
+    std::unique_ptr<ExpressionNode> factor = Factor();
 
     SkipAllWhitespaces();
 
@@ -174,11 +162,13 @@ class GD_CORE_API ExpressionParser2 {
     // to guarantee the proper operator precedence. (Expression could also
     // be reworked to use a while loop).
     while (CheckIfChar(IsTermOperator)) {
-      auto op = gd::make_unique<OperatorNode>(inferredType, GetCurrentChar());
+      auto op = gd::make_unique<OperatorNode>(GetCurrentChar());
       op->leftHandSide = std::move(factor);
-      op->diagnostic = ValidateOperator(inferredType, GetCurrentChar());
+      op->leftHandSide->parent = op.get();
+      op->diagnostic = ValidateOperator(GetCurrentChar());
       SkipChar();
-      op->rightHandSide = Factor(inferredType, objectName);
+      op->rightHandSide = Factor();
+      op->rightHandSide->parent = op.get();
       op->location = ExpressionParserLocation(expressionStartPosition,
                                               GetCurrentPosition());
       SkipAllWhitespaces();
@@ -189,54 +179,47 @@ class GD_CORE_API ExpressionParser2 {
     return factor;
   };
 
-  std::unique_ptr<ExpressionNode> Factor(const gd::String &type,
-                                         const gd::String &objectName) {
+  std::unique_ptr<ExpressionNode> Factor() {
     SkipAllWhitespaces();
     size_t expressionStartPosition = GetCurrentPosition();
 
     if (CheckIfChar(IsQuote)) {
       std::unique_ptr<ExpressionNode> factor = ReadText();
-      if (type == "number")
-        factor->diagnostic =
-            RaiseTypeError(_("You entered a text, but a number was expected."),
-                           expressionStartPosition);
-      else if (type != "string" && type != "number|string")
-        factor->diagnostic = RaiseTypeError(
-            _("You entered a text, but this type was expected:") + type,
-            expressionStartPosition);
-
       return factor;
     } else if (CheckIfChar(IsUnaryOperator)) {
       auto unaryOperatorCharacter = GetCurrentChar();
-      SkipChar();
 
-      auto operatorOperand = Factor(type, objectName);
-      const gd::String &inferredType = operatorOperand->type;
+      bool isNumberSign = CheckIfChar(IsNumberSign);
+      SkipChar();
+      if (isNumberSign && CheckIfChar(IsNumberFirstChar)) {
+        std::unique_ptr<ExpressionNode> numberNode =
+            ReadNumber(expressionStartPosition);
+        return numberNode;
+      }
+      auto operatorOperand = Factor();
 
       auto unaryOperator = gd::make_unique<UnaryOperatorNode>(
-          inferredType, unaryOperatorCharacter);
+          unaryOperatorCharacter);
       unaryOperator->diagnostic = ValidateUnaryOperator(
-          inferredType, unaryOperatorCharacter, expressionStartPosition);
+          unaryOperatorCharacter, expressionStartPosition);
       unaryOperator->factor = std::move(operatorOperand);
+      unaryOperator->factor->parent = unaryOperator.get();
       unaryOperator->location = ExpressionParserLocation(
           expressionStartPosition, GetCurrentPosition());
 
       return std::move(unaryOperator);
     } else if (CheckIfChar(IsNumberFirstChar)) {
       std::unique_ptr<ExpressionNode> factor = ReadNumber();
-      if (type == "string")
-        factor->diagnostic = RaiseTypeError(
-            _("You entered a number, but a text was expected (in quotes)."),
-            expressionStartPosition);
-      else if (type != "number" && type != "number|string")
-        factor->diagnostic = RaiseTypeError(
-            _("You entered a number, but this type was expected:") + type,
-            expressionStartPosition);
-
       return factor;
     } else if (CheckIfChar(IsOpeningParenthesis)) {
+      size_t expressionStartPosition = GetCurrentPosition();
       SkipChar();
-      std::unique_ptr<ExpressionNode> factor = SubExpression(type, objectName);
+
+      // The expression inside the parentheses excluding them.
+      auto expression = Expression();
+
+      // The expression and its parentheses.
+      auto factor = gd::make_unique<SubExpressionNode>(std::move(expression));
 
       if (!CheckIfChar(IsClosingParenthesis)) {
         factor->diagnostic =
@@ -244,39 +227,20 @@ class GD_CORE_API ExpressionParser2 {
                                "parenthesis for each opening parenthesis."));
       }
       SkipIfChar(IsClosingParenthesis);
-      return factor;
-    } else if (IsIdentifierAllowedChar()) {
-      // This is a place where the grammar differs according to the
-      // type being expected.
-      if (gd::ParameterMetadata::IsExpression("variable", type)) {
-        return Variable(type, objectName);
-      } else {
-        return Identifier(type);
-      }
+      factor->location = ExpressionParserLocation(expressionStartPosition,
+                                                  GetCurrentPosition());
+
+      return std::move(factor);
+    } else if (CheckIfChar(IsAllowedInIdentifier)) {
+      return Identifier();
     }
 
-    std::unique_ptr<ExpressionNode> factor = ReadUntilWhitespace(type);
-    factor->diagnostic = RaiseEmptyError(type, expressionStartPosition);
+    std::unique_ptr<ExpressionNode> factor = ReadUntilWhitespace();
     return factor;
   }
 
-  std::unique_ptr<SubExpressionNode> SubExpression(
-      const gd::String &type, const gd::String &objectName) {
-    size_t expressionStartPosition = GetCurrentPosition();
-
-    auto expression = Expression(type, objectName);
-    const gd::String &inferredType = expression->type;
-
-    auto subExpression =
-        gd::make_unique<SubExpressionNode>(inferredType, std::move(expression));
-    subExpression->location =
-        ExpressionParserLocation(expressionStartPosition, GetCurrentPosition());
-
-    return std::move(subExpression);
-  };
-
   std::unique_ptr<IdentifierOrFunctionCallOrObjectFunctionNameOrEmptyNode>
-  Identifier(const gd::String &type) {
+  Identifier() {
     auto identifierAndLocation = ReadIdentifierName();
     gd::String name = identifierAndLocation.name;
     auto nameLocation = identifierAndLocation.location;
@@ -303,47 +267,30 @@ class GD_CORE_API ExpressionParser2 {
 
     if (CheckIfChar(IsOpeningParenthesis)) {
       ExpressionParserLocation openingParenthesisLocation = SkipChar();
-      return FreeFunction(type, name, nameLocation, openingParenthesisLocation);
+      return FreeFunction(name, nameLocation, openingParenthesisLocation);
     } else if (CheckIfChar(IsDot)) {
       ExpressionParserLocation dotLocation = SkipChar();
       SkipAllWhitespaces();
-      return ObjectFunctionOrBehaviorFunction(
-          type, name, nameLocation, dotLocation);
+      return ObjectFunctionOrBehaviorFunctionOrVariable(
+          name, nameLocation, dotLocation);
+    } else if (CheckIfChar(IsOpeningSquareBracket)) {
+      return Variable(name, nameLocation);
     } else {
-      auto identifier = gd::make_unique<IdentifierNode>(name, type);
-      if (type == "string") {
-        identifier->diagnostic =
-            RaiseTypeError(_("You must wrap your text inside double quotes "
-                             "(example: \"Hello world\")."),
-                           nameLocation.GetStartPosition());
-      } else if (type == "number") {
-        identifier->diagnostic = RaiseTypeError(
-            _("You must enter a number."), nameLocation.GetStartPosition());
-      } else if (type == "number|string") {
-        identifier->diagnostic = RaiseTypeError(
-            _("You must enter a number or a text, wrapped inside double quotes "
-              "(example: \"Hello world\")."),
-            nameLocation.GetStartPosition());
-      } else if (!gd::ParameterMetadata::IsObject(type)) {
-        identifier->diagnostic = RaiseTypeError(
-            _("You've entered a name, but this type was expected:") + type,
-            nameLocation.GetStartPosition());
-      }
-
+      auto identifier = gd::make_unique<IdentifierNode>(name);
       identifier->location = ExpressionParserLocation(
           nameLocation.GetStartPosition(), GetCurrentPosition());
+      identifier->identifierNameLocation = identifier->location;
       return std::move(identifier);
     }
   }
 
-  std::unique_ptr<VariableNode> Variable(const gd::String &type,
-                                         const gd::String &objectName) {
-    auto identifierAndLocation = ReadIdentifierName();
-    const gd::String &name = identifierAndLocation.name;
-    const auto &nameLocation = identifierAndLocation.location;
+  std::unique_ptr<VariableNode> Variable(const gd::String &name, gd::ExpressionParserLocation nameLocation) {
+    auto variable = gd::make_unique<VariableNode>(name);
 
-    auto variable = gd::make_unique<VariableNode>(type, name, objectName);
-    variable->child = VariableAccessorOrVariableBracketAccessor();
+    if (CheckIfChar(IsOpeningSquareBracket) || CheckIfChar(IsDot)) {
+      variable->child = VariableAccessorOrVariableBracketAccessor();
+      variable->child->parent = variable.get();
+    }
 
     variable->location = ExpressionParserLocation(
         nameLocation.GetStartPosition(), GetCurrentPosition());
@@ -358,16 +305,25 @@ class GD_CORE_API ExpressionParser2 {
     SkipAllWhitespaces();
     if (CheckIfChar(IsOpeningSquareBracket)) {
       SkipChar();
-      auto child = gd::make_unique<VariableBracketAccessorNode>(
-          Expression("number|string"));
+      
+      SkipAllWhitespaces();
+      bool isEmptyBrackets = CheckIfChar(IsClosingSquareBracket);
 
-      if (!CheckIfChar(IsClosingSquareBracket)) {
+      auto child = gd::make_unique<VariableBracketAccessorNode>(Expression());
+      child->expression->parent = child.get();
+
+      if (!CheckIfChar(IsClosingSquareBracket) && !isEmptyBrackets) {
         child->diagnostic =
             RaiseSyntaxError(_("Missing a closing bracket. Add a closing "
                                "bracket for each opening bracket."));
       }
       SkipIfChar(IsClosingSquareBracket);
-      child->child = VariableAccessorOrVariableBracketAccessor();
+
+      SkipAllWhitespaces();
+      if (CheckIfChar(IsOpeningSquareBracket) || CheckIfChar(IsDot)) {
+        child->child = VariableAccessorOrVariableBracketAccessor();
+        child->child->parent = child.get();
+      }
       child->location =
           ExpressionParserLocation(childStartPosition, GetCurrentPosition());
 
@@ -376,10 +332,18 @@ class GD_CORE_API ExpressionParser2 {
       auto dotLocation = SkipChar();
       SkipAllWhitespaces();
 
-      auto identifierAndLocation = ReadIdentifierName();
+      auto identifierAndLocation = ReadIdentifierName(/*allowDeprecatedSpacesInName=*/ false);
       auto child =
           gd::make_unique<VariableAccessorNode>(identifierAndLocation.name);
-      child->child = VariableAccessorOrVariableBracketAccessor();
+      if (identifierAndLocation.name.empty()) {
+        child->diagnostic = RaiseSyntaxError(_("A name should be entered after the dot."));
+      }
+
+      SkipAllWhitespaces();
+      if (CheckIfChar(IsOpeningSquareBracket) || CheckIfChar(IsDot)) {
+        child->child = VariableAccessorOrVariableBracketAccessor();
+        child->child->parent = child.get();
+      }
       child->nameLocation = identifierAndLocation.location;
       child->dotLocation = dotLocation;
       child->location =
@@ -388,40 +352,25 @@ class GD_CORE_API ExpressionParser2 {
       return std::move(child);
     }
 
-    return std::move(
-        std::unique_ptr<VariableAccessorOrVariableBracketAccessorNode>());
+    // Should never happen, unless a node called this function without checking if the current character
+    // was a dot or an opening bracket - this means there is an error in the grammar.
+    auto unrecognisedNode = gd::make_unique<VariableAccessorOrVariableBracketAccessorNode>();
+    unrecognisedNode->diagnostic = RaiseSyntaxError(_("A dot or bracket was expected here."));
+    return std::move(unrecognisedNode);
   }
 
   std::unique_ptr<FunctionCallNode> FreeFunction(
-      const gd::String &type,
       const gd::String &functionFullName,
       const ExpressionParserLocation &identifierLocation,
       const ExpressionParserLocation &openingParenthesisLocation) {
     // TODO: error if trying to use function for type != "number" && != "string"
     // + Test for it
 
-    const gd::ExpressionMetadata &metadata =
-        MetadataProvider::GetAnyExpressionMetadata(platform, functionFullName);
-
-    // In case we can't find a valid expression, ensure the node has the type
-    // that is requested by the parent, so we avoid putting "unknown" (which
-    // would be also correct, but less precise and would prevent completions to
-    // be shown to the user)
-    const gd::String returnType =
-        gd::MetadataProvider::IsBadExpressionMetadata(metadata) == true
-            ? type
-            : metadata.GetReturnType();
-
-    auto parametersNode = Parameters(metadata.parameters);
     auto function =
-        gd::make_unique<FunctionCallNode>(returnType,
-                                          std::move(parametersNode.parameters),
-                                          metadata,
-                                          functionFullName);
+        gd::make_unique<FunctionCallNode>(functionFullName);
+    auto parametersNode = Parameters(function.get());
+    function->parameters = std::move(parametersNode.parameters);
     function->diagnostic = std::move(parametersNode.diagnostic);
-    if (!function->diagnostic)  // TODO: reverse the order of diagnostic?
-      function->diagnostic = ValidateFunction(
-          type, *function, identifierLocation.GetStartPosition());
 
     function->location = ExpressionParserLocation(
         identifierLocation.GetStartPosition(), GetCurrentPosition());
@@ -433,16 +382,18 @@ class GD_CORE_API ExpressionParser2 {
     return std::move(function);
   }
 
-  std::unique_ptr<FunctionCallOrObjectFunctionNameOrEmptyNode>
-  ObjectFunctionOrBehaviorFunction(
-      const gd::String &type,
-      const gd::String &objectName,
-      const ExpressionParserLocation &objectNameLocation,
-      const ExpressionParserLocation &objectNameDotLocation) {
-    auto identifierAndLocation = ReadIdentifierName();
-    const gd::String &objectFunctionOrBehaviorName = identifierAndLocation.name;
-    const auto &objectFunctionOrBehaviorNameLocation =
-        identifierAndLocation.location;
+  std::unique_ptr<IdentifierOrFunctionCallOrObjectFunctionNameOrEmptyNode>
+  ObjectFunctionOrBehaviorFunctionOrVariable(
+      const gd::String &parentIdentifier,
+      const ExpressionParserLocation &parentIdentifierLocation,
+      const ExpressionParserLocation &parentIdentifierDotLocation) {
+    auto childIdentifierAndLocation = ReadIdentifierName(/*allowDeprecatedSpacesInName=*/ false);
+    const gd::String &childIdentifierName = childIdentifierAndLocation.name;
+    const auto &childIdentifierNameLocation =
+        childIdentifierAndLocation.location;
+
+    std::unique_ptr<gd::ExpressionParserError> emptyNameError = childIdentifierName.empty() ?
+      RaiseSyntaxError(_("A name should be entered after the dot.")) : nullptr;
 
     SkipAllWhitespaces();
 
@@ -450,72 +401,68 @@ class GD_CORE_API ExpressionParser2 {
       ExpressionParserLocation namespaceSeparatorLocation =
           SkipNamespaceSeparator();
       SkipAllWhitespaces();
-      return BehaviorFunction(type,
-                              objectName,
-                              objectFunctionOrBehaviorName,
-                              objectNameLocation,
-                              objectNameDotLocation,
-                              objectFunctionOrBehaviorNameLocation,
+      auto behaviorFunction = BehaviorFunction(parentIdentifier,
+                              childIdentifierName,
+                              parentIdentifierLocation,
+                              parentIdentifierDotLocation,
+                              childIdentifierNameLocation,
                               namespaceSeparatorLocation);
+
+      if (emptyNameError) behaviorFunction->diagnostic = std::move(emptyNameError);
+      return std::move(behaviorFunction);
     } else if (CheckIfChar(IsOpeningParenthesis)) {
       ExpressionParserLocation openingParenthesisLocation = SkipChar();
 
-      gd::String objectType =
-          GetTypeOfObject(globalObjectsContainer, objectsContainer, objectName);
-
-      const gd::ExpressionMetadata &metadata =
-          MetadataProvider::GetObjectAnyExpressionMetadata(
-              platform, objectType, objectFunctionOrBehaviorName);
-
-      // In case we can't find a valid expression, ensure the node has the type
-      // that is requested by the parent, so we avoid putting "unknown" (which
-      // would be also correct, but less precise and would prevent completions
-      // to be shown to the user)
-      const gd::String returnType =
-          gd::MetadataProvider::IsBadExpressionMetadata(metadata) == true
-              ? type
-              : metadata.GetReturnType();
-
-      auto parametersNode = Parameters(metadata.parameters, objectName);
       auto function = gd::make_unique<FunctionCallNode>(
-          returnType,
-          objectName,
-          std::move(parametersNode.parameters),
-          metadata,
-          objectFunctionOrBehaviorName);
-      function->diagnostic = std::move(parametersNode.diagnostic);
-      if (!function->diagnostic)  // TODO: reverse the order of diagnostic?
-        function->diagnostic = ValidateFunction(
-            type, *function, objectNameLocation.GetStartPosition());
+          parentIdentifier,
+          childIdentifierName);
+      auto parametersNode = Parameters(function.get(), parentIdentifier);
+      function->parameters = std::move(parametersNode.parameters),
+      function->diagnostic = emptyNameError ? std::move(emptyNameError) : std::move(parametersNode.diagnostic);
 
       function->location = ExpressionParserLocation(
-          objectNameLocation.GetStartPosition(), GetCurrentPosition());
-      function->objectNameLocation = objectNameLocation;
-      function->objectNameDotLocation = objectNameDotLocation;
-      function->functionNameLocation = objectFunctionOrBehaviorNameLocation;
+          parentIdentifierLocation.GetStartPosition(), GetCurrentPosition());
+      function->objectNameLocation = parentIdentifierLocation;
+      function->objectNameDotLocation = parentIdentifierDotLocation;
+      function->functionNameLocation = childIdentifierNameLocation;
       function->openingParenthesisLocation = openingParenthesisLocation;
       function->closingParenthesisLocation =
           parametersNode.closingParenthesisLocation;
       return std::move(function);
+    } else if (CheckIfChar(IsDot) || CheckIfChar(IsOpeningSquareBracket)) {
+      auto variable = gd::make_unique<VariableNode>(parentIdentifier);
+      variable->diagnostic = std::move(emptyNameError);
+
+      auto child =
+          gd::make_unique<VariableAccessorNode>(childIdentifierName);
+      child->child = VariableAccessorOrVariableBracketAccessor();
+      child->child->parent = child.get();
+      child->nameLocation = childIdentifierNameLocation;
+      child->dotLocation = parentIdentifierDotLocation;
+      child->location = ExpressionParserLocation(
+          parentIdentifierDotLocation.GetStartPosition(), GetCurrentPosition());
+      variable->child = std::move(child);
+      variable->child->parent = variable.get();
+
+      variable->location = ExpressionParserLocation(
+          parentIdentifierLocation.GetStartPosition(), GetCurrentPosition());
+      variable->nameLocation = parentIdentifierLocation;
+
+      return std::move(variable);
     }
 
-    auto node = gd::make_unique<ObjectFunctionNameNode>(
-        type, objectName, objectFunctionOrBehaviorName);
-    node->diagnostic = RaiseSyntaxError(
-        _("An opening parenthesis (for an object expression), or double colon "
-          "(::) was expected (for a behavior expression)."));
-
+    auto node = gd::make_unique<IdentifierNode>(
+        parentIdentifier, childIdentifierName);
     node->location = ExpressionParserLocation(
-        objectNameLocation.GetStartPosition(), GetCurrentPosition());
-    node->objectNameLocation = objectNameLocation;
-    node->objectNameDotLocation = objectNameDotLocation;
-    node->objectFunctionOrBehaviorNameLocation =
-        objectFunctionOrBehaviorNameLocation;
+        parentIdentifierLocation.GetStartPosition(), GetCurrentPosition());
+    node->identifierNameLocation = parentIdentifierLocation;
+    node->identifierNameDotLocation = parentIdentifierDotLocation;
+    node->childIdentifierNameLocation = childIdentifierNameLocation;
+    node->diagnostic = std::move(emptyNameError);
     return std::move(node);
   }
 
   std::unique_ptr<FunctionCallOrObjectFunctionNameOrEmptyNode> BehaviorFunction(
-      const gd::String &type,
       const gd::String &objectName,
       const gd::String &behaviorName,
       const ExpressionParserLocation &objectNameLocation,
@@ -531,35 +478,14 @@ class GD_CORE_API ExpressionParser2 {
     if (CheckIfChar(IsOpeningParenthesis)) {
       ExpressionParserLocation openingParenthesisLocation = SkipChar();
 
-      gd::String behaviorType = GetTypeOfBehavior(
-          globalObjectsContainer, objectsContainer, behaviorName);
-
-      const gd::ExpressionMetadata &metadata =
-          MetadataProvider::GetBehaviorAnyExpressionMetadata(
-              platform, behaviorType, functionName);
-
-      // In case we can't find a valid expression, ensure the node has the type
-      // that is requested by the parent, so we avoid putting "unknown" (which
-      // would be also correct, but less precise and would prevent completions
-      // to be shown to the user)
-      const gd::String returnType =
-          gd::MetadataProvider::IsBadExpressionMetadata(metadata) == true
-              ? type
-              : metadata.GetReturnType();
-
-      auto parametersNode =
-          Parameters(metadata.parameters, objectName, behaviorName);
       auto function = gd::make_unique<FunctionCallNode>(
-          returnType,
           objectName,
           behaviorName,
-          std::move(parametersNode.parameters),
-          metadata,
           functionName);
+      auto parametersNode =
+          Parameters(function.get(), objectName, behaviorName);
+      function->parameters = std::move(parametersNode.parameters);
       function->diagnostic = std::move(parametersNode.diagnostic);
-      if (!function->diagnostic)  // TODO: reverse the order of diagnostic?
-        function->diagnostic = ValidateFunction(
-            type, *function, objectNameLocation.GetStartPosition());
 
       function->location = ExpressionParserLocation(
           objectNameLocation.GetStartPosition(), GetCurrentPosition());
@@ -575,7 +501,7 @@ class GD_CORE_API ExpressionParser2 {
       return std::move(function);
     } else {
       auto node = gd::make_unique<ObjectFunctionNameNode>(
-          type, objectName, behaviorName, functionName);
+          objectName, behaviorName, functionName);
       node->diagnostic = RaiseSyntaxError(
           _("An opening parenthesis was expected here to call a function."));
 
@@ -599,88 +525,30 @@ class GD_CORE_API ExpressionParser2 {
   };
 
   ParametersNode Parameters(
-      std::vector<gd::ParameterMetadata> parameterMetadata,
+      FunctionCallNode *functionCallNode,
       const gd::String &objectName = "",
       const gd::String &behaviorName = "") {
     std::vector<std::unique_ptr<ExpressionNode>> parameters;
     gd::String lastObjectName = "";
 
-    // By convention, object is always the first parameter, and behavior the
-    // second one.
-    size_t parameterIndex =
-        WrittenParametersFirstIndex(objectName, behaviorName);
-
+    bool previousCharacterIsParameterSeparator = false;
     while (!IsEndReached()) {
       SkipAllWhitespaces();
 
-      if (CheckIfChar(IsClosingParenthesis)) {
+      if (CheckIfChar(IsClosingParenthesis) && !previousCharacterIsParameterSeparator) {
         auto closingParenthesisLocation = SkipChar();
         return ParametersNode{
             std::move(parameters), nullptr, closingParenthesisLocation};
-      } else {
-        if (parameterIndex < parameterMetadata.size()) {
-          const gd::String &type = parameterMetadata[parameterIndex].GetType();
-          if (parameterMetadata[parameterIndex].IsCodeOnly()) {
-            // Do nothing, code only parameters are not written in expressions.
-          } else if (gd::ParameterMetadata::IsExpression("number", type)) {
-            parameters.push_back(Expression("number"));
-          } else if (gd::ParameterMetadata::IsExpression("string", type)) {
-            parameters.push_back(Expression("string"));
-          } else if (gd::ParameterMetadata::IsExpression("variable", type)) {
-            parameters.push_back(Expression(
-                type, lastObjectName.empty() ? objectName : lastObjectName));
-          } else if (gd::ParameterMetadata::IsObject(type)) {
-            size_t parameterStartPosition = GetCurrentPosition();
-            std::unique_ptr<ExpressionNode> objectExpression = Expression(type);
-
-            // Memorize the last object name. By convention, parameters that
-            // require an object (mainly, "objectvar" and "behavior") should be
-            // placed after the object in the list of parameters (if possible,
-            // just after). Search "lastObjectName" in the codebase for other
-            // place where this convention is enforced.
-            if (auto identifierNode =
-                    dynamic_cast<IdentifierNode *>(objectExpression.get())) {
-              lastObjectName = identifierNode->identifierName;
-            } else {
-              objectExpression->diagnostic =
-                  gd::make_unique<ExpressionParserError>(
-                      "malformed_object_parameter",
-                      _("An object name was expected but something else was "
-                        "written. Enter just the name of the object for this "
-                        "parameter."),
-                      parameterStartPosition,
-                      GetCurrentPosition());
-            }
-
-            parameters.push_back(std::move(objectExpression));
-          } else {
-            size_t parameterStartPosition = GetCurrentPosition();
-            parameters.push_back(Expression("unknown"));
-            parameters.back()->diagnostic =
-                gd::make_unique<ExpressionParserError>(
-                    "unknown_parameter_type",
-                    _("This function is improperly set up. Reach out to the "
-                      "extension developer or a GDevelop maintainer to fix "
-                      "this issue"),
-                    parameterStartPosition,
-                    GetCurrentPosition());
-          }
-        } else {
-          size_t parameterStartPosition = GetCurrentPosition();
-          parameters.push_back(Expression("unknown"));
-          parameters.back()
-              ->diagnostic = gd::make_unique<ExpressionParserError>(
-              "extra_parameter",
-              _("This parameter was not expected by this expression. Remove it "
-                "or verify that you've entered the proper expression name."),
-              parameterStartPosition,
-              GetCurrentPosition());
-        }
-
-        SkipAllWhitespaces();
-        SkipIfChar(IsParameterSeparator);
-        parameterIndex++;
       }
+      bool isEmptyParameter = CheckIfChar(IsParameterSeparator)
+          || (CheckIfChar(IsClosingParenthesis) && previousCharacterIsParameterSeparator);
+      auto parameter = isEmptyParameter ? gd::make_unique<EmptyNode>() : Expression();
+      parameter->parent = functionCallNode;
+      parameters.push_back(std::move(parameter));
+
+      SkipAllWhitespaces();
+      previousCharacterIsParameterSeparator = CheckIfChar(IsParameterSeparator);
+      SkipIfChar(IsParameterSeparator);
     }
 
     ExpressionParserLocation invalidClosingParenthesisLocation;
@@ -692,92 +560,32 @@ class GD_CORE_API ExpressionParser2 {
   }
   ///@}
 
-  /** \name Validators
-   * Return a diagnostic if any error is found
-   */
-  ///@{
-  std::unique_ptr<ExpressionParserDiagnostic> ValidateFunction(
-      const gd::String &type,
-      const gd::FunctionCallNode &function,
-      size_t functionStartPosition);
-
-  std::unique_ptr<ExpressionParserDiagnostic> ValidateOperator(
-      const gd::String &type, gd::String::value_type operatorChar) {
-    if (type == "number") {
-      if (operatorChar == '+' || operatorChar == '-' || operatorChar == '/' ||
-          operatorChar == '*') {
-        return gd::make_unique<ExpressionParserDiagnostic>();
-      }
-
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("You've used an operator that is not supported. Operator should be "
-            "either +, -, / or *."),
-          GetCurrentPosition());
-    } else if (type == "string") {
-      if (operatorChar == '+') {
-        return gd::make_unique<ExpressionParserDiagnostic>();
-      }
-
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("You've used an operator that is not supported. Only + can be used "
-            "to concatenate texts."),
-          GetCurrentPosition());
-    } else if (gd::ParameterMetadata::IsObject(type)) {
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("Operators (+, -, /, *) can't be used with an object name. Remove "
-            "the operator."),
-          GetCurrentPosition());
-    } else if (gd::ParameterMetadata::IsExpression("variable", type)) {
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("Operators (+, -, /, *) can't be used in variable names. Remove "
-            "the operator from the variable name."),
-          GetCurrentPosition());
+  std::unique_ptr<ExpressionParserError> ValidateOperator(
+      gd::String::value_type operatorChar) {
+    if (operatorChar == '+' || operatorChar == '-' || operatorChar == '/' ||
+        operatorChar == '*') {
+      return std::unique_ptr<ExpressionParserError>(nullptr);
     }
-
-    return gd::make_unique<ExpressionParserDiagnostic>();
+    return gd::make_unique<ExpressionParserError>(
+        gd::ExpressionParserError::ErrorType::InvalidOperator,
+        _("You've used an operator that is not supported. Operator should be "
+          "either +, -, / or *."),
+        GetCurrentPosition());
   }
 
-  std::unique_ptr<ExpressionParserDiagnostic> ValidateUnaryOperator(
-      const gd::String &type,
+  std::unique_ptr<ExpressionParserError> ValidateUnaryOperator(
       gd::String::value_type operatorChar,
       size_t position) {
-    if (type == "number") {
-      if (operatorChar == '+' || operatorChar == '-') {
-        return gd::make_unique<ExpressionParserDiagnostic>();
-      }
-
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("You've used an \"unary\" operator that is not supported. Operator "
-            "should be "
-            "either + or -."),
-          position);
-    } else if (type == "string") {
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("You've used an operator that is not supported. Only + can be used "
-            "to concatenate texts, and must be placed between two texts (or "
-            "expressions)."),
-          position);
-    } else if (gd::ParameterMetadata::IsObject(type)) {
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("Operators (+, -) can't be used with an object name. Remove the "
-            "operator."),
-          position);
-    } else if (gd::ParameterMetadata::IsExpression("variable", type)) {
-      return gd::make_unique<ExpressionParserError>(
-          "invalid_operator",
-          _("Operators (+, -) can't be used in variable names. Remove "
-            "the operator from the variable name."),
-          position);
+    if (operatorChar == '+' || operatorChar == '-') {
+      return std::unique_ptr<ExpressionParserError>(nullptr);
     }
 
-    return gd::make_unique<ExpressionParserDiagnostic>();
+    return gd::make_unique<ExpressionParserError>(
+        gd::ExpressionParserError::ErrorType::InvalidOperator,
+        _("You've used an \"unary\" operator that is not supported. Operator "
+          "should be "
+          "either + or -."),
+        position);
   }
   ///@}
 
@@ -791,8 +599,8 @@ class GD_CORE_API ExpressionParser2 {
   }
 
   void SkipAllWhitespaces() {
-    while (currentPosition < expression.size() &&
-           IsWhitespace(expression[currentPosition])) {
+    while (currentPosition < expressionUtf32.size() &&
+           IsWhitespace(expressionUtf32[currentPosition])) {
       currentPosition++;
     }
   }
@@ -817,110 +625,22 @@ class GD_CORE_API ExpressionParser2 {
 
   bool CheckIfChar(
       const std::function<bool(gd::String::value_type)> &predicate) {
-    if (currentPosition >= expression.size()) return false;
-    gd::String::value_type character = expression[currentPosition];
+    if (currentPosition >= expressionUtf32.size()) return false;
+    gd::String::value_type character = expressionUtf32[currentPosition];
 
     return predicate(character);
   }
 
-  bool IsIdentifierAllowedChar() {
-    if (currentPosition >= expression.size()) return false;
-    gd::String::value_type character = expression[currentPosition];
-
-    // Quickly compare if the character is a number or ASCII character.
-    if ((character >= '0' && character <= '9') ||
-        (character >= 'A' && character <= 'Z') ||
-        (character >= 'a' && character <= 'z'))
-      return true;
-
-    // Otherwise do the full check against separators forbidden in identifiers.
-    if (!IsParameterSeparator(character) && !IsDot(character) &&
-        !IsQuote(character) && !IsBracket(character) &&
-        !IsExpressionOperator(character) && !IsTermOperator(character)) {
-      return true;
-    }
-
-    return false;
-  }
-
-  static bool IsWhitespace(gd::String::value_type character) {
-    return character == ' ' || character == '\n' || character == '\r';
-  }
-
-  static bool IsParameterSeparator(gd::String::value_type character) {
-    return character == ',';
-  }
-
-  static bool IsDot(gd::String::value_type character) {
-    return character == '.';
-  }
-
-  static bool IsQuote(gd::String::value_type character) {
-    return character == '"';
-  }
-
-  static bool IsBracket(gd::String::value_type character) {
-    return character == '(' || character == ')' || character == '[' ||
-           character == ']' || character == '{' || character == '}';
-  }
-
-  static bool IsOpeningParenthesis(gd::String::value_type character) {
-    return character == '(';
-  }
-
-  static bool IsClosingParenthesis(gd::String::value_type character) {
-    return character == ')';
-  }
-
-  static bool IsOpeningSquareBracket(gd::String::value_type character) {
-    return character == '[';
-  }
-
-  static bool IsClosingSquareBracket(gd::String::value_type character) {
-    return character == ']';
-  }
-
-  static bool IsExpressionEndingChar(gd::String::value_type character) {
-    return character == ',' || IsClosingParenthesis(character) ||
-           IsClosingSquareBracket(character);
-  }
-
-  static bool IsExpressionOperator(gd::String::value_type character) {
-    return character == '+' || character == '-' || character == '<' ||
-           character == '>' || character == '?' || character == '^' ||
-           character == '=' || character == '\\' || character == ':' ||
-           character == '!';
-  }
-
-  static bool IsUnaryOperator(gd::String::value_type character) {
-    return character == '+' || character == '-';
-  }
-
-  static bool IsTermOperator(gd::String::value_type character) {
-    return character == '/' || character == '*';
-  }
-
-  static bool IsNumberFirstChar(gd::String::value_type character) {
-    return character == '.' || (character >= '0' && character <= '9');
-  }
-
-  static bool IsNonZeroDigit(gd::String::value_type character) {
-    return (character >= '1' && character <= '9');
-  }
-
-  static bool IsZeroDigit(gd::String::value_type character) {
-    return character == '0';
-  }
-
   bool IsNamespaceSeparator() {
     // Namespace separator is a special kind of delimiter as it is 2 characters
-    // long
-    return (currentPosition + NAMESPACE_SEPARATOR.size() <= expression.size() &&
-            expression.substr(currentPosition, NAMESPACE_SEPARATOR.size()) ==
-                NAMESPACE_SEPARATOR);
+    // long. Computed once as the separator is a compile-time constant ("::").
+    static const std::u32string separator = NAMESPACE_SEPARATOR.ToUTF32();
+    return (currentPosition + separator.size() <= expressionUtf32.size() &&
+            expressionUtf32.compare(
+                currentPosition, separator.size(), separator) == 0);
   }
 
-  bool IsEndReached() { return currentPosition >= expression.size(); }
+  bool IsEndReached() { return currentPosition >= expressionUtf32.size(); }
 
   // A temporary node used when reading an identifier
   struct IdentifierAndLocation {
@@ -928,14 +648,14 @@ class GD_CORE_API ExpressionParser2 {
     ExpressionParserLocation location;
   };
 
-  IdentifierAndLocation ReadIdentifierName() {
+  IdentifierAndLocation ReadIdentifierName(bool allowDeprecatedSpacesInName = true) {
     gd::String name;
     size_t startPosition = currentPosition;
-    while (currentPosition < expression.size() &&
-           (IsIdentifierAllowedChar()
+    while (currentPosition < expressionUtf32.size() &&
+           (CheckIfChar(IsAllowedInIdentifier)
             // Allow whitespace in identifier name for compatibility
-            || expression[currentPosition] == ' ')) {
-      name += expression[currentPosition];
+            || (allowDeprecatedSpacesInName && expressionUtf32[currentPosition] == ' '))) {
+      name += expressionUtf32[currentPosition];
       currentPosition++;
     }
 
@@ -963,32 +683,32 @@ class GD_CORE_API ExpressionParser2 {
 
   std::unique_ptr<TextNode> ReadText();
 
-  std::unique_ptr<NumberNode> ReadNumber();
+  std::unique_ptr<NumberNode> ReadNumber(size_t minusSignPosition = -1);
 
-  std::unique_ptr<EmptyNode> ReadUntilWhitespace(gd::String type) {
+  std::unique_ptr<EmptyNode> ReadUntilWhitespace() {
     size_t startPosition = GetCurrentPosition();
     gd::String text;
-    while (currentPosition < expression.size() &&
-           !IsWhitespace(expression[currentPosition])) {
-      text += expression[currentPosition];
+    while (currentPosition < expressionUtf32.size() &&
+           !IsWhitespace(expressionUtf32[currentPosition])) {
+      text += expressionUtf32[currentPosition];
       currentPosition++;
     }
 
-    auto node = gd::make_unique<EmptyNode>(type, text);
+    auto node = gd::make_unique<EmptyNode>(text);
     node->location =
         ExpressionParserLocation(startPosition, GetCurrentPosition());
     return node;
   }
 
-  std::unique_ptr<EmptyNode> ReadUntilEnd(gd::String type) {
+  std::unique_ptr<EmptyNode> ReadUntilEnd() {
     size_t startPosition = GetCurrentPosition();
     gd::String text;
-    while (currentPosition < expression.size()) {
-      text += expression[currentPosition];
+    while (currentPosition < expressionUtf32.size()) {
+      text += expressionUtf32[currentPosition];
       currentPosition++;
     }
 
-    auto node = gd::make_unique<EmptyNode>(type, text);
+    auto node = gd::make_unique<EmptyNode>(text);
     node->location =
         ExpressionParserLocation(startPosition, GetCurrentPosition());
     return node;
@@ -997,8 +717,8 @@ class GD_CORE_API ExpressionParser2 {
   size_t GetCurrentPosition() { return currentPosition; }
 
   gd::String::value_type GetCurrentChar() {
-    if (currentPosition < expression.size()) {
-      return expression[currentPosition];
+    if (currentPosition < expressionUtf32.size()) {
+      return expressionUtf32[currentPosition];
     }
 
     return '\n';  // Should not arise, unless GetCurrentChar was called when
@@ -1013,41 +733,23 @@ class GD_CORE_API ExpressionParser2 {
   std::unique_ptr<ExpressionParserError> RaiseSyntaxError(
       const gd::String &message) {
     return std::move(gd::make_unique<ExpressionParserError>(
-        "syntax_error", message, GetCurrentPosition()));
+        gd::ExpressionParserError::ErrorType::SyntaxError, message,
+        GetCurrentPosition()));
   }
 
   std::unique_ptr<ExpressionParserError> RaiseTypeError(
       const gd::String &message, size_t beginningPosition) {
     return std::move(gd::make_unique<ExpressionParserError>(
-        "type_error", message, beginningPosition, GetCurrentPosition()));
-  }
-
-  std::unique_ptr<ExpressionParserError> RaiseEmptyError(
-      const gd::String &type, size_t beginningPosition) {
-    gd::String message;
-    if (type == "number") {
-      message = _("You must enter a number or a valid expression call.");
-    } else if (type == "string") {
-      message = _(
-          "You must enter a text (between quotes) or a valid expression call.");
-    } else if (gd::ParameterMetadata::IsExpression("variable", type)) {
-      message = _("You must enter a variable name.");
-    } else if (gd::ParameterMetadata::IsObject(type)) {
-      message = _("You must enter a valid object name.");
-    } else {
-      message = _("You must enter a valid expression.");
-    }
-
-    return std::move(RaiseTypeError(message, beginningPosition));
+        gd::ExpressionParserError::ErrorType::MismatchedType, message,
+        beginningPosition, GetCurrentPosition()));
   }
   ///@}
 
-  gd::String expression;
+  // The expression being parsed, stored as UTF-32 (fixed-width) so that
+  // character access (operator[]) and size() are O(1). See ParseExpression for
+  // the rationale.
+  std::u32string expressionUtf32;
   std::size_t currentPosition;
-
-  const gd::Platform &platform;
-  const gd::ObjectsContainer &globalObjectsContainer;
-  const gd::ObjectsContainer &objectsContainer;
 
   static gd::String NAMESPACE_SEPARATOR;
 };

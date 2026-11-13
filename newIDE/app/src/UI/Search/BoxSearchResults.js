@@ -9,10 +9,19 @@ import EmptyMessage from '../EmptyMessage';
 
 type Props<SearchItem> = {|
   searchItems: ?Array<SearchItem>,
-  renderSearchItem: (item: SearchItem, size: number) => React.Node,
+  renderSearchItem: (
+    item: SearchItem,
+    size: number,
+    index: number
+  ) => React.Node,
+  spacing: number,
   error: ?Error,
   onRetry: () => void,
   baseSize: number,
+  // If true, the grid will take the whole height of the container without scroll,
+  // so make sure to limit the number of items to a reasonable number for performance.
+  noScroll?: boolean,
+  noResultPlaceholder?: React.Node,
 |};
 
 const styles = {
@@ -20,13 +29,60 @@ const styles = {
   grid: { overflowX: 'hidden' },
 };
 
-export const BoxSearchResults = <SearchItem>({
-  searchItems,
-  renderSearchItem,
-  error,
-  onRetry,
-  baseSize,
-}: Props<SearchItem>) => {
+export type BoxSearchResultsInterface = {|
+  getScrollPosition: () => number,
+  scrollToPosition: (y: number) => void,
+|};
+
+export const BoxSearchResults: React.ComponentType<{
+  ...Props<any>,
+  +ref?: React.RefSetter<BoxSearchResultsInterface>,
+}> = React.forwardRef<
+  // $FlowFixMe[incompatible-type] The generic type can't pass through.
+  // $FlowFixMe[cannot-resolve-name]
+  Props<SearchItem>,
+  BoxSearchResultsInterface
+>((
+  {
+    searchItems,
+    renderSearchItem,
+    spacing,
+    error,
+    onRetry,
+    baseSize,
+    noResultPlaceholder,
+    noScroll,
+  }: // $FlowFixMe[cannot-resolve-name]
+  Props<SearchItem>,
+  // $FlowFixMe[missing-local-annot]
+  ref
+) => {
+  // $FlowFixMe[value-as-type]
+  const grid = React.useRef<?Grid>(null);
+  React.useImperativeHandle(ref, () => ({
+    /**
+     * Return the scroll position.
+     */
+    getScrollPosition: () => {
+      const scrollViewElement = grid.current;
+      if (!scrollViewElement) return 0;
+
+      // TODO Find a clean way to get the scroll position.
+      // Using the internal state of a component is hacky.
+      // Grid probably doesn't expose the scroll position
+      // because it became irrelevant when the dimensions change.
+      // Though, it's easier to use it and the chance that the Grid is
+      // resized is low.
+      return scrollViewElement.state.scrollTop;
+    },
+    scrollToPosition: (y: number) => {
+      const scrollViewElement = grid.current;
+      if (!scrollViewElement) return;
+
+      scrollViewElement.scrollToPosition({ scrollLeft: 0, scrollTop: y });
+    },
+  }));
+
   if (!searchItems) {
     if (!error) return <PlaceholderLoader />;
     else {
@@ -41,29 +97,36 @@ export const BoxSearchResults = <SearchItem>({
     }
   } else if (searchItems.length === 0) {
     return (
-      <EmptyMessage>
-        <Trans>
-          No results returned for your search. Try something else, browse the
-          categories or create your object from scratch!
-        </Trans>
-      </EmptyMessage>
+      noResultPlaceholder || (
+        <EmptyMessage>
+          <Trans>
+            No results returned for your search. Try something else, browse the
+            categories or create your object from scratch!
+          </Trans>
+        </EmptyMessage>
+      )
     );
   }
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary
+      componentTitle={<Trans>Search results</Trans>}
+      scope="box-search-result"
+    >
       <div style={styles.container}>
         <AutoSizer>
           {({ width, height }) => {
-            if (!width || !height) return null;
-
             const columnCount = Math.max(Math.floor((width - 5) / baseSize), 1);
             const columnWidth = Math.max(Math.floor(width / columnCount), 30);
             const rowCount = Math.max(
               1,
               Math.ceil(searchItems.length / columnCount)
             );
+            const rowHeight = columnWidth; // Square items.
+            const gridHeight = noScroll ? rowHeight * rowCount : height;
+            const gridWidth = width;
 
+            // $FlowFixMe[missing-local-annot]
             function cellRenderer({ columnIndex, key, rowIndex, style }) {
               const indexInList = rowIndex * columnCount + columnIndex;
               const searchItem =
@@ -72,9 +135,22 @@ export const BoxSearchResults = <SearchItem>({
                   : null;
 
               return (
-                <div key={key} style={style}>
+                <div
+                  key={key}
+                  style={{
+                    ...style,
+                    left: style.left + spacing / 2,
+                    top: style.top + spacing / 2,
+                    width: style.width - spacing,
+                    height: style.height - spacing,
+                  }}
+                >
                   {searchItem
-                    ? renderSearchItem(searchItem, columnWidth)
+                    ? renderSearchItem(
+                        searchItem,
+                        columnWidth - spacing,
+                        indexInList
+                      )
                     : null}
                 </div>
               );
@@ -82,11 +158,12 @@ export const BoxSearchResults = <SearchItem>({
 
             return (
               <Grid
-                width={width}
-                height={height}
+                ref={grid}
+                width={gridWidth}
+                height={gridHeight}
                 columnCount={columnCount}
                 columnWidth={columnWidth}
-                rowHeight={columnWidth}
+                rowHeight={rowHeight}
                 rowCount={rowCount}
                 cellRenderer={cellRenderer}
                 style={styles.grid}
@@ -97,4 +174,4 @@ export const BoxSearchResults = <SearchItem>({
       </div>
     </ErrorBoundary>
   );
-};
+});

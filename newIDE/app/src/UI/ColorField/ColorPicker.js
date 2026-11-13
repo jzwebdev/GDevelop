@@ -6,6 +6,7 @@ import { SketchPicker } from 'react-color';
 import Popover from '@material-ui/core/Popover';
 import muiZIndex from '@material-ui/core/styles/zIndex';
 import { type RGBColor } from '../../Utils/ColorTransformer';
+import PortalContainerContext from '../PortalContainerContext';
 
 export type ColorResult = {
   rgb: RGBColor,
@@ -19,27 +20,29 @@ type Props = {|
   onChange?: ColorChangeHandler,
   onChangeComplete?: ColorChangeHandler,
   disableAlpha?: boolean,
-|};
-
-type State = {|
-  displayColorPicker: boolean,
+  disabled?: boolean,
+  size?: 'compact',
 |};
 
 const styles = {
   color: {
-    width: '36px',
-    height: '14px',
+    width: '100%',
+    height: '100%',
     borderRadius: '2px',
     textAlign: 'center',
     fontSize: '10px',
   },
   swatch: {
-    padding: '5px',
+    padding: '2px',
     background: '#fff',
-    borderRadius: '1px',
+    borderRadius: '4px',
     boxShadow: '0 0 0 1px rgba(0,0,0,.1)',
     display: 'inline-block',
     cursor: 'pointer',
+  },
+  disabled: {
+    opacity: 0.2,
+    cursor: 'default',
   },
   popover: {
     // Ensure the popover is above everything (modal, dialog, snackbar, tooltips, etc).
@@ -49,67 +52,81 @@ const styles = {
   },
 };
 
-class ColorPicker extends React.Component<Props, State> {
-  _swatch = React.createRef<HTMLDivElement>();
-  state = {
-    displayColorPicker: false,
+const ColorPicker = ({
+  color,
+  style,
+  onChange,
+  onChangeComplete,
+  disableAlpha,
+  disabled,
+  size,
+}: Props): React.Node => {
+  const swatchRef = React.useRef<?HTMLDivElement>(null);
+  const [displayColorPicker, setDisplayColorPicker] = React.useState(false);
+  const portalContainer = React.useContext(PortalContainerContext);
+
+  const handleClick = () => {
+    if (disabled) return;
+    setDisplayColorPicker(!displayColorPicker);
   };
 
-  open = () => {
-    this.setState({ displayColorPicker: true });
+  const handleClose = () => {
+    setDisplayColorPicker(false);
   };
 
-  handleClick = () => {
-    this.setState({ displayColorPicker: !this.state.displayColorPicker });
-  };
+  const displayedColor = color
+    ? color
+    : {
+        r: 200,
+        g: 200,
+        b: 200,
+        a: 1,
+      };
 
-  handleClose = () => {
-    this.setState({ displayColorPicker: false });
-  };
-
-  render() {
-    const { style, color, ...otherProps } = this.props;
-
-    const displayedColor = color
-      ? color
-      : {
-          r: 200,
-          g: 200,
-          b: 200,
-          a: 1,
-        };
-
-    return (
-      <div style={style}>
+  return (
+    <>
+      <div
+        style={{
+          ...styles.swatch,
+          ...(disabled ? styles.disabled : {}),
+          width: size === 'compact' ? 16 : 38,
+          height: size === 'compact' ? 16 : 18,
+          ...style,
+        }}
+        onClick={handleClick}
+        ref={swatchRef}
+      >
         <div
-          style={styles.swatch}
-          onClick={this.handleClick}
-          ref={this._swatch}
+          style={{
+            ...styles.color,
+            background: `rgba(${displayedColor.r}, ${displayedColor.g}, ${
+              displayedColor.b
+            }, ${displayedColor.a || 1})`,
+          }}
         >
-          <div
-            style={{
-              ...styles.color,
-              background: `rgba(${displayedColor.r}, ${displayedColor.g}, ${
-                displayedColor.b
-              }, ${displayedColor.a || 1})`,
-            }}
-          >
-            {color ? null : '?'}
-          </div>
+          {color ? null : '?'}
         </div>
-        {this.state.displayColorPicker && this._swatch.current ? (
-          <Popover
-            open
-            onClose={this.handleClose}
-            anchorEl={this._swatch.current}
-            style={styles.popover}
-          >
-            <SketchPicker color={displayedColor} {...otherProps} />
-          </Popover>
-        ) : null}
       </div>
-    );
-  }
-}
+      {displayColorPicker && swatchRef.current ? (
+        <Popover
+          open
+          onClose={handleClose}
+          anchorEl={swatchRef.current}
+          container={portalContainer}
+          style={styles.popover}
+        >
+          <SketchPicker
+            // $FlowFixMe[incompatible-type]
+            color={displayedColor}
+            // $FlowFixMe[incompatible-type]
+            onChange={onChange}
+            onChangeComplete={onChangeComplete}
+            disableAlpha={disableAlpha}
+          />
+        </Popover>
+      ) : null}
+    </>
+  );
+};
 
 export default ColorPicker;

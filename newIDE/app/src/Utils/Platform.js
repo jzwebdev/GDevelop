@@ -1,11 +1,11 @@
 // @flow
-import optionalRequire from './OptionalRequire.js';
-const electron = optionalRequire('electron');
+import optionalRequire from './OptionalRequire';
+const remote = optionalRequire('@electron/remote');
 const process = optionalRequire('process');
 
 let _isWindows = false;
-if (electron) {
-  _isWindows = electron.remote.require('electron-is').windows();
+if (remote) {
+  _isWindows = remote.process.platform === 'win32';
 }
 const _isMacLike =
   typeof navigator !== 'undefined' &&
@@ -42,6 +42,9 @@ export const getPlatformName = (): string => {
         'Unknown platform (web-app)';
 };
 
-export const isWindows = () => _isWindows;
-export const isMacLike = () => _isMacLike;
-export const isMobile = () => _isMobile;
+export const isWindows = (): boolean => _isWindows;
+export const isMacLike = (): boolean => _isMacLike;
+export const isMobile = (): boolean => _isMobile;
+export const isNativeMobileApp = (): boolean => false;
+export const isNativeIos = (): boolean => false;
+export const isNativeAndroid = (): boolean => false;

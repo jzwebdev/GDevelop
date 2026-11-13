@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const shell = require('shelljs');
 const workboxBuild = require('workbox-build');
-const buildPath = '../build';
+const buildPath = '../public';
 const VersionMetadata = require('../src/Version/VersionMetadata');
 
 /**
@@ -46,14 +46,17 @@ const buildSW = () => {
   return workboxBuild
     .injectManifest({
       swSrc: 'service-worker-template/service-worker-template.js',
-      swDest: '../build/service-worker.js',
+      swDest: '../public/service-worker.js',
       globDirectory: buildPath,
       globPatterns: [
         // Application:
-        '!(libGD)*.{js,css,html,png}', // Root files...
+        '!(libGD)*.{js,css,html,png}', // Root files.
         'static/css/*.css',
         'static/media/*',
-        'static/js/!(locales-|local-app)*.js',
+        'static/js/locales-*.js', // Locales.
+        'static/js/!local-app*.js', // Exclude electron app.
+        'static/js/Resource3DPreview.worker.*.js', // Include the 3D preview worker
+        'static/js/BackgroundSerializer.worker.*.js', // Include the serializer worker
         // ...But not libGD.js/wasm (there are cached with their URL
         // query string that depends on the VersionMetadata, see below).
 
@@ -66,6 +69,10 @@ const buildSW = () => {
         'external/zip.js/WebContent/{deflate,inflate,z-worker,zip}.js', // Zip.js
         'external/zip.js/WebContent/zlib-asm/codecs.js', // zlib-asm codec for Zip.js
         'external/zlib-asm/zlib.js', // zlib-asm
+
+        // Draco decoder, used to read 3D models compressed with Draco.
+        'external/draco/gltf/draco_wasm_wrapper.js',
+        'external/draco/gltf/draco_decoder.wasm',
 
         // Monaco Editor (for JavaScript)
         'external/monaco-editor-min/vs/loader.js',
@@ -83,13 +90,13 @@ const buildSW = () => {
     .then(({ count, size, warnings }) => {
       if (
         !replaceInFile(
-          '../build/service-worker.js',
+          '../public/service-worker.js',
           'VersionMetadata = {}',
           'VersionMetadata = ' + JSON.stringify(VersionMetadata)
         )
       ) {
         console.error(
-          'Error while trying to replace version metadata in build/service-worker.js.'
+          'Error while trying to replace version metadata in public/service-worker.js.'
         );
         shell.exit(1);
       }

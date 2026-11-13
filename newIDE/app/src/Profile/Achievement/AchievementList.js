@@ -2,8 +2,7 @@
 import * as React from 'react';
 import { I18n } from '@lingui/react';
 import { parseISO } from 'date-fns';
-import Lock from '@material-ui/icons/Lock';
-
+import Lock from '../../UI/CustomSvgIcons/Lock';
 import { Column, Line } from '../../UI/Grid';
 import Text from '../../UI/Text';
 import DotBadge from '../../UI/DotBadge';
@@ -15,12 +14,11 @@ import {
   type AchievementWithBadgeData,
 } from '../../Utils/GDevelopServices/Badge';
 import ScrollView from '../../UI/ScrollView';
+import { selectMessageByLocale } from '../../Utils/i18n/MessageByLocale';
 
 type Props = {|
   badges: Array<BadgeType>,
   achievements: Array<Achievement>,
-  displayUnclaimedAchievements: boolean,
-  displayNotifications: boolean,
 |};
 
 const styles = {
@@ -33,12 +31,7 @@ const styles = {
   unlockedAchievement: {},
 };
 
-const AchievementList = ({
-  badges,
-  achievements,
-  displayUnclaimedAchievements,
-  displayNotifications,
-}: Props) => {
+const AchievementList = ({ badges, achievements }: Props): React.Node => {
   const [
     achievementsWithBadgeData,
     setAchievementsWithBadgeData,
@@ -47,21 +40,22 @@ const AchievementList = ({
   React.useEffect(
     () => {
       const badgeByAchievementId = badges.reduce((acc, badge) => {
+        // $FlowFixMe[prop-missing]
         acc[badge.achievementId] = badge;
         return acc;
       }, {});
 
       const achievementsWithBadgeData = achievements.reduce(
+        // $FlowFixMe[missing-local-annot]
         (acc, achievement) => {
+          // $FlowFixMe[invalid-computed-prop]
           const badge = badgeByAchievementId[achievement.id];
           const hasBadge = !!badge;
-          if (hasBadge || (!hasBadge && displayUnclaimedAchievements)) {
-            acc.push({
-              ...achievement,
-              seen: hasBadge ? badge.seen : undefined,
-              unlockedAt: hasBadge ? parseISO(badge.unlockedAt) : null,
-            });
-          }
+          acc.push({
+            ...achievement,
+            seen: hasBadge ? badge.seen : undefined,
+            unlockedAt: hasBadge ? parseISO(badge.unlockedAt) : null,
+          });
 
           return acc;
         },
@@ -72,7 +66,7 @@ const AchievementList = ({
 
       setAchievementsWithBadgeData(achievementsWithBadgeData);
     },
-    [badges, achievements, displayUnclaimedAchievements]
+    [badges, achievements]
   );
 
   return (
@@ -88,36 +82,43 @@ const AchievementList = ({
                 <Column justifyContent="center" alignItems="flex-start">
                   <DotBadge
                     invisible={
-                      !(
-                        displayNotifications &&
-                        achievementWithBadgeData.seen === false
-                      )
+                      achievementWithBadgeData.seen === true ||
+                      achievementWithBadgeData.seen === undefined
                     }
                   >
                     <Text
                       noMargin
+                      size="sub-title"
                       style={
                         achievementWithBadgeData.unlockedAt
-                          ? styles.unlockedAchievement
-                          : styles.lockedAchievement
+                          ? // $FlowFixMe[incompatible-type]
+                            styles.unlockedAchievement
+                          : // $FlowFixMe[incompatible-type]
+                            styles.lockedAchievement
                       }
                     >
-                      {achievementWithBadgeData.name}
+                      {selectMessageByLocale(
+                        i18n,
+                        achievementWithBadgeData.nameByLocale
+                      )}
                     </Text>
                   </DotBadge>
-                  {displayUnclaimedAchievements && (
-                    <Text
-                      noMargin
-                      style={
-                        achievementWithBadgeData.unlockedAt
-                          ? styles.unlockedAchievement
-                          : styles.lockedAchievement
-                      }
-                      size="body2"
-                    >
-                      {achievementWithBadgeData.description}
-                    </Text>
-                  )}
+                  <Text
+                    noMargin
+                    style={
+                      achievementWithBadgeData.unlockedAt
+                        ? // $FlowFixMe[incompatible-type]
+                          styles.unlockedAchievement
+                        : // $FlowFixMe[incompatible-type]
+                          styles.lockedAchievement
+                    }
+                    size="body2"
+                  >
+                    {selectMessageByLocale(
+                      i18n,
+                      achievementWithBadgeData.descriptionByLocale
+                    )}
+                  </Text>
                 </Column>
                 <Column>
                   {achievementWithBadgeData.unlockedAt ? (

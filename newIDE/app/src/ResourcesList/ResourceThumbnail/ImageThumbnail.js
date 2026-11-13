@@ -3,38 +3,29 @@ import * as React from 'react';
 import ResourcesLoader from '../../ResourcesLoader';
 import Checkbox from '../../UI/Checkbox';
 import { CorsAwareImage } from '../../UI/CorsAwareImage';
-import GDevelopThemeContext from '../../UI/Theme/ThemeContext';
+import GDevelopThemeContext from '../../UI/Theme/GDevelopThemeContext';
 import { useLongTouch } from '../../Utils/UseLongTouch';
 import CheckeredBackground from '../CheckeredBackground';
 
-const SPRITE_SIZE = 100;
-export const thumbnailContainerStyle = {
-  position: 'relative',
-  display: 'inline-block',
-  width: SPRITE_SIZE,
-  height: SPRITE_SIZE,
-  justifyContent: 'center',
-  alignItems: 'center',
-  lineHeight: SPRITE_SIZE + 'px',
-  textAlign: 'center',
-};
-
 const styles = {
   spriteThumbnail: {
-    ...thumbnailContainerStyle,
+    position: 'relative',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    textAlign: 'center',
+    boxSizing: 'border-box',
+    flexShrink: 0,
   },
   spriteThumbnailImage: {
     position: 'relative',
-    maxWidth: SPRITE_SIZE,
-    maxHeight: SPRITE_SIZE,
-    verticalAlign: 'middle',
     pointerEvents: 'none',
   },
   checkboxContainer: {
     textAlign: 'initial',
     position: 'absolute',
     width: 34, // Used to position the checkbox near the right border with a proper margin
-    height: 64,
+    height: 25,
     bottom: 0,
     right: 0,
   },
@@ -49,29 +40,46 @@ type Props = {|
   selected?: boolean,
   onSelect?: (checked: boolean) => void,
   onContextMenu?: (x: number, y: number) => void,
+  /** The delay of the long press opening the context menu. */
+  longTouchDelay?: number,
+  size?: number,
 |};
 
-const ImageThumbnail = (props: Props) => {
-  const { onContextMenu, resourcesLoader, resourceName, project } = props;
+const ImageThumbnail = (props: Props): React.MixedElement => {
+  const {
+    onContextMenu,
+    longTouchDelay,
+    resourcesLoader,
+    resourceName,
+    project,
+  } = props;
   const theme = React.useContext(GDevelopThemeContext);
+  const [error, setError] = React.useState(false);
 
   // Allow a long press to show the context menu
-  const longTouchForContextMenuProps = useLongTouch(
+  const { contextMenuProps: longTouchForContextMenuProps } = useLongTouch(
     React.useCallback(
       event => {
         if (onContextMenu) onContextMenu(event.clientX, event.clientY);
       },
       [onContextMenu]
-    )
+    ),
+    { delay: longTouchDelay }
   );
 
-  const { selectedBorderColor } = theme.imageThumbnail;
   const normalBorderColor = theme.imagePreview.borderColor;
-  const borderColor = props.selected ? selectedBorderColor : normalBorderColor;
+  const borderColor = props.selected
+    ? theme.palette.secondary
+    : !!error
+    ? theme.message.error
+    : normalBorderColor;
 
   const containerStyle = {
     ...styles.spriteThumbnail,
+    width: props.size || 100,
+    height: props.size || 100,
     border: `1px solid ${borderColor}`,
+    borderRadius: 4,
     ...props.style,
   };
 
@@ -80,16 +88,33 @@ const ImageThumbnail = (props: Props) => {
       title={resourceName}
       style={containerStyle}
       onContextMenu={e => {
+        // Prevent the default browser context menu, which is otherwise not
+        // prevented because `stopPropagation` stops the event before it
+        // reaches the global `contextmenu` handler set up by
+        // `Window.setUpContextMenu`.
+        e.preventDefault();
         e.stopPropagation();
         if (onContextMenu) onContextMenu(e.clientX, e.clientY);
       }}
       {...longTouchForContextMenuProps}
     >
-      <CheckeredBackground />
+      <CheckeredBackground borderRadius={4} />
       <CorsAwareImage
-        style={styles.spriteThumbnailImage}
+        style={{
+          ...styles.spriteThumbnailImage,
+          maxWidth: props.size || 100,
+          maxHeight: props.size || 100,
+          display: error ? 'none' : undefined,
+        }}
         alt={resourceName}
         src={resourcesLoader.getResourceFullUrl(project, resourceName, {})}
+        onError={error => {
+          // $FlowFixMe[incompatible-type]
+          setError(error);
+        }}
+        onLoad={() => {
+          setError(false);
+        }}
       />
       {props.selectable && (
         <div style={styles.checkboxContainer}>

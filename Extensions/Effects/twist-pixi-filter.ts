@@ -1,43 +1,114 @@
 namespace gdjs {
-  // Use a different name for PIXI to avoid confusing Typescript between the
-  // PIXI module, and the PIXI "namespace" where filters are added. Could maybe
-  // be removed when filters typings are reworked.
-  import PIXI_ = GlobalPIXIModule.PIXI;
-
-  gdjs.PixiFiltersTools.registerFilterCreator('Twist', {
-    makePIXIFilter: function (target, effectData) {
-      const twistFilter = new PIXI.filters.TwistFilter();
-      twistFilter.offset = new PIXI_.Point(0, 0);
-      return twistFilter;
-    },
-    updatePreRender: function (filter, target) {
-      const twistFilter = (filter as unknown) as PIXI.filters.TwistFilter;
-      twistFilter.offset.x = Math.round(
-        // @ts-ignore - extra properties are stored on the filter.
-        twistFilter._offsetX * target.getWidth()
-      );
-      twistFilter.offset.y = Math.round(
-        // @ts-ignore - extra properties are stored on the filter.
-        twistFilter._offsetY * target.getHeight()
-      );
-    },
-    updateDoubleParameter: function (filter, parameterName, value) {
-      const twistFilter = (filter as unknown) as PIXI.filters.TwistFilter;
-      if (parameterName === 'radius') {
-        twistFilter.radius = value;
-      } else if (parameterName === 'angle') {
-        twistFilter.angle = value;
-      } else if (parameterName === 'padding') {
-        twistFilter.padding = value;
-      } else if (parameterName === 'offsetX') {
-        // @ts-ignore - extra properties are stored on the filter.
-        twistFilter._offsetX = value;
-      } else if (parameterName === 'offsetY') {
-        // @ts-ignore - extra properties are stored on the filter.
-        twistFilter._offsetY = value;
+  interface TwistFilterExtra {
+    // extra properties are stored on the filter.
+    _offsetX: number;
+    _offsetY: number;
+  }
+  interface TwistFilterNetworkSyncData {
+    r: number;
+    a: number;
+    p: number;
+    ox: number;
+    oy: number;
+  }
+  gdjs.PixiFiltersTools.registerFilterCreator(
+    'Twist',
+    new (class extends gdjs.PixiFiltersTools.PixiFilterCreator {
+      makePIXIFilter(target: EffectsTarget, effectData) {
+        const twistFilter = new PIXI.filters.TwistFilter();
+        twistFilter.offset = new PIXI.Point(0, 0);
+        return twistFilter;
       }
-    },
-    updateStringParameter: function (filter, parameterName, value) {},
-    updateBooleanParameter: function (filter, parameterName, value) {},
-  });
+      updatePreRender(filter: PIXI.Filter, target: EffectsTarget) {
+        const twistFilter = filter as unknown as PIXI.filters.TwistFilter &
+          TwistFilterExtra;
+        twistFilter.offset.x = Math.round(
+          twistFilter._offsetX * target.getWidth()
+        );
+        twistFilter.offset.y = Math.round(
+          twistFilter._offsetY * target.getHeight()
+        );
+      }
+      updateDoubleParameter(
+        filter: PIXI.Filter,
+        parameterName: string,
+        value: number
+      ) {
+        const twistFilter = filter as unknown as PIXI.filters.TwistFilter &
+          TwistFilterExtra;
+        if (parameterName === 'radius') {
+          twistFilter.radius = value;
+        } else if (parameterName === 'angle') {
+          twistFilter.angle = value;
+        } else if (parameterName === 'padding') {
+          twistFilter.padding = value;
+        } else if (parameterName === 'offsetX') {
+          twistFilter._offsetX = value;
+        } else if (parameterName === 'offsetY') {
+          twistFilter._offsetY = value;
+        }
+      }
+      getDoubleParameter(filter: PIXI.Filter, parameterName: string): number {
+        const twistFilter = filter as unknown as PIXI.filters.TwistFilter &
+          TwistFilterExtra;
+        if (parameterName === 'radius') {
+          return twistFilter.radius;
+        }
+        if (parameterName === 'angle') {
+          return twistFilter.angle;
+        }
+        if (parameterName === 'padding') {
+          return twistFilter.padding;
+        }
+        if (parameterName === 'offsetX') {
+          return twistFilter._offsetX;
+        }
+        if (parameterName === 'offsetY') {
+          return twistFilter._offsetY;
+        }
+        return 0;
+      }
+      updateStringParameter(
+        filter: PIXI.Filter,
+        parameterName: string,
+        value: string
+      ) {}
+      updateColorParameter(
+        filter: PIXI.Filter,
+        parameterName: string,
+        value: number
+      ): void {}
+      getColorParameter(filter: PIXI.Filter, parameterName: string): number {
+        return 0;
+      }
+      updateBooleanParameter(
+        filter: PIXI.Filter,
+        parameterName: string,
+        value: boolean
+      ) {}
+      getNetworkSyncData(filter: PIXI.Filter): TwistFilterNetworkSyncData {
+        const twistFilter = filter as unknown as PIXI.filters.TwistFilter &
+          TwistFilterExtra;
+        return {
+          r: twistFilter.radius,
+          a: twistFilter.angle,
+          p: twistFilter.padding,
+          ox: twistFilter._offsetX,
+          oy: twistFilter._offsetY,
+        };
+      }
+      updateFromNetworkSyncData(
+        filter: PIXI.Filter,
+        data: TwistFilterNetworkSyncData
+      ) {
+        const twistFilter = filter as unknown as PIXI.filters.TwistFilter &
+          TwistFilterExtra;
+        twistFilter.radius = data.r;
+        twistFilter.angle = data.a;
+        twistFilter.padding = data.p;
+        twistFilter._offsetX = data.ox;
+        twistFilter._offsetY = data.oy;
+      }
+    })()
+  );
 }

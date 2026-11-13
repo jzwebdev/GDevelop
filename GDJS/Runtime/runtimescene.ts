@@ -4,107 +4,115 @@
  * This project is released under the MIT License.
  */
 namespace gdjs {
+  /**
+   * Options of `gdjs.RuntimeScene.render`.
+   * @category Core Engine > Scene
+   */
+  export type RuntimeSceneRenderOptions = {
+    /** Update everything for rendering, but don't draw anything. */
+    skipDrawing?: boolean;
+    /** Draw on this background color, instead of the one of the scene and
+     * instead of what an effect shows as the background (a skybox). */
+    backgroundColor?: integer;
+  };
+
   const logger = new gdjs.Logger('RuntimeScene');
   const setupWarningLogger = new gdjs.Logger('RuntimeScene (setup warnings)');
 
   /**
    * A scene being played, containing instances of objects rendered on screen.
+   * @category Core Engine > Scene
    */
-  export class RuntimeScene {
+  export class RuntimeScene extends gdjs.RuntimeInstanceContainer {
     _eventsFunction: null | ((runtimeScene: RuntimeScene) => void) = null;
-    _instances: Hashtable<RuntimeObject[]>;
-
-    //Contains the instances living on the scene
-    _instancesCache: Hashtable<RuntimeObject[]>;
-
-    //Used to recycle destroyed instance instead of creating new ones.
-    _objects: Hashtable<ObjectData>;
-
-    //Contains the objects data stored in the project
-    _objectsCtor: Hashtable<typeof RuntimeObject>;
-    _layers: Hashtable<Layer>;
-    _initialBehaviorSharedData: Hashtable<BehaviorSharedData | null>;
+    _idToCallbackMap: null | Map<
+      string,
+      (
+        runtimeScene: gdjs.RuntimeScene,
+        asyncObjectsList: gdjs.LongLivedObjectsList
+      ) => void
+    > = null;
     _renderer: RuntimeSceneRenderer;
+    _debuggerRenderer: gdjs.DebuggerRenderer;
     _variables: gdjs.VariablesContainer;
+    _variablesByExtensionName: Map<string, gdjs.VariablesContainer>;
     _runtimeGame: gdjs.RuntimeGame;
     _lastId: integer = 0;
     _name: string = '';
     _timeManager: TimeManager;
     _gameStopRequested: boolean = false;
     _requestedScene: string = '';
-    _isLoaded: boolean = false;
+    _resourcesUnloading: 'at-scene-exit' | 'never' | 'inherit' = 'inherit';
+    private _asyncTasksManager = new gdjs.AsyncTasksManager();
 
-    // True if loadFromScene was called and the scene is being played.
+    /** True if loadFromScene was called and the scene is being played. */
+    _isLoaded: boolean = false;
+    /** True in the first frame after resuming the paused scene */
     _isJustResumed: boolean = false;
 
-    // True in the first frame after resuming the paused scene
     _requestedChange: SceneChangeRequest;
+    /** Black background by default. */
     _backgroundColor: integer = 0;
-    _allInstancesList: gdjs.RuntimeObject[] = [];
-    _onceTriggers: OnceTriggers;
-    _layersCameraCoordinates: Record<string, [float, float, float, float]> = {};
-    _instancesRemoved: gdjs.RuntimeObject[] = [];
-    _profiler: gdjs.Profiler | null = null;
 
-    // Options for the debug draw:
-    _debugDrawEnabled: boolean = false;
-    _debugDrawShowHiddenInstances: boolean = false;
-    _debugDrawShowPointsNames: boolean = false;
-    _debugDrawShowCustomPoints: boolean = false;
+    /** Should the canvas be cleared before this scene rendering. */
+    _clearCanvas: boolean = true;
+
+    _profiler: gdjs.Profiler | null = null;
 
     // Set to `new gdjs.Profiler()` to have profiling done on the scene.
     _onProfilerStopped: null | ((oldProfiler: gdjs.Profiler) => void) = null;
+
+    _cachedGameResolutionWidth: integer;
+    _cachedGameResolutionHeight: integer;
+
+    /**
+     * A network ID associated to the scene to be used
+     * for multiplayer, to identify the scene across peers.
+     * A scene can have its networkId re-generated during the game, meaning
+     * that the scene is re-created on every peer.
+     */
+    networkId: string | null = null;
+
+    private _renderer3DWorldScale: float = 100;
+    private _renderer3DInverseWorldScale: float = 0.01;
 
     /**
      * @param runtimeGame The game associated to this scene.
      */
     constructor(runtimeGame: gdjs.RuntimeGame) {
-      this._instances = new Hashtable();
-      this._instancesCache = new Hashtable();
-      this._objects = new Hashtable();
-      this._objectsCtor = new Hashtable();
-      this._layers = new Hashtable();
-      this._initialBehaviorSharedData = new Hashtable();
-      this._renderer = new gdjs.RuntimeSceneRenderer(
-        this,
-        // @ts-ignore
-        runtimeGame ? runtimeGame.getRenderer() : null
-      );
-      this._variables = new gdjs.VariablesContainer();
+      super(runtimeGame);
       this._runtimeGame = runtimeGame;
+      this._variables = new gdjs.VariablesContainer();
+      this._variablesByExtensionName = new Map<
+        string,
+        gdjs.VariablesContainer
+      >();
       this._timeManager = new gdjs.TimeManager();
       this._requestedChange = SceneChangeRequest.CONTINUE;
+      this._cachedGameResolutionWidth = runtimeGame
+        ? runtimeGame.getGameResolutionWidth()
+        : 0;
+      this._cachedGameResolutionHeight = runtimeGame
+        ? runtimeGame.getGameResolutionHeight()
+        : 0;
+
+      this._renderer = new gdjs.RuntimeSceneRenderer(
+        this,
+        // @ts-ignore This is needed because of test. They should mock RuntimeGame instead.
+        runtimeGame ? runtimeGame.getRenderer() : null
+      );
+      this._debuggerRenderer = new gdjs.DebuggerRenderer(this);
 
       // What to do after the frame is rendered.
-
-      // Black background by default.
-
-      //An array used to create a list of all instance when necessary ( see _constructListOfAllInstances )
-      this._onceTriggers = new gdjs.OnceTriggers();
-
-      //The instances removed from the scene and waiting to be sent to the cache.
 
       // The callback function to call when the profiler is stopped.
       this.onGameResolutionResized();
     }
 
-    /**
-     * Activate or deactivate the debug visualization for collisions and points.
-     */
-    enableDebugDraw(
-      enableDebugDraw: boolean,
-      showHiddenInstances: boolean,
-      showPointsNames: boolean,
-      showCustomPoints: boolean
-    ): void {
-      if (this._debugDrawEnabled && !enableDebugDraw) {
-        this.getRenderer().clearDebugDraw();
-      }
-
-      this._debugDrawEnabled = enableDebugDraw;
-      this._debugDrawShowHiddenInstances = showHiddenInstances;
-      this._debugDrawShowPointsNames = showPointsNames;
-      this._debugDrawShowCustomPoints = showCustomPoints;
+    addLayer(layerData: LayerData) {
+      const layer = new gdjs.Layer(layerData, this);
+      this._layers.put(layerData.name, layer);
+      this._orderedLayers.push(layer);
     }
 
     /**
@@ -112,11 +120,21 @@ namespace gdjs {
      * See gdjs.RuntimeGame.startGameLoop in particular.
      */
     onGameResolutionResized() {
+      const oldGameResolutionOriginX = this.getViewportOriginX();
+      const oldGameResolutionOriginY = this.getViewportOriginY();
+      this._cachedGameResolutionWidth = this._runtimeGame
+        ? this._runtimeGame.getGameResolutionWidth()
+        : 0;
+      this._cachedGameResolutionHeight = this._runtimeGame
+        ? this._runtimeGame.getGameResolutionHeight()
+        : 0;
       for (const name in this._layers.items) {
         if (this._layers.items.hasOwnProperty(name)) {
-          /** @type gdjs.Layer */
-          const theLayer: gdjs.Layer = this._layers.items[name];
-          theLayer.onGameResolutionResized();
+          const theLayer: gdjs.RuntimeLayer = this._layers.items[name];
+          theLayer.onGameResolutionResized(
+            oldGameResolutionOriginX,
+            oldGameResolutionOriginY
+          );
         }
       }
       this._renderer.onGameResolutionResized();
@@ -124,14 +142,25 @@ namespace gdjs {
 
     /**
      * Load the runtime scene from the given scene.
-     * @param sceneData An object containing the scene data.
-     * @see gdjs.RuntimeGame#getSceneData
+     * @param sceneAndExtensionsData The data of the scene and extension variables to be loaded.
+     * @param options Options to change what is loaded.
+     * @see gdjs.RuntimeGame#getSceneAndExtensionsData
      */
-    loadFromScene(sceneData: LayoutData | null) {
-      if (!sceneData) {
+    loadFromScene(
+      sceneAndExtensionsData: SceneAndExtensionsData | null,
+      options?: {
+        excludedObjectNames?: Set<string>;
+        skipStoppingSoundsOnStartup?: boolean;
+        skipCreatingInstances?: boolean;
+      }
+    ) {
+      if (!sceneAndExtensionsData) {
         logger.error('loadFromScene was called without a scene');
         return;
       }
+      const { sceneData, usedExtensionsWithVariablesData } =
+        sceneAndExtensionsData;
+
       if (this._isLoaded) {
         this.unloadScene();
       }
@@ -141,6 +170,8 @@ namespace gdjs {
         this._runtimeGame.getRenderer().setWindowTitle(sceneData.title);
       }
       this._name = sceneData.name;
+      this._resourcesUnloading = sceneData.resourcesUnloading || 'inherit';
+      this.setRenderer3DWorldScale(sceneData.renderer3DWorldScale);
       this.setBackgroundColor(sceneData.r, sceneData.v, sceneData.b);
 
       //Load layers
@@ -148,8 +179,14 @@ namespace gdjs {
         this.addLayer(sceneData.layers[i]);
       }
 
-      //Load variables
+      // Load variables
       this._variables = new gdjs.VariablesContainer(sceneData.variables);
+      for (const extensionData of usedExtensionsWithVariablesData) {
+        this._variablesByExtensionName.set(
+          extensionData.name,
+          new gdjs.VariablesContainer(extensionData.sceneVariables)
+        );
+      }
 
       //Cache the initial shared data of the behaviors
       for (
@@ -175,14 +212,20 @@ namespace gdjs {
         this.registerObject(sceneData.objects[i]);
       }
 
-      //Create initial instances of objects
-      this.createObjectsFrom(
-        sceneData.instances,
-        0,
-        0,
-        /*trackByPersistentUuid=*/
-        true
-      );
+      // Create initial instances of objects.
+      if (!options || !options.skipCreatingInstances) {
+        this.createObjectsFrom(
+          sceneData.instances,
+          0,
+          0,
+          0,
+          /*trackByPersistentUuid=*/
+          true,
+          {
+            excludedObjectNames: options?.excludedObjectNames,
+          }
+        );
+      }
 
       // Set up the default z order (for objects created from events)
       this._setLayerDefaultZOrders();
@@ -200,80 +243,25 @@ namespace gdjs {
       for (let i = 0; i < gdjs.callbacksRuntimeSceneLoaded.length; ++i) {
         gdjs.callbacksRuntimeSceneLoaded[i](this);
       }
-      if (sceneData.stopSoundsOnStartup && this._runtimeGame) {
+      if (
+        sceneData.stopSoundsOnStartup &&
+        (!options || !options.skipStoppingSoundsOnStartup) &&
+        this._runtimeGame
+      ) {
         this._runtimeGame.getSoundManager().clearAll();
       }
       this._isLoaded = true;
       this._timeManager.reset();
     }
 
-    /**
-     * Check if an object is registered, meaning that instances of it can be created and lives in the scene.
-     * @see gdjs.RuntimeScene#registerObject
-     */
-    isObjectRegistered(objectName: string): boolean {
-      return (
-        this._objects.containsKey(objectName) &&
-        this._instances.containsKey(objectName) &&
-        this._objectsCtor.containsKey(objectName)
-      );
-    }
-
-    /**
-     * Register a {@link gdjs.RuntimeObject} so that instances of it can be used in the scene.
-     * @param objectData The data for the object to register.
-     */
-    registerObject(objectData: ObjectData) {
-      this._objects.put(objectData.name, objectData);
-      this._instances.put(objectData.name, []);
-
-      // Cache the constructor
-      const Ctor = gdjs.getObjectConstructor(objectData.type);
-      this._objectsCtor.put(objectData.name, Ctor);
-
-      // Also prepare a cache for recycled instances, if the object supports it.
-      if (Ctor.supportsReinitialization) {
-        this._instancesCache.put(objectData.name, []);
+    getInitialSharedDataForBehavior(name: string): BehaviorSharedData | null {
+      // TODO Move this error in RuntimeInstanceContainer after deciding
+      // what to do with shared data in custom object.
+      const behaviorSharedData = super.getInitialSharedDataForBehavior(name);
+      if (!behaviorSharedData) {
+        logger.error("Can't find shared data for behavior with name: " + name);
       }
-    }
-
-    /**
-     * Update the data of a {@link gdjs.RuntimeObject} so that instances use this when constructed.
-     * @param objectData The data for the object to register.
-     */
-    updateObject(objectData: ObjectData): void {
-      if (!this.isObjectRegistered(objectData.name)) {
-        logger.warn(
-          'Tried to call updateObject for an object that was not registered (' +
-            objectData.name +
-            '). Call registerObject first.'
-        );
-      }
-      this._objects.put(objectData.name, objectData);
-    }
-
-    // Don't erase instances, nor instances cache, or objectsCtor cache.
-    /**
-     * Unregister a {@link gdjs.RuntimeObject}. Instances will be destroyed.
-     * @param objectName The name of the object to unregister.
-     */
-    unregisterObject(objectName: string) {
-      const instances = this._instances.get(objectName);
-      if (instances) {
-        // This is sub-optimal: markObjectForDeletion will search the instance to
-        // remove in instances, so cost is O(n^2), n being the number of instances.
-        // As we're unregistering an object which only happen during a hot-reloading,
-        // this is fine.
-        const instancesToRemove = instances.slice();
-        for (let i = 0; i < instancesToRemove.length; i++) {
-          this.markObjectForDeletion(instancesToRemove[i]);
-        }
-        this._cacheOrClearRemovedInstances();
-      }
-      this._objects.remove(objectName);
-      this._instances.remove(objectName);
-      this._instancesCache.remove(objectName);
-      this._objectsCtor.remove(objectName);
+      return behaviorSharedData;
     }
 
     /**
@@ -281,6 +269,14 @@ namespace gdjs {
      * for some time, until it's resumed or unloaded.
      */
     onPause() {
+      // Notify the objects that the scene is being paused. Objects should not
+      // do anything special, but some object renderers might want to know about this.
+      const allInstancesList = this.getAdhocListOfAllInstances();
+      for (let i = 0, len = allInstancesList.length; i < len; ++i) {
+        const object = allInstancesList[i];
+        object.onScenePaused(this);
+      }
+
       for (let i = 0; i < gdjs.callbacksRuntimeScenePaused.length; ++i) {
         gdjs.callbacksRuntimeScenePaused[i](this);
       }
@@ -292,6 +288,15 @@ namespace gdjs {
      */
     onResume() {
       this._isJustResumed = true;
+
+      // Notify the objects that the scene is being resumed. Objects should not
+      // do anything special, but some object renderers might want to know about this.
+      const allInstancesList = this.getAdhocListOfAllInstances();
+      for (let i = 0, len = allInstancesList.length; i < len; ++i) {
+        const object = allInstancesList[i];
+        object.onSceneResumed(this);
+      }
+
       for (let i = 0; i < gdjs.callbacksRuntimeSceneResumed.length; ++i) {
         gdjs.callbacksRuntimeSceneResumed[i](this);
       }
@@ -316,10 +321,11 @@ namespace gdjs {
       }
 
       // Notify the objects they are being destroyed
-      this._constructListOfAllInstances();
-      for (let i = 0, len = this._allInstancesList.length; i < len; ++i) {
-        const object = this._allInstancesList[i];
-        object.onDestroyFromScene(this);
+      const allInstancesList = this.getAdhocListOfAllInstances();
+      for (let i = 0, len = allInstancesList.length; i < len; ++i) {
+        const object = allInstancesList[i];
+        object.onDeletedFromScene();
+        object.onDestroyed();
       }
 
       // Notify the renderer
@@ -334,96 +340,25 @@ namespace gdjs {
         gdjs.callbacksRuntimeSceneUnloaded[i](this);
       }
 
-      // It should not be necessary to reset these variables, but this help
-      // ensuring that all memory related to the RuntimeScene is released immediately.
-      this._layers = new Hashtable();
-      this._variables = new gdjs.VariablesContainer();
-      this._initialBehaviorSharedData = new Hashtable();
-      this._objects = new Hashtable();
-      this._instances = new Hashtable();
-      this._instancesCache = new Hashtable();
-      this._eventsFunction = null;
-      this._objectsCtor = new Hashtable();
-      this._allInstancesList = [];
-      this._instancesRemoved = [];
-      this._lastId = 0;
+      this._destroy();
 
-      //@ts-ignore We are deleting the object
-      this._onceTriggers = null;
       this._isLoaded = false;
       this.onGameResolutionResized();
     }
 
-    /**
-     * Create objects from initial instances data (for example, the initial instances
-     * of the scene or the instances of an external layout).
-     *
-     * @param data The instances data
-     * @param xPos The offset on X axis
-     * @param yPos The offset on Y axis
-     * @param trackByPersistentUuid If true, objects are tracked by setting their `persistentUuid`
-     * to the same as the associated instance. Useful for hot-reloading when instances are changed.
-     */
-    createObjectsFrom(
-      data: InstanceData[],
-      xPos: float,
-      yPos: float,
-      trackByPersistentUuid: boolean
-    ) {
-      for (let i = 0, len = data.length; i < len; ++i) {
-        const instanceData = data[i];
-        const objectName = instanceData.name;
-        const newObject = this.createObject(objectName);
-        if (newObject !== null) {
-          if (trackByPersistentUuid) {
-            // Give the object the same persistentUuid as the instance, so that
-            // it can be hot-reloaded.
-            newObject.persistentUuid = instanceData.persistentUuid || null;
-          }
-          newObject.setPosition(instanceData.x + xPos, instanceData.y + yPos);
-          newObject.setZOrder(instanceData.zOrder);
-          newObject.setAngle(instanceData.angle);
-          newObject.setLayer(instanceData.layer);
-          newObject
-            .getVariables()
-            .initFrom(instanceData.initialVariables, true);
-          newObject.extraInitializationFromInitialInstance(instanceData);
-        }
-      }
-    }
-
-    /**
-     * Set the default Z order for each layer, which is the highest Z order found on each layer.
-     * Useful as it ensures that instances created from events are, by default, shown in front
-     * of other instances.
-     */
-    private _setLayerDefaultZOrders() {
-      if (
-        this._runtimeGame.getGameData().properties
-          .useDeprecatedZeroAsDefaultZOrder
-      ) {
-        // Deprecated option to still support games that were made considered 0 as the
-        // default Z order for all layers.
-        return;
-      }
-      const layerHighestZOrders: Record<string, number> = {};
-      const allInstances = this.getAdhocListOfAllInstances();
-      for (let i = 0, len = allInstances.length; i < len; ++i) {
-        const object = allInstances[i];
-        let layerName = object.getLayer();
-        const zOrder = object.getZOrder();
-        if (
-          layerHighestZOrders[layerName] === undefined ||
-          layerHighestZOrders[layerName] < zOrder
-        ) {
-          layerHighestZOrders[layerName] = zOrder;
-        }
-      }
-      for (let layerName in layerHighestZOrders) {
-        this.getLayer(layerName).setDefaultZOrder(
-          layerHighestZOrders[layerName] + 1
-        );
-      }
+    override _destroy() {
+      // It should not be necessary to reset these variables, but this help
+      // ensuring that all memory related to the RuntimeScene is released immediately.
+      super._destroy();
+      this._variables = new gdjs.VariablesContainer();
+      this._variablesByExtensionName = new Map<
+        string,
+        gdjs.VariablesContainer
+      >();
+      this._initialBehaviorSharedData = new Hashtable();
+      this._eventsFunction = null;
+      this._lastId = 0;
+      this.networkId = null;
     }
 
     /**
@@ -437,6 +372,8 @@ namespace gdjs {
       const module = gdjs[sceneData.mangledName + 'Code'];
       if (module && module.func) {
         this._eventsFunction = module.func;
+        this._idToCallbackMap =
+          gdjs[sceneData.mangledName + 'Code'].idToCallbackMap;
       } else {
         setupWarningLogger.warn(
           'No function found for running logic of scene ' + this._name
@@ -459,11 +396,16 @@ namespace gdjs {
     }
 
     /**
-     * Step and render the scene.
+     * Step (execute the game logic) and render the scene.
+     * @param elapsedTime In milliseconds
+     * @param renderOptions See `render`.
      * @return true if the game loop should continue, false if a scene change/push/pop
      * or a game stop was requested.
      */
-    renderAndStep(elapsedTime: float): boolean {
+    renderAndStep(
+      elapsedTime: float,
+      renderOptions?: RuntimeSceneRenderOptions
+    ): boolean {
       if (this._profiler) {
         this._profiler.beginFrame();
       }
@@ -472,6 +414,13 @@ namespace gdjs {
         elapsedTime,
         this._runtimeGame.getMinimalFramerate()
       );
+      if (this._profiler) {
+        this._profiler.begin('asynchronous actions (wait action, etc...)');
+      }
+      this._asyncTasksManager.processTasks(this);
+      if (this._profiler) {
+        this._profiler.end('asynchronous actions (wait action, etc...)');
+      }
       if (this._profiler) {
         this._profiler.begin('objects (pre-events)');
       }
@@ -498,7 +447,7 @@ namespace gdjs {
       if (this._profiler) {
         this._profiler.begin('objects (post-events)');
       }
-      this._updateObjectsPostEvents();
+      this._stepBehaviorsPostEvents();
       if (this._profiler) {
         this._profiler.end('objects (post-events)');
       }
@@ -511,6 +460,37 @@ namespace gdjs {
       if (this._profiler) {
         this._profiler.end('callbacks and extensions (post-events)');
       }
+
+      this.render(renderOptions);
+      this._isJustResumed = false;
+      if (this._profiler) {
+        this._profiler.end('render');
+      }
+      if (this._profiler) {
+        const threeRenderer = this._runtimeGame
+          .getRenderer()
+          .getThreeRenderer();
+        if (threeRenderer) {
+          this._profiler.record3DRendererInfo(threeRenderer.info);
+        }
+      }
+      if (this._profiler) {
+        this._profiler.endFrame();
+      }
+      return !!this.getRequestedChange();
+    }
+    /**
+     * Render the scene (but do not execute the game logic).
+     *
+     * With `skipDrawing`, everything is done except the drawing itself (the
+     * draw calls of the layers, their post-processing passes, the shadow maps
+     * and the debug draw): objects and layers are still updated for rendering
+     * (culling, effects, `updatePreRender` of objects) and the world matrices
+     * of the 3D objects are still updated, as game logic can read them (3D
+     * raycasts, bounding boxes of 3D models...). Used to step a game faster
+     * when nobody looks at it (gameplay tests).
+     */
+    render(options?: RuntimeSceneRenderOptions) {
       if (this._profiler) {
         this._profiler.begin('objects (pre-render, effects update)');
       }
@@ -529,67 +509,25 @@ namespace gdjs {
         this._profiler.begin('render');
       }
 
+      if (options && options.skipDrawing) {
+        this._renderer.updateWithoutDrawing();
+        return;
+      }
+
       // Set to true to enable debug rendering (look for the implementation in the renderer
       // to see what is rendered).
-      if (this._debugDrawEnabled && this._layersCameraCoordinates) {
-        this._updateLayersCameraCoordinates(1);
-        this.getRenderer().renderDebugDraw(
-          this._allInstancesList,
-          this._layersCameraCoordinates,
+      if (this._debugDrawEnabled) {
+        this._debuggerRenderer.renderDebugDraw(
+          this.getAdhocListOfAllInstances(),
+          this._debugDrawShowHitBoxes,
           this._debugDrawShowHiddenInstances,
           this._debugDrawShowPointsNames,
-          this._debugDrawShowCustomPoints
+          this._debugDrawShowCustomPoints,
+          this._debugDrawHooks
         );
       }
 
-      this._isJustResumed = false;
-      this.render();
-      if (this._profiler) {
-        this._profiler.end('render');
-      }
-      if (this._profiler) {
-        this._profiler.endFrame();
-      }
-      return !!this.getRequestedChange();
-    }
-
-    /**
-     * Render the PIXI container associated to the runtimeScene.
-     */
-    render() {
-      this._renderer.render();
-    }
-
-    _updateLayersCameraCoordinates(scale: float) {
-      this._layersCameraCoordinates = this._layersCameraCoordinates || {};
-      for (const name in this._layers.items) {
-        if (this._layers.items.hasOwnProperty(name)) {
-          const theLayer = this._layers.items[name];
-          this._layersCameraCoordinates[name] = this._layersCameraCoordinates[
-            name
-          ] || [0, 0, 0, 0];
-          this._layersCameraCoordinates[name][0] =
-            theLayer.getCameraX() - (theLayer.getCameraWidth() / 2) * scale;
-          this._layersCameraCoordinates[name][1] =
-            theLayer.getCameraY() - (theLayer.getCameraHeight() / 2) * scale;
-          this._layersCameraCoordinates[name][2] =
-            theLayer.getCameraX() + (theLayer.getCameraWidth() / 2) * scale;
-          this._layersCameraCoordinates[name][3] =
-            theLayer.getCameraY() + (theLayer.getCameraHeight() / 2) * scale;
-        }
-      }
-    }
-
-    /**
-     * Called to update effects of layers before rendering.
-     */
-    _updateLayersPreRender() {
-      for (const name in this._layers.items) {
-        if (this._layers.items.hasOwnProperty(name)) {
-          const layer = this._layers.items[name];
-          layer.updatePreRender(this);
-        }
-      }
+      this._renderer.render(options);
     }
 
     /**
@@ -602,24 +540,7 @@ namespace gdjs {
      */
     _updateObjectsPreRender() {
       if (this._timeManager.isFirstFrame()) {
-        this._constructListOfAllInstances();
-        for (let i = 0, len = this._allInstancesList.length; i < len; ++i) {
-          const object = this._allInstancesList[i];
-          const rendererObject = object.getRendererObject();
-          if (rendererObject) {
-            rendererObject.visible = !object.isHidden();
-
-            // Update effects, only for visible objects.
-            if (rendererObject.visible) {
-              this._runtimeGame
-                .getEffectsManager()
-                .updatePreRender(object.getRendererEffects(), object);
-            }
-          }
-
-          // Perform pre-render update.
-          object.updatePreRender(this);
-        }
+        super._updateObjectsPreRender();
         return;
       } else {
         // After first frame, optimise rendering by setting only objects
@@ -632,136 +553,53 @@ namespace gdjs {
         // (so we have a "safety margin") but these objects should be fixed
         // instead.
         // - objects having effects rendering outside of their visibility AABB.
+
+        // TODO (3D) culling - add support for 3D object culling?
         this._updateLayersCameraCoordinates(2);
-        this._constructListOfAllInstances();
-        for (let i = 0, len = this._allInstancesList.length; i < len; ++i) {
-          const object = this._allInstancesList[i];
-          const cameraCoords = this._layersCameraCoordinates[object.getLayer()];
+        const allInstancesList = this.getAdhocListOfAllInstances();
+        for (let i = 0, len = allInstancesList.length; i < len; ++i) {
+          const object = allInstancesList[i];
           const rendererObject = object.getRendererObject();
-          if (!cameraCoords || !rendererObject) {
-            continue;
-          }
-          if (object.isHidden()) {
-            rendererObject.visible = false;
-          } else {
-            const aabb = object.getVisibilityAABB();
-            if (
-              // If no AABB is returned, the object should always be visible
-              aabb &&
-              (aabb.min[0] > cameraCoords[2] ||
-                aabb.min[1] > cameraCoords[3] ||
-                aabb.max[0] < cameraCoords[0] ||
-                aabb.max[1] < cameraCoords[1])
-            ) {
+          if (rendererObject) {
+            if (object.isHidden()) {
               rendererObject.visible = false;
             } else {
-              rendererObject.visible = true;
+              const cameraCoords =
+                this._layersCameraCoordinates[object.getLayer()];
+              if (!cameraCoords) {
+                continue;
+              }
+              const aabb = object.getVisibilityAABB();
+              rendererObject.visible =
+                // If no AABB is returned, the object should always be visible
+                !aabb ||
+                // If an AABB is there, it must be at least partially inside
+                // the camera bounds.
+                !(
+                  aabb.min[0] > cameraCoords[2] ||
+                  aabb.min[1] > cameraCoords[3] ||
+                  aabb.max[0] < cameraCoords[0] ||
+                  aabb.max[1] < cameraCoords[1]
+                );
             }
-          }
 
-          // Update effects, only for visible objects.
-          if (rendererObject.visible) {
-            this._runtimeGame
-              .getEffectsManager()
-              .updatePreRender(object.getRendererEffects(), object);
-          }
+            // Update effects, only for visible objects.
+            if (rendererObject.visible) {
+              this._runtimeGame
+                .getEffectsManager()
+                .updatePreRender(object.getRendererEffects(), object);
 
-          // Perform pre-render update.
-          object.updatePreRender(this);
-        }
-      }
-    }
-
-    /**
-     * Empty the list of the removed objects:<br>
-     * When an object is removed from the scene, it is still kept in the _instancesRemoved member
-     * of the RuntimeScene.<br>
-     * This method should be called regularly (after events or behaviors steps) so as to clear this list
-     * and allows the removed objects to be cached (or destroyed if the cache is full).<br>
-     * The removed objects could not be sent directly to the cache, as events may still be using them after
-     * removing them from the scene for example.
-     */
-    _cacheOrClearRemovedInstances() {
-      for (let k = 0, lenk = this._instancesRemoved.length; k < lenk; ++k) {
-        // Cache the instance to recycle it into a new instance later.
-        // If the object does not support recycling, the cache won't be defined.
-        const cache = this._instancesCache.get(
-          this._instancesRemoved[k].getName()
-        );
-        if (cache) {
-          if (cache.length < 128) {
-            cache.push(this._instancesRemoved[k]);
-          }
-        }
-      }
-      this._instancesRemoved.length = 0;
-    }
-
-    /**
-     * Tool function filling _allInstancesList member with all the living object instances.
-     */
-    _constructListOfAllInstances() {
-      let currentListSize = 0;
-      for (const name in this._instances.items) {
-        if (this._instances.items.hasOwnProperty(name)) {
-          const list = this._instances.items[name];
-          const oldSize = currentListSize;
-          currentListSize += list.length;
-          for (let j = 0, lenj = list.length; j < lenj; ++j) {
-            if (oldSize + j < this._allInstancesList.length) {
-              this._allInstancesList[oldSize + j] = list[j];
-            } else {
-              this._allInstancesList.push(list[j]);
+              // Perform pre-render update only if the object is visible
+              // (including if there is no visibility AABB returned previously).
+              object.updatePreRender(this);
             }
+          } else {
+            // Perform pre-render update, always for objects not having an
+            // associated renderer object (so it must handle visibility on its own).
+            object.updatePreRender(this);
           }
         }
       }
-      this._allInstancesList.length = currentListSize;
-    }
-
-    /**
-     * Update the objects before launching the events.
-     */
-    _updateObjectsPreEvents() {
-      //It is *mandatory* to create and iterate on a external list of all objects, as the behaviors
-      //may delete the objects.
-      this._constructListOfAllInstances();
-      for (let i = 0, len = this._allInstancesList.length; i < len; ++i) {
-        const obj = this._allInstancesList[i];
-        const elapsedTime = obj.getElapsedTime(this);
-        if (!obj.hasNoForces()) {
-          const averageForce = obj.getAverageForce();
-          const elapsedTimeInSeconds = elapsedTime / 1000;
-          obj.setX(obj.getX() + averageForce.getX() * elapsedTimeInSeconds);
-          obj.setY(obj.getY() + averageForce.getY() * elapsedTimeInSeconds);
-          obj.update(this);
-          obj.updateForces(elapsedTimeInSeconds);
-        } else {
-          obj.update(this);
-        }
-        obj.updateTimers(elapsedTime);
-        this._allInstancesList[i].stepBehaviorsPreEvents(this);
-      }
-
-      //Some behaviors may have request objects to be deleted.
-      this._cacheOrClearRemovedInstances();
-    }
-
-    /**
-     * Update the objects (update positions, time management...)
-     */
-    _updateObjectsPostEvents() {
-      this._cacheOrClearRemovedInstances();
-
-      //It is *mandatory* to create and iterate on a external list of all objects, as the behaviors
-      //may delete the objects.
-      this._constructListOfAllInstances();
-      for (let i = 0, len = this._allInstancesList.length; i < len; ++i) {
-        this._allInstancesList[i].stepBehaviorsPostEvents(this);
-      }
-
-      //Some behaviors may have request objects to be deleted.
-      this._cacheOrClearRemovedInstances();
     }
 
     /**
@@ -785,6 +623,22 @@ namespace gdjs {
     }
 
     /**
+     * Set whether the canvas should be cleared before this scene rendering.
+     * This is experimental: if possible, try to avoid relying on this and use
+     * custom objects to build complex scenes.
+     */
+    setClearCanvas(shouldClearCanvas: boolean): void {
+      this._clearCanvas = shouldClearCanvas;
+    }
+
+    /**
+     * Get whether the canvas should be cleared before this scene rendering.
+     */
+    getClearCanvas(): boolean {
+      return this._clearCanvas;
+    }
+
+    /**
      * Get the name of the scene.
      */
     getName(): string {
@@ -792,118 +646,10 @@ namespace gdjs {
     }
 
     /**
-     * Update the objects positions according to their forces
+     * Get the strategy to unload resources of this scene.
      */
-    updateObjectsForces(): void {
-      for (const name in this._instances.items) {
-        if (this._instances.items.hasOwnProperty(name)) {
-          const list = this._instances.items[name];
-          for (let j = 0, listLen = list.length; j < listLen; ++j) {
-            const obj = list[j];
-            if (!obj.hasNoForces()) {
-              const averageForce = obj.getAverageForce();
-              const elapsedTimeInSeconds = obj.getElapsedTime(this) / 1000;
-              obj.setX(obj.getX() + averageForce.getX() * elapsedTimeInSeconds);
-              obj.setY(obj.getY() + averageForce.getY() * elapsedTimeInSeconds);
-              obj.updateForces(elapsedTimeInSeconds);
-            }
-          }
-        }
-      }
-    }
-
-    /**
-     * Add an object to the instances living on the scene.
-     * @param obj The object to be added.
-     */
-    addObject(obj: RuntimeObject) {
-      if (!this._instances.containsKey(obj.name)) {
-        this._instances.put(obj.name, []);
-      }
-      this._instances.get(obj.name).push(obj);
-    }
-
-    /**
-     * Get all the instances of the object called name.
-     * @param name Name of the object for which the instances must be returned.
-     * @return The list of objects with the given name
-     */
-    getObjects(name: string): gdjs.RuntimeObject[] {
-      if (!this._instances.containsKey(name)) {
-        logger.info(
-          'RuntimeScene.getObjects: No instances called "' +
-            name +
-            '"! Adding it.'
-        );
-        this._instances.put(name, []);
-      }
-      return this._instances.get(name);
-    }
-
-    /**
-     * Create a new object from its name. The object is also added to the instances
-     * living on the scene ( No need to call RuntimeScene.addObject )
-     * @param objectName The name of the object to be created
-     * @return The created object
-     */
-    createObject(objectName: string): gdjs.RuntimeObject | null {
-      if (
-        !this._objectsCtor.containsKey(objectName) ||
-        !this._objects.containsKey(objectName)
-      ) {
-        return null;
-      }
-
-      //There is no such object in this scene.
-
-      // Create a new object using the object constructor (cached during loading)
-      // and the stored object's data:
-      const cache = this._instancesCache.get(objectName);
-      const ctor = this._objectsCtor.get(objectName);
-      let obj;
-      if (!cache || cache.length === 0) {
-        obj = new ctor(this, this._objects.get(objectName));
-      } else {
-        // Reuse an objet destroyed before. If there is an object in the cache,
-        // then it means it does support reinitialization.
-        obj = cache.pop();
-        obj.reinitialize(this._objects.get(objectName));
-      }
-      this.addObject(obj);
-      return obj;
-    }
-
-    /**
-     * Must be called whenever an object must be removed from the scene.
-     * @param obj The object to be removed.
-     */
-    markObjectForDeletion(obj: gdjs.RuntimeObject) {
-      //Add to the objects removed list.
-      //The objects will be sent to the instances cache or really deleted from memory later.
-      if (this._instancesRemoved.indexOf(obj) === -1) {
-        this._instancesRemoved.push(obj);
-      }
-
-      //Delete from the living instances.
-      if (this._instances.containsKey(obj.getName())) {
-        const objId = obj.id;
-        const allInstances = this._instances.get(obj.getName());
-        for (let i = 0, len = allInstances.length; i < len; ++i) {
-          if (allInstances[i].id == objId) {
-            allInstances.splice(i, 1);
-            break;
-          }
-        }
-      }
-
-      //Notify the object it was removed from the scene
-      obj.onDestroyFromScene(this);
-
-      // Notify the global callbacks
-      for (let j = 0; j < gdjs.callbacksObjectDeletedFromScene.length; ++j) {
-        gdjs.callbacksObjectDeletedFromScene[j](this, obj);
-      }
-      return;
+    getResourcesUnloading(): 'at-scene-exit' | 'never' | 'inherit' {
+      return this._resourcesUnloading;
     }
 
     /**
@@ -914,18 +660,91 @@ namespace gdjs {
       return this._lastId;
     }
 
-    /**
-     * Get the renderer associated to the RuntimeScene.
-     */
-    getRenderer() {
+    getRenderer(): gdjs.RuntimeScenePixiRenderer {
       return this._renderer;
     }
 
-    /**
-     * Get the runtimeGame associated to the RuntimeScene.
-     */
+    getDebuggerRenderer() {
+      return this._debuggerRenderer;
+    }
+
     getGame() {
       return this._runtimeGame;
+    }
+
+    getScene() {
+      return this;
+    }
+
+    getUnrotatedViewportMinX(): float {
+      return 0;
+    }
+
+    getUnrotatedViewportMinY(): float {
+      return 0;
+    }
+
+    getUnrotatedViewportMaxX(): float {
+      return this._cachedGameResolutionWidth;
+    }
+
+    getUnrotatedViewportMaxY(): float {
+      return this._cachedGameResolutionHeight;
+    }
+
+    getInitialUnrotatedViewportMinX(): float {
+      return 0;
+    }
+
+    getInitialUnrotatedViewportMinY(): float {
+      return 0;
+    }
+
+    getInitialUnrotatedViewportMaxX(): float {
+      return this.getGame().getOriginalWidth();
+    }
+
+    getInitialUnrotatedViewportMaxY(): float {
+      return this.getGame().getOriginalHeight();
+    }
+
+    getViewportWidth(): float {
+      return this._cachedGameResolutionWidth;
+    }
+
+    getViewportHeight(): float {
+      return this._cachedGameResolutionHeight;
+    }
+
+    getViewportOriginX(): float {
+      return this._cachedGameResolutionWidth / 2;
+    }
+
+    getViewportOriginY(): float {
+      return this._cachedGameResolutionHeight / 2;
+    }
+
+    convertCoords(x: float, y: float, result: FloatPoint): FloatPoint {
+      // The result parameter used to be optional.
+      const point = result || [0, 0];
+      point[0] = x;
+      point[1] = y;
+      return point;
+    }
+
+    convertInverseCoords(
+      sceneX: float,
+      sceneY: float,
+      result: FloatPoint
+    ): FloatPoint {
+      const point = result || [0, 0];
+      point[0] = sceneX;
+      point[1] = sceneY;
+      return point;
+    }
+
+    onChildrenLocationChanged(): void {
+      // Scenes don't maintain bounds.
     }
 
     /**
@@ -937,95 +756,12 @@ namespace gdjs {
     }
 
     /**
-     * Get the data representing the initial shared data of the scene for the specified behavior.
-     * @param name The name of the behavior
-     * @returns The shared data for the behavior, if any.
+     * Get the extension's variables for this scene.
+     * @param extensionName The extension name.
+     * @returns The extension's variables for this scene.
      */
-    getInitialSharedDataForBehavior(name: string): BehaviorSharedData | null {
-      const behaviorSharedData = this._initialBehaviorSharedData.get(name);
-      if (behaviorSharedData) {
-        return behaviorSharedData;
-      }
-      logger.error("Can't find shared data for behavior with name: " + name);
-      return null;
-    }
-
-    /**
-     * Set the data representing the initial shared data of the scene for the specified behavior.
-     * @param name The name of the behavior
-     * @param sharedData The shared data for the behavior, or null to remove it.
-     */
-    setInitialSharedDataForBehavior(
-      name: string,
-      sharedData: BehaviorSharedData | null
-    ): void {
-      this._initialBehaviorSharedData.put(name, sharedData);
-    }
-
-    /**
-     * Get the layer with the given name
-     * @param name The name of the layer
-     * @returns The layer, or the base layer if not found
-     */
-    getLayer(name: string): gdjs.Layer {
-      if (this._layers.containsKey(name)) {
-        return this._layers.get(name);
-      }
-      return this._layers.get('');
-    }
-
-    /**
-     * Check if a layer exists
-     * @param name The name of the layer
-     */
-    hasLayer(name: string): boolean {
-      return this._layers.containsKey(name);
-    }
-
-    /**
-     * Add a layer.
-     * @param layerData The data to construct the layer
-     */
-    addLayer(layerData: LayerData) {
-      this._layers.put(layerData.name, new gdjs.Layer(layerData, this));
-    }
-
-    /**
-     * Remove a layer. All {@link gdjs.RuntimeObject} on this layer will
-     * be moved back to the base layer.
-     * @param layerName The name of the layer to remove
-     */
-    removeLayer(layerName: string) {
-      const allInstances = this.getAdhocListOfAllInstances();
-      for (let i = 0; i < allInstances.length; ++i) {
-        const runtimeObject = allInstances[i];
-        if (runtimeObject.getLayer() === layerName) {
-          runtimeObject.setLayer('');
-        }
-      }
-      this._layers.remove(layerName);
-    }
-
-    /**
-     * Change the position of a layer.
-     *
-     * @param layerName The name of the layer to reorder
-     * @param index The new position in the list of layers
-     */
-    setLayerIndex(layerName: string, index: integer): void {
-      const layer: gdjs.Layer = this._layers.get(layerName);
-      if (!layer) {
-        return;
-      }
-      this._renderer.setLayerIndex(layer, index);
-    }
-
-    /**
-     * Fill the array passed as argument with the names of all layers
-     * @param result The array where to put the layer names
-     */
-    getAllLayerNames(result: string[]) {
-      this._layers.keys(result);
+    getVariablesForExtension(extensionName: string) {
+      return this._variablesByExtensionName.get(extensionName) || null;
     }
 
     /**
@@ -1037,11 +773,26 @@ namespace gdjs {
     }
 
     /**
+     * Return the time elapsed since the last frame,
+     * in milliseconds, for objects on the layer.
+     */
+    getElapsedTime(): float {
+      return this._timeManager.getElapsedTime();
+    }
+
+    /**
      * Shortcut to get the SoundManager of the game.
      * @return The gdjs.SoundManager of the game.
      */
     getSoundManager(): gdjs.SoundManager {
       return this._runtimeGame.getSoundManager();
+    }
+
+    /**
+     * @returns The scene's async tasks manager.
+     */
+    getAsyncTasksManager() {
+      return this._asyncTasksManager;
     }
 
     /**
@@ -1074,7 +825,7 @@ namespace gdjs {
     /**
      * Get the profiler associated with the scene, or null if none.
      */
-    getProfiler() {
+    getProfiler(): gdjs.Profiler | null {
       return this._profiler;
     }
 
@@ -1108,26 +859,6 @@ namespace gdjs {
     }
 
     /**
-     * Get the structure containing the triggers for "Trigger once" conditions.
-     */
-    getOnceTriggers() {
-      return this._onceTriggers;
-    }
-
-    /**
-     * Get a list of all gdjs.RuntimeObject living on the scene.
-     * You should not, normally, need this method at all. It's only to be used
-     * in exceptional use cases where you need to loop through all objects,
-     * and it won't be performant.
-     *
-     * @returns The list of all runtime objects on the scnee
-     */
-    getAdhocListOfAllInstances(): gdjs.RuntimeObject[] {
-      this._constructListOfAllInstances();
-      return this._allInstancesList;
-    }
-
-    /**
      * Check if the scene was just resumed.
      * This is true during the first frame after the scene has been unpaused.
      *
@@ -1136,9 +867,162 @@ namespace gdjs {
     sceneJustResumed(): boolean {
       return this._isJustResumed;
     }
+
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): LayoutNetworkSyncData | null {
+      const syncedPlayerNumber = syncOptions.playerNumber;
+      const variablesNetworkSyncData =
+        this._variables.getNetworkSyncData(syncOptions);
+      const extensionsVariablesSyncData = {};
+      this._variablesByExtensionName.forEach((variables, extensionName) => {
+        const extensionVariablesSyncData =
+          variables.getNetworkSyncData(syncOptions);
+        // If there is no variables to sync, don't include the extension in the sync data.
+        if (extensionVariablesSyncData) {
+          extensionsVariablesSyncData[extensionName] =
+            extensionVariablesSyncData;
+        }
+      });
+
+      if (
+        syncedPlayerNumber !== undefined &&
+        syncedPlayerNumber !== 1 &&
+        !this.networkId
+      ) {
+        // If we are getting sync data for a specific player,
+        // and they are not the host, there is no sync data to send if
+        // the scene has no networkId (it's either not a multiplayer scene or the scene is not yet networked).
+        return null;
+      }
+
+      const networkSyncData: LayoutNetworkSyncData = {
+        var: variablesNetworkSyncData,
+        extVar: extensionsVariablesSyncData,
+        id: this.getOrCreateNetworkId(),
+      };
+      if (syncOptions.syncSceneVisualProps) {
+        networkSyncData.color = this._backgroundColor;
+      }
+      if (syncOptions.syncLayers) {
+        const layersSyncData = {};
+        for (const layerName in this._layers.items) {
+          layersSyncData[layerName] =
+            this._layers.items[layerName].getNetworkSyncData();
+        }
+        networkSyncData.layers = layersSyncData;
+      }
+      if (syncOptions.syncSceneTimers) {
+        networkSyncData.time = this._timeManager.getNetworkSyncData();
+      }
+      if (syncOptions.syncOnceTriggers) {
+        networkSyncData.once = this._onceTriggers.getNetworkSyncData();
+      }
+
+      gdjs.callbacksRuntimeSceneGetSyncData.forEach((callback) => {
+        callback(this, networkSyncData, syncOptions);
+      });
+
+      if (syncOptions.syncAsyncTasks) {
+        networkSyncData.async =
+          this._asyncTasksManager.getNetworkSyncData(syncOptions);
+      }
+
+      return networkSyncData;
+    }
+
+    updateFromNetworkSyncData(
+      syncData: LayoutNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ) {
+      if (syncData.color !== undefined) {
+        this._backgroundColor = syncData.color;
+      }
+      if (syncData.layers) {
+        for (const layerName in syncData.layers) {
+          const layerData = syncData.layers[layerName];
+          if (this.hasLayer(layerName)) {
+            const layer = this.getLayer(layerName);
+            layer.updateFromNetworkSyncData(layerData);
+          }
+        }
+      }
+      // Update variables before anything else, as they might be used
+      // in other sync data (for instance in tweens).
+      if (syncData.var) {
+        this._variables.updateFromNetworkSyncData(syncData.var, options);
+      }
+      if (syncData.extVar) {
+        for (const extensionName in syncData.extVar) {
+          if (!syncData.extVar.hasOwnProperty(extensionName)) {
+            continue;
+          }
+          const extensionVariablesData = syncData.extVar[extensionName];
+          const extensionVariables =
+            this._variablesByExtensionName.get(extensionName);
+          if (extensionVariables) {
+            extensionVariables.updateFromNetworkSyncData(
+              extensionVariablesData,
+              options
+            );
+          }
+        }
+      }
+      if (syncData.time) {
+        this._timeManager.updateFromNetworkSyncData(syncData.time);
+      }
+      if (syncData.once) {
+        this._onceTriggers.updateNetworkSyncData(syncData.once);
+      }
+
+      gdjs.callbacksRuntimeSceneUpdateFromSyncData.forEach((callback) => {
+        callback(this, syncData, options);
+      });
+
+      // Sync Async last, as it might depend on other data.
+      if (syncData.async && this._idToCallbackMap) {
+        this._asyncTasksManager.updateFromNetworkSyncData(
+          syncData.async,
+          this._idToCallbackMap,
+          this,
+          options
+        );
+      }
+    }
+
+    getOrCreateNetworkId(): string {
+      if (!this.networkId) {
+        const newNetworkId = gdjs.makeUuid().substring(0, 8);
+        this.networkId = newNetworkId;
+      }
+      return this.networkId;
+    }
+
+    setRenderer3DWorldScale(worldScale: float): void {
+      const value = Math.abs(worldScale) || 100;
+      this._renderer3DWorldScale = value;
+      this._renderer3DInverseWorldScale = 1 / value;
+
+      for (const layer of this._orderedLayers) {
+        const layerRenderer = layer.getRenderer();
+        layerRenderer.updateWorldScale();
+        layerRenderer.updatePosition();
+      }
+    }
+
+    getRenderer3DWorldScale(): float {
+      return this._renderer3DWorldScale;
+    }
+
+    getRenderer3DInverseWorldScale(): float {
+      return this._renderer3DInverseWorldScale;
+    }
   }
 
-  //The flags to describe the change request by a scene:
+  /**
+   * The flags to describe the change request by a scene.
+   * @category Core Engine > Scene
+   */
   export enum SceneChangeRequest {
     CONTINUE,
     PUSH_SCENE,

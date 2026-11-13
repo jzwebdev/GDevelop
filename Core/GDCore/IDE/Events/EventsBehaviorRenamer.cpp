@@ -11,12 +11,10 @@
 
 #include "GDCore/Events/Event.h"
 #include "GDCore/Events/EventsList.h"
-#include "GDCore/Events/Parsers/ExpressionParser2.h"
 #include "GDCore/Events/Parsers/ExpressionParser2NodePrinter.h"
 #include "GDCore/Events/Parsers/ExpressionParser2NodeWorker.h"
 #include "GDCore/Extensions/Metadata/MetadataProvider.h"
 #include "GDCore/Extensions/Metadata/ParameterMetadataTools.h"
-#include "GDCore/IDE/Events/ExpressionValidator.h"
 #include "GDCore/Project/Layout.h"
 #include "GDCore/Project/Project.h"
 #include "GDCore/String.h"
@@ -32,14 +30,10 @@ namespace gd {
 class GD_CORE_API ExpressionBehaviorRenamer
     : public ExpressionParser2NodeWorker {
  public:
-  ExpressionBehaviorRenamer(const gd::ObjectsContainer& globalObjectsContainer_,
-                            const gd::ObjectsContainer& objectsContainer_,
-                            const gd::String& objectName_,
+  ExpressionBehaviorRenamer(const gd::String& objectName_,
                             const gd::String& oldBehaviorName_,
                             const gd::String& newBehaviorName_)
       : hasDoneRenaming(false),
-        globalObjectsContainer(globalObjectsContainer_),
-        objectsContainer(objectsContainer_),
         objectName(objectName_),
         oldBehaviorName(oldBehaviorName_),
         newBehaviorName(newBehaviorName_){};
@@ -98,8 +92,6 @@ class GD_CORE_API ExpressionBehaviorRenamer
 
  private:
   bool hasDoneRenaming;
-  const gd::ObjectsContainer& globalObjectsContainer;
-  const gd::ObjectsContainer& objectsContainer;
   const gd::String& objectName;  // The object name for which the behavior
                                  // must be replaced.
   const gd::String& oldBehaviorName;
@@ -115,34 +107,23 @@ bool EventsBehaviorRenamer::DoVisitInstruction(gd::Instruction& instruction,
                                    platform, instruction.GetType());
 
   gd::ParameterMetadataTools::IterateOverParametersWithIndex(
-      instruction.GetParameters(),
-      metadata.GetParameters(),
-      [&](const gd::ParameterMetadata& parameterMetadata,
-          const gd::String& parameterValue,
-          size_t parameterIndex,
-          const gd::String& lastObjectName) {
-        const gd::String& type = parameterMetadata.type;
+      instruction.GetParameters(), metadata.GetParameters(),
+      [&](const gd::ParameterMetadata &parameterMetadata,
+          const gd::Expression &parameterValue, size_t parameterIndex,
+          const gd::String &lastObjectName, size_t lastObjectIndex) {
+        const gd::String& type = parameterMetadata.GetType();
 
         if (gd::ParameterMetadata::IsBehavior(type)) {
           if (lastObjectName == objectName) {
-            if (parameterValue == oldBehaviorName) {
+            if (parameterValue.GetPlainString() == oldBehaviorName) {
               instruction.SetParameter(parameterIndex,
                                        gd::Expression(newBehaviorName));
             }
           }
         } else {
-          gd::ExpressionParser2 parser(
-              platform, GetGlobalObjectsContainer(), GetObjectsContainer());
-          auto node =
-              gd::ParameterMetadata::IsExpression("number", type)
-                  ? parser.ParseExpression("number", parameterValue)
-                  : (gd::ParameterMetadata::IsExpression("string", type)
-                         ? parser.ParseExpression("string", parameterValue)
-                         : std::unique_ptr<gd::ExpressionNode>());
+          auto node = parameterValue.GetRootNode();
           if (node) {
-            ExpressionBehaviorRenamer renamer(GetGlobalObjectsContainer(),
-                                              GetObjectsContainer(),
-                                              objectName,
+            ExpressionBehaviorRenamer renamer(objectName,
                                               oldBehaviorName,
                                               newBehaviorName);
             node->Visit(renamer);

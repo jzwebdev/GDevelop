@@ -4,12 +4,36 @@ Copyright (c) 2010-2016 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
   const logger = new gdjs.Logger('Pathfinding behavior');
+
+  interface PathfindingNetworkSyncDataType {
+    // Syncing the path and its position on it should be enough to have a good prediction.
+    path: FloatPoint[];
+    pf: boolean;
+    sp: number;
+    as: number;
+    cs: number;
+    tss: number;
+    re: boolean;
+    ma: number;
+    dos: number;
+  }
+
+  /** @category Behaviors > 2D Pathfinding */
+  export interface PathfindingNetworkSyncData extends BehaviorNetworkSyncData {
+    props: PathfindingNetworkSyncDataType;
+  }
+
   /**
    * PathfindingRuntimeBehavior represents a behavior allowing objects to
    * follow a path computed to avoid obstacles.
+   * @category Behaviors > 2D Pathfinding
    */
   export class PathfindingRuntimeBehavior extends gdjs.RuntimeBehavior {
     _path: Array<FloatPoint> = [];
+    /** Used by the path simplification algorithm */
+    static _smoothingResultVertices: Array<FloatPoint> = [];
+    /** Used by the path simplification algorithm */
+    static _smoothingWorkingVertices: Array<FloatPoint> = [];
 
     //Behavior configuration:
     _allowDiagonals: boolean;
@@ -23,6 +47,7 @@ namespace gdjs {
     _gridOffsetX: float;
     _gridOffsetY: float;
     _extraBorder: float;
+    _smoothingMaxCellGap: float;
 
     //Attributes used for traveling on the path:
     _pathFound: boolean = false;
@@ -38,11 +63,11 @@ namespace gdjs {
     _movementAngle: float = 0;
 
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
+      instanceContainer: gdjs.RuntimeInstanceContainer,
       behaviorData,
       owner: gdjs.RuntimeObject
     ) {
-      super(runtimeScene, behaviorData, owner);
+      super(instanceContainer, behaviorData, owner);
 
       //The path computed and followed by the object (Array of arrays containing x and y position)
       if (this._path === undefined) {
@@ -60,47 +85,109 @@ namespace gdjs {
       this._gridOffsetX = behaviorData.gridOffsetX || 0;
       this._gridOffsetY = behaviorData.gridOffsetY || 0;
       this._extraBorder = behaviorData.extraBorder;
-      this._manager = gdjs.PathfindingObstaclesManager.getManager(runtimeScene);
+      this._smoothingMaxCellGap = behaviorData.smoothingMaxCellGap || 0;
+      this._manager =
+        gdjs.PathfindingObstaclesManager.getManager(instanceContainer);
       this._searchContext = new gdjs.PathfindingRuntimeBehavior.SearchContext(
         this._manager
       );
     }
 
-    updateFromBehaviorData(oldBehaviorData, newBehaviorData): boolean {
-      if (oldBehaviorData.allowDiagonals !== newBehaviorData.allowDiagonals) {
-        this.allowDiagonals(newBehaviorData.allowDiagonals);
+    override applyBehaviorOverriding(behaviorData): boolean {
+      if (behaviorData.allowDiagonals !== undefined) {
+        this.allowDiagonals(behaviorData.allowDiagonals);
       }
-      if (oldBehaviorData.acceleration !== newBehaviorData.acceleration) {
-        this.setAcceleration(newBehaviorData.acceleration);
+      if (behaviorData.acceleration !== undefined) {
+        this.setAcceleration(behaviorData.acceleration);
       }
-      if (oldBehaviorData.maxSpeed !== newBehaviorData.maxSpeed) {
-        this.setMaxSpeed(newBehaviorData.maxSpeed);
+      if (behaviorData.maxSpeed !== undefined) {
+        this.setMaxSpeed(behaviorData.maxSpeed);
       }
-      if (oldBehaviorData.angularMaxSpeed !== newBehaviorData.angularMaxSpeed) {
-        this.setAngularMaxSpeed(newBehaviorData.angularMaxSpeed);
+      if (behaviorData.angularMaxSpeed !== undefined) {
+        this.setAngularMaxSpeed(behaviorData.angularMaxSpeed);
       }
-      if (oldBehaviorData.rotateObject !== newBehaviorData.rotateObject) {
-        this.setRotateObject(newBehaviorData.rotateObject);
+      if (behaviorData.rotateObject !== undefined) {
+        this.setRotateObject(behaviorData.rotateObject);
       }
-      if (oldBehaviorData.angleOffset !== newBehaviorData.angleOffset) {
-        this.setAngleOffset(newBehaviorData.angleOffset);
+      if (behaviorData.angleOffset !== undefined) {
+        this.setAngleOffset(behaviorData.angleOffset);
       }
-      if (oldBehaviorData.cellWidth !== newBehaviorData.cellWidth) {
-        this.setCellWidth(newBehaviorData.cellWidth);
+      if (behaviorData.cellWidth !== undefined) {
+        this.setCellWidth(behaviorData.cellWidth);
       }
-      if (oldBehaviorData.cellHeight !== newBehaviorData.cellHeight) {
-        this.setCellHeight(newBehaviorData.cellHeight);
+      if (behaviorData.cellHeight !== undefined) {
+        this.setCellHeight(behaviorData.cellHeight);
       }
-      if (oldBehaviorData.gridOffsetX !== newBehaviorData.gridOffsetX) {
-        this._gridOffsetX = newBehaviorData.gridOffsetX;
+      if (behaviorData.gridOffsetX !== undefined) {
+        this._gridOffsetX = behaviorData.gridOffsetX;
       }
-      if (oldBehaviorData.gridOffsetY !== newBehaviorData.gridOffsetY) {
-        this._gridOffsetY = newBehaviorData.gridOffsetY;
+      if (behaviorData.gridOffsetY !== undefined) {
+        this._gridOffsetY = behaviorData.gridOffsetY;
       }
-      if (oldBehaviorData.extraBorder !== newBehaviorData.extraBorder) {
-        this.setExtraBorder(newBehaviorData.extraBorder);
+      if (behaviorData.extraBorder !== undefined) {
+        this.setExtraBorder(behaviorData.extraBorder);
+      }
+      if (behaviorData.smoothingMaxCellGap !== undefined) {
+        this._smoothingMaxCellGap = behaviorData.smoothingMaxCellGap;
       }
       return true;
+    }
+
+    getNetworkSyncData(
+      options: GetNetworkSyncDataOptions
+    ): PathfindingNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(options),
+        props: {
+          path: this._path,
+          pf: this._pathFound,
+          sp: this._speed,
+          as: this._angularSpeed,
+          cs: this._currentSegment,
+          tss: this._totalSegmentDistance,
+          re: this._reachedEnd,
+          ma: this._movementAngle,
+          dos: this._distanceOnSegment,
+        },
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: PathfindingNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+      const behaviorSpecificProps = networkSyncData.props;
+      if (behaviorSpecificProps.path !== undefined) {
+        this._path = behaviorSpecificProps.path;
+      }
+      if (behaviorSpecificProps.pf !== undefined) {
+        this._pathFound = behaviorSpecificProps.pf;
+      }
+      if (behaviorSpecificProps.sp !== undefined) {
+        this._speed = behaviorSpecificProps.sp;
+      }
+      if (behaviorSpecificProps.as !== undefined) {
+        this._angularSpeed = behaviorSpecificProps.as;
+      }
+      if (
+        behaviorSpecificProps.cs !== undefined &&
+        behaviorSpecificProps.cs !== this._currentSegment
+      ) {
+        this._currentSegment = behaviorSpecificProps.cs;
+      }
+      if (behaviorSpecificProps.tss !== undefined) {
+        this._totalSegmentDistance = behaviorSpecificProps.tss;
+      }
+      if (behaviorSpecificProps.re !== undefined) {
+        this._reachedEnd = behaviorSpecificProps.re;
+      }
+      if (behaviorSpecificProps.ma !== undefined) {
+        this._movementAngle = behaviorSpecificProps.ma;
+      }
+      if (behaviorSpecificProps.dos !== undefined) {
+        this._distanceOnSegment = behaviorSpecificProps.dos;
+      }
     }
 
     setCellWidth(width: float): void {
@@ -165,9 +252,8 @@ namespace gdjs {
 
     movementAngleIsAround(degreeAngle: float, tolerance: float) {
       return (
-        gdjs.evtTools.common.angleDifference(
-          this._movementAngle,
-          degreeAngle
+        Math.abs(
+          gdjs.evtTools.common.angleDifference(this._movementAngle, degreeAngle)
         ) <= tolerance
       );
     }
@@ -313,7 +399,11 @@ namespace gdjs {
     /**
      * Compute and move on the path to the specified destination.
      */
-    moveTo(runtimeScene: gdjs.RuntimeScene, x: float, y: float) {
+    moveTo(
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      x: float,
+      y: float
+    ) {
       const owner = this.owner;
 
       //First be sure that there is a path to compute.
@@ -371,12 +461,26 @@ namespace gdjs {
         this._path.reverse();
         this._path[0][0] = owner.getX();
         this._path[0][1] = owner.getY();
+
+        if (this._allowDiagonals && this._smoothingMaxCellGap > 0) {
+          gdjs.pathfinding.simplifyPath(
+            this._path,
+            this._smoothingMaxCellGap *
+              Math.min(this._cellWidth, this._cellHeight),
+            gdjs.PathfindingRuntimeBehavior._smoothingResultVertices,
+            gdjs.PathfindingRuntimeBehavior._smoothingWorkingVertices
+          );
+          let swapArray = this._path;
+          this._path = gdjs.PathfindingRuntimeBehavior._smoothingResultVertices;
+          gdjs.PathfindingRuntimeBehavior._smoothingResultVertices = swapArray;
+        }
+
         this._enterSegment(0);
         this._pathFound = true;
         return;
       }
 
-      //Not path found
+      // No path found
       this._pathFound = false;
     }
 
@@ -403,13 +507,13 @@ namespace gdjs {
       }
     }
 
-    doStepPreEvents(runtimeScene: gdjs.RuntimeScene) {
+    doStepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {
       if (this._path.length === 0 || this._reachedEnd) {
         return;
       }
 
       // Update the speed of the object
-      const timeDelta = this.owner.getElapsedTime(runtimeScene) / 1000;
+      const timeDelta = this.owner.getElapsedTime() / 1000;
       const previousSpeed = this._speed;
       if (this._speed !== this._maxSpeed) {
         this._speed += this._acceleration * timeDelta;
@@ -452,8 +556,7 @@ namespace gdjs {
         ) {
           this.owner.rotateTowardAngle(
             this._movementAngle + this._angleOffset,
-            this._angularSpeed,
-            runtimeScene
+            this._angularSpeed
           );
         }
       } else {
@@ -463,7 +566,7 @@ namespace gdjs {
       this.owner.setY(newPos[1]);
     }
 
-    doStepPostEvents(runtimeScene: gdjs.RuntimeScene) {}
+    doStepPostEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {}
 
     /**
      * Compute the euclidean distance between two positions.
@@ -488,6 +591,7 @@ namespace gdjs {
     gdjs.PathfindingRuntimeBehavior
   );
 
+  /** @category Behaviors > 2D Pathfinding */
   export namespace PathfindingRuntimeBehavior {
     /**
      * Internal tool class representing a node when looking for a path
@@ -519,6 +623,7 @@ namespace gdjs {
      * Internal tool class containing the structures used by A* and members functions related
      * to them.
      * @ignore
+     * @category Behaviors > 2D Pathfinding
      */
     export class SearchContext {
       _obstacles: PathfindingObstaclesManager;
@@ -534,19 +639,18 @@ namespace gdjs {
       _gridOffsetX: float = 0;
       _gridOffsetY: float = 0;
 
-      _leftBorder: integer = 0;
-      _rightBorder: integer = 0;
-      _topBorder: integer = 0;
-      _bottomBorder: integer = 0;
+      /** Distance on the left from the owner position that is considered as solid (in pixels) */
+      _leftBorder: float = 0;
+      _rightBorder: float = 0;
+      _topBorder: float = 0;
+      _bottomBorder: float = 0;
       _distanceFunction: (pt1: FloatPoint, pt2: FloatPoint) => float;
       //An array of array. Nodes are indexed by their x position, and then by their y position.
       _allNodes: Node[][] = [];
       //An array of nodes sorted by their estimate cost (First node = Lower estimate cost).
       _openNodes: Node[] = [];
       //Used by getNodes to temporarily store obstacles near a position.
-      _closeObstacles: gdjs.BehaviorRBushAABB<
-        PathfindingObstacleRuntimeBehavior
-      >[] = [];
+      _closeObstacles: gdjs.PathfindingObstacleRuntimeBehavior[] = [];
       //Old nodes constructed in a previous search are stored here to avoid temporary objects (see _freeAllNodes method).
       _nodeCache: Node[] = [];
 
@@ -584,10 +688,10 @@ namespace gdjs {
       }
 
       setObjectSize(
-        leftBorder: integer,
-        topBorder: integer,
-        rightBorder: integer,
-        bottomBorder: integer
+        leftBorder: float,
+        topBorder: float,
+        rightBorder: float,
+        bottomBorder: float
       ): PathfindingRuntimeBehavior.SearchContext {
         this._leftBorder = leftBorder;
         this._rightBorder = rightBorder;
@@ -650,6 +754,9 @@ namespace gdjs {
         while (this._openNodes.length !== 0) {
           //Make sure we do not search forever.
           if (iterationCount++ > maxIterationCount) {
+            console.warn(
+              `No path was found after covering ${maxIterationCount} cells.`
+            );
             return false;
           }
 
@@ -787,7 +894,7 @@ namespace gdjs {
           this._closeObstacles
         );
         for (let k = 0; k < this._closeObstacles.length; ++k) {
-          const obj = this._closeObstacles[k].behavior.owner;
+          const obj = this._closeObstacles[k].owner;
           const topLeftCellX = Math.floor(
             (obj.getDrawableX() - this._rightBorder - this._gridOffsetX) /
               this._cellWidth
@@ -816,14 +923,26 @@ namespace gdjs {
             topLeftCellY < yPos &&
             yPos < bottomRightCellY
           ) {
-            objectsOnCell = true;
-            if (this._closeObstacles[k].behavior.isImpassable()) {
-              //The cell is impassable, stop here.
-              newNode.cost = -1;
+            let hasAnyHitBoxInCell = false;
+            for (const _hitbox of obj.getHitBoxesAround(
+              nodeCenterX - this._leftBorder,
+              nodeCenterY - this._topBorder,
+              nodeCenterX + this._rightBorder - 1,
+              nodeCenterY + this._bottomBorder - 1
+            )) {
+              hasAnyHitBoxInCell = true;
               break;
-            } else {
-              //Superimpose obstacles
-              newNode.cost += this._closeObstacles[k].behavior.getCost();
+            }
+            if (hasAnyHitBoxInCell) {
+              objectsOnCell = true;
+              if (this._closeObstacles[k].isImpassable()) {
+                //The cell is impassable, stop here.
+                newNode.cost = -1;
+                break;
+              } else {
+                //Superimpose obstacles
+                newNode.cost += this._closeObstacles[k].getCost();
+              }
             }
           }
         }

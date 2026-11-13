@@ -11,8 +11,8 @@ This project is released under the MIT License.
 #include "ExtensionSubDeclaration2.h"
 #include "ExtensionSubDeclaration3.h"
 #include "GDCore/Extensions/PlatformExtension.h"
-#include "GDCore/Tools/Localization.h"
 #include "GDCore/Project/BehaviorsSharedData.h"
+#include "GDCore/Tools/Localization.h"
 #include "ParticleEmitterObject.h"
 
 void DeclareParticleSystemExtension(gd::PlatformExtension& extension) {
@@ -20,23 +20,31 @@ void DeclareParticleSystemExtension(gd::PlatformExtension& extension) {
       .SetExtensionInformation(
           "ParticleSystem",
           _("Particle system"),
-          "A particle emitter allows to create various effects by showing a "
+          "A 2D particle emitter allows to create various effects by showing a "
           "lot of tiny images called particles. It's ideal for fires, smoke, "
-          "explosions, magical effects, etc...",
+          "explosions, magical effects, etc... in 2D games. For 3D games, use "
+          "the 3D particle emitter instead.",
           "Florian Rival",
           "Open source (MIT License)")
+      .SetShortDescription("2D particle emitter for fire, smoke, explosions, magic effects. Configurable color, size, speed, lifetime.")
+      .SetDimension("2D")
+      .SetCategory("Visual effect")
       .SetExtensionHelpPath("/objects/particles_emitter");
+  extension.AddInstructionOrExpressionGroupMetadata(_("Particle system"))
+      .SetIcon("CppPlatform/Extensions/particleSystemicon.png");
 
   // Declaration of all objects available
   {
-    gd::ObjectMetadata& obj = extension.AddObject<ParticleEmitterObject>(
-        "ParticleEmitter",
-        _("Particles emitter"),
-        _("Displays a large number of small particles to create visual "
-          "effects."),
-        "CppPlatform/Extensions/particleSystemicon.png");
-
-    obj.SetIncludeFile("ParticleSystem/ParticleEmitterObject.h");
+    gd::ObjectMetadata& obj =
+        extension
+            .AddObject<ParticleEmitterObject>(
+                "ParticleEmitter",
+                _("2D particles emitter"),
+                _("2D effects like smoke, fire or sparks."),
+                "CppPlatform/Extensions/particleSystemicon.png")
+            .SetCategory("Visual effect")
+            .SetAssetStoreTag("particles emitter")
+            .AddDefaultBehavior("EffectCapability::EffectBehavior");
 
     // Declaration is too big to be compiled by GCC in one file, unless you have
     // 4GB+ ram. :/

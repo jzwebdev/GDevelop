@@ -8,6 +8,8 @@ namespace gdjs {
   /**
    * Manage the common objects shared by objects having a
    * physics behavior.
+   * @category Behaviors > Physics (deprecated)
+   * @deprecated
    */
   export class PhysicsSharedData {
     stepped: boolean = false;
@@ -48,8 +50,9 @@ namespace gdjs {
         ) {
           return;
         }
-        const behaviorA = contact.GetFixtureA().GetBody()
-            .gdjsAssociatedBehavior,
+        const behaviorA = contact
+            .GetFixtureA()
+            .GetBody().gdjsAssociatedBehavior,
           behaviorB = contact.GetFixtureB().GetBody().gdjsAssociatedBehavior;
         behaviorA.currentContacts.push(behaviorB);
         behaviorB.currentContacts.push(behaviorA);
@@ -68,8 +71,9 @@ namespace gdjs {
         ) {
           return;
         }
-        const behaviorA = contact.GetFixtureA().GetBody()
-            .gdjsAssociatedBehavior,
+        const behaviorA = contact
+            .GetFixtureA()
+            .GetBody().gdjsAssociatedBehavior,
           behaviorB = contact.GetFixtureB().GetBody().gdjsAssociatedBehavior;
         let i = behaviorA.currentContacts.indexOf(behaviorB);
         if (i !== -1) {
@@ -127,6 +131,8 @@ namespace gdjs {
 
   /**
    * Allows objects to be moved in a realistic way thanks to a physics engine (Box2D).
+   * @category Behaviors > Physics (deprecated)
+   * @deprecated
    */
   export class PhysicsRuntimeBehavior extends gdjs.RuntimeBehavior {
     _box2DBody: any = null;
@@ -175,29 +181,29 @@ namespace gdjs {
     }
 
     //See b2Vec2 method
-    updateFromBehaviorData(oldBehaviorData, newBehaviorData): boolean {
-      if (oldBehaviorData.dynamic !== newBehaviorData.dynamic) {
-        if (newBehaviorData.dynamic) {
+    override applyBehaviorOverriding(behaviorData): boolean {
+      if (behaviorData.dynamic !== undefined) {
+        if (behaviorData.dynamic) {
           this.setDynamic();
         } else {
           this.setStatic();
         }
       }
-      if (oldBehaviorData.angularDamping !== newBehaviorData.angularDamping) {
-        this.setAngularDamping(newBehaviorData.angularDamping);
+      if (behaviorData.angularDamping !== undefined) {
+        this.setAngularDamping(behaviorData.angularDamping);
       }
-      if (oldBehaviorData.linearDamping !== newBehaviorData.linearDamping) {
-        this.setLinearDamping(newBehaviorData.linearDamping);
+      if (behaviorData.linearDamping !== undefined) {
+        this.setLinearDamping(behaviorData.linearDamping);
       }
-      if (oldBehaviorData.isBullet !== newBehaviorData.isBullet) {
-        if (newBehaviorData.isBullet) {
+      if (behaviorData.isBullet !== undefined) {
+        if (behaviorData.isBullet) {
           this.setAsBullet();
         } else {
           this.dontSetAsBullet();
         }
       }
-      if (oldBehaviorData.fixedRotation !== newBehaviorData.fixedRotation) {
-        if (newBehaviorData.fixedRotation) {
+      if (behaviorData.fixedRotation !== undefined) {
+        if (behaviorData.fixedRotation) {
           this.setFixedRotation();
         } else {
           this.setFreeRotation();
@@ -205,19 +211,16 @@ namespace gdjs {
       }
 
       // TODO: make these properties updatable.
-      if (oldBehaviorData.massDensity !== newBehaviorData.massDensity) {
+      if (behaviorData.massDensity !== undefined) {
         return false;
       }
-      if (oldBehaviorData.averageFriction !== newBehaviorData.averageFriction) {
+      if (behaviorData.averageFriction !== undefined) {
         return false;
       }
-      if (
-        oldBehaviorData.averageRestitution !==
-        newBehaviorData.averageRestitution
-      ) {
+      if (behaviorData.averageRestitution !== undefined) {
         return false;
       }
-      if (oldBehaviorData.shapeType !== newBehaviorData.shapeType) {
+      if (behaviorData.shapeType !== undefined) {
         return false;
       }
       return true;

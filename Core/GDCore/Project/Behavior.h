@@ -3,90 +3,100 @@
  * Copyright 2008-2016 Florian Rival (Florian.Rival@gmail.com). All rights
  * reserved. This project is released under the MIT License.
  */
-#ifndef GDCORE_BEHAVIOR_H
-#define GDCORE_BEHAVIOR_H
-#include <map>
+#pragma once
+
 #include "GDCore/String.h"
-#if defined(GD_IDE_ONLY)
-namespace gd {
-class PropertyDescriptor;
-}
-#endif
-namespace gd {
-class SerializerElement;
-class Project;
-class Layout;
-}  // namespace gd
+#include "GDCore/Project/BehaviorConfigurationContainer.h"
+#include "GDCore/Project/MemoryTrackedRegistry.h"
+#include "GDCore/Tools/MakeUnique.h"
 
 namespace gd {
 
 /**
  * \brief Base class used to represents a behavior that can be applied to an
- * object
+ * object. It stores the content (i.e: the properties) of a behavior of an object
+ * and forward the properties related functions to Javascript with Emscripten.
  *
- * \see gd::BehaviorContent
  * \see gd::BehaviorsSharedData
+ * \see gd::Object
  * \ingroup PlatformDefinition
  */
-class GD_CORE_API Behavior {
+class GD_CORE_API Behavior: public BehaviorConfigurationContainer {
  public:
-  Behavior(){};
+
+  Behavior()
+      : BehaviorConfigurationContainer(),
+        isDefaultBehavior(false),
+        isSynchronizedOverNetwork(true),
+        isSynchronizedOverNetworkByDefault(true) {};
+  Behavior(const gd::String& name_, const gd::String& type_)
+      : BehaviorConfigurationContainer(name_, type_),
+        isDefaultBehavior(false),
+        isSynchronizedOverNetwork(true),
+        isSynchronizedOverNetworkByDefault(true) {};
+  Behavior(const Behavior& other)
+      : BehaviorConfigurationContainer(other),
+        isDefaultBehavior(other.isDefaultBehavior),
+        isSynchronizedOverNetwork(other.isSynchronizedOverNetwork),
+        isSynchronizedOverNetworkByDefault(
+            other.isSynchronizedOverNetworkByDefault) {};
+  Behavior& operator=(const Behavior& other) {
+    if (this != &other) {
+      BehaviorConfigurationContainer::operator=(other);
+      isDefaultBehavior = other.isDefaultBehavior;
+      isSynchronizedOverNetwork = other.isSynchronizedOverNetwork;
+      isSynchronizedOverNetworkByDefault =
+          other.isSynchronizedOverNetworkByDefault;
+    }
+    return *this;
+  }
   virtual ~Behavior();
-  virtual Behavior* Clone() const { return new Behavior(*this); }
+  virtual std::unique_ptr<gd::Behavior> Clone() const {
+    return gd::make_unique<gd::Behavior>(*this);
+  }
+
+  bool IsDefaultBehavior() const {
+    return isDefaultBehavior;
+  }
+
+  void SetDefaultBehavior(bool isDefaultBehavior_) {
+    isDefaultBehavior = isDefaultBehavior_;
+  }
 
   /**
-   * \brief Return the type of the behavior
-   */
-  const gd::String& GetTypeName() const { return type; }
-
-  /**
-   * \brief Set the type of the behavior.
-   */
-  void SetTypeName(const gd::String& type_) { type = type_; };
-
-#if defined(GD_IDE_ONLY)
-  /**
-   * \brief Called when the IDE wants to know about the custom properties of the
-   * behavior.
+   * \brief Check if the behavior state is synchronized with other players,
+   * when its object is synchronized over the network (multiplayer).
    *
-   * Implementation example:
-   \code
-      std::map<gd::String, gd::PropertyDescriptor> properties;
-      properties[_("Initial speed")].SetValue(gd::String::From(initialSpeed));
-
-      return properties;
-   \endcode
-   *
-   * \return a std::map with properties names as key.
-   * \see gd::PropertyDescriptor
+   * When not synchronized, the behavior only runs as decided by the game of
+   * the player owning the object (useful for behaviors reacting to the inputs
+   * of the player).
    */
-  virtual std::map<gd::String, gd::PropertyDescriptor> GetProperties(
-      const gd::SerializerElement& behaviorContent) const;
+  bool IsSynchronizedOverNetwork() const { return isSynchronizedOverNetwork; }
+
+  void SetSynchronizedOverNetwork(bool isSynchronizedOverNetwork_) {
+    isSynchronizedOverNetwork = isSynchronizedOverNetwork_;
+  }
 
   /**
-   * \brief Called when the IDE wants to update a custom property of the
-   * behavior
-   *
-   * \return false if the new value cannot be set
-   * \see gd::InitialInstance
+   * \brief Check if the behavior is synchronized over the network when not
+   * specified otherwise. This comes from the behavior metadata, and is not
+   * serialized: `IsSynchronizedOverNetwork` is only serialized when it's
+   * different from this.
    */
-  virtual bool UpdateProperty(gd::SerializerElement& behaviorContent,
-                              const gd::String& name,
-                              const gd::String& value) {
-    return false;
-  };
-#endif
+  bool IsSynchronizedOverNetworkByDefault() const {
+    return isSynchronizedOverNetworkByDefault;
+  }
 
-  /**
-   * \brief Called to initialize the content with the default properties
-   * for the behavior.
-   */
-  virtual void InitializeContent(gd::SerializerElement& behaviorContent){};
+  void SetSynchronizedOverNetworkByDefault(
+      bool isSynchronizedOverNetworkByDefault_) {
+    isSynchronizedOverNetworkByDefault = isSynchronizedOverNetworkByDefault_;
+  }
 
- private:
-  gd::String type;
+  private:
+  gd::MemoryTracked _memoryTracked{this, "Behavior"};
+  bool isDefaultBehavior;
+  bool isSynchronizedOverNetwork;
+  bool isSynchronizedOverNetworkByDefault;
 };
 
 }  // namespace gd
-
-#endif  // GDCORE_BEHAVIOR_H

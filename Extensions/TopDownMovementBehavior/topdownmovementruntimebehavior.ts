@@ -4,9 +4,29 @@ Copyright (c) 2010-2016 Florian Rival (Florian.Rival@gmail.com)
  */
 
 namespace gdjs {
+  interface TopDownMovementNetworkSyncDataType {
+    a: float;
+    xv: float;
+    yv: float;
+    as: float;
+    lk: boolean;
+    rk: boolean;
+    uk: boolean;
+    dk: boolean;
+    wsu: boolean;
+    sa: float;
+    sf: float;
+  }
+
+  /** @category Behaviors > Top-down movement */
+  export interface TopDownMovementNetworkSyncData
+    extends BehaviorNetworkSyncData {
+    props: TopDownMovementNetworkSyncDataType;
+  }
   /**
    * Allows an object to move in 4 or 8 directions, with customizable speed, accelerations
    * and rotation.
+   * @category Behaviors > Top-down movement
    */
   export class TopDownMovementRuntimeBehavior extends gdjs.RuntimeBehavior {
     //Behavior configuration:
@@ -19,13 +39,12 @@ namespace gdjs {
     private _angleOffset: float;
     private _ignoreDefaultControls: boolean;
     private _movementAngleOffset: float;
+    private _useLegacyTurnBack: boolean;
 
     /** The latest angle of movement, in degrees. */
     private _angle: float = 0;
 
     //Attributes used when moving
-    private _x: float = 0;
-    private _y: float = 0;
     private _xVelocity: float = 0;
     private _yVelocity: float = 0;
     private _angularSpeed: float = 0;
@@ -35,23 +54,44 @@ namespace gdjs {
     private _rightKey: boolean = false;
     private _upKey: boolean = false;
     private _downKey: boolean = false;
-    private _leftKeyPressedDuration: integer = -1;
-    private _rightKeyPressedDuration: integer = -1;
-    private _upKeyPressedDuration: integer = -1;
-    private _downKeyPressedDuration: integer = -1;
+    private _leftKeyPressedDuration: float = 0;
+    private _rightKeyPressedDuration: float = 0;
+    private _upKeyPressedDuration: float = 0;
+    private _downKeyPressedDuration: float = 0;
+    private _wasStickUsed: boolean = false;
     private _stickAngle: float = 0;
     private _stickForce: float = 0;
+
+    // This is useful when the object is synchronized by an external source
+    // like in a multiplayer game, and we want to be able to predict the
+    // movement of the object, even if the inputs are not updated every frame.
+    private _clearInputsBetweenFrames: boolean = true;
+    // This is useful when the object is synchronized over the network,
+    // object is controlled by the network and we want to ensure the current player
+    // cannot control it.
+    _ignoreDefaultControlsAsSyncedByNetwork: boolean = false;
+
+    // This is useful for extensions that need to know
+    // which keys were pressed and doesn't know the mapping
+    // done by the scene events.
+    private _wasLeftKeyPressed: boolean = false;
+    private _wasRightKeyPressed: boolean = false;
+    private _wasUpKeyPressed: boolean = false;
+    private _wasDownKeyPressed: boolean = false;
 
     // @ts-ignore The setter "setViewpoint" is not detected as an affectation.
     private _basisTransformation: gdjs.TopDownMovementRuntimeBehavior.BasisTransformation | null;
     private _temporaryPointForTransformations: FloatPoint = [0, 0];
 
+    private _topDownMovementHooks: Array<gdjs.TopDownMovementRuntimeBehavior.TopDownMovementHook> =
+      [];
+
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
+      instanceContainer: gdjs.RuntimeInstanceContainer,
       behaviorData,
       owner: gdjs.RuntimeObject
     ) {
-      super(runtimeScene, behaviorData, owner);
+      super(instanceContainer, behaviorData, owner);
       this._allowDiagonals = behaviorData.allowDiagonals;
       this._acceleration = behaviorData.acceleration;
       this._deceleration = behaviorData.deceleration;
@@ -65,68 +105,141 @@ namespace gdjs {
         behaviorData.customIsometryAngle
       );
       this._movementAngleOffset = behaviorData.movementAngleOffset || 0;
+      this._useLegacyTurnBack =
+        behaviorData.useLegacyTurnBack === undefined
+          ? true
+          : behaviorData.useLegacyTurnBack;
     }
 
-    updateFromBehaviorData(oldBehaviorData, newBehaviorData): boolean {
-      if (oldBehaviorData.allowDiagonals !== newBehaviorData.allowDiagonals) {
-        this._allowDiagonals = newBehaviorData.allowDiagonals;
+    getNetworkSyncData(
+      options: GetNetworkSyncDataOptions
+    ): TopDownMovementNetworkSyncData {
+      // This method is called, so we are synchronizing this object.
+      // Let's clear the inputs between frames as we control it.
+      this._clearInputsBetweenFrames = true;
+      this._ignoreDefaultControlsAsSyncedByNetwork = false;
+
+      return {
+        ...super.getNetworkSyncData(options),
+        props: {
+          a: this._angle,
+          xv: this._xVelocity,
+          yv: this._yVelocity,
+          as: this._angularSpeed,
+          lk: this._wasLeftKeyPressed,
+          rk: this._wasRightKeyPressed,
+          uk: this._wasUpKeyPressed,
+          dk: this._wasDownKeyPressed,
+          wsu: this._wasStickUsed,
+          sa: this._stickAngle,
+          sf: this._stickForce,
+        },
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: TopDownMovementNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      const behaviorSpecificProps = networkSyncData.props;
+      if (behaviorSpecificProps.a !== undefined) {
+        this._angle = behaviorSpecificProps.a;
       }
-      if (oldBehaviorData.acceleration !== newBehaviorData.acceleration) {
-        this._acceleration = newBehaviorData.acceleration;
+      if (behaviorSpecificProps.xv !== undefined) {
+        this._xVelocity = behaviorSpecificProps.xv;
       }
-      if (oldBehaviorData.deceleration !== newBehaviorData.deceleration) {
-        this._deceleration = newBehaviorData.deceleration;
+      if (behaviorSpecificProps.yv !== undefined) {
+        this._yVelocity = behaviorSpecificProps.yv;
       }
-      if (oldBehaviorData.maxSpeed !== newBehaviorData.maxSpeed) {
-        this._maxSpeed = newBehaviorData.maxSpeed;
+      if (behaviorSpecificProps.as !== undefined) {
+        this._angularSpeed = behaviorSpecificProps.as;
       }
-      if (oldBehaviorData.angularMaxSpeed !== newBehaviorData.angularMaxSpeed) {
-        this._angularMaxSpeed = newBehaviorData.angularMaxSpeed;
+      if (behaviorSpecificProps.lk !== undefined) {
+        this._leftKey = behaviorSpecificProps.lk;
       }
-      if (oldBehaviorData.rotateObject !== newBehaviorData.rotateObject) {
-        this._rotateObject = newBehaviorData.rotateObject;
+      if (behaviorSpecificProps.rk !== undefined) {
+        this._rightKey = behaviorSpecificProps.rk;
       }
-      if (oldBehaviorData.angleOffset !== newBehaviorData.angleOffset) {
-        this._angleOffset = newBehaviorData.angleOffset;
+      if (behaviorSpecificProps.uk !== undefined) {
+        this._upKey = behaviorSpecificProps.uk;
+      }
+      if (behaviorSpecificProps.dk !== undefined) {
+        this._downKey = behaviorSpecificProps.dk;
+      }
+      if (behaviorSpecificProps.wsu !== undefined) {
+        this._wasStickUsed = behaviorSpecificProps.wsu;
+      }
+      if (behaviorSpecificProps.sa !== undefined) {
+        this._stickAngle = behaviorSpecificProps.sa;
+      }
+      if (behaviorSpecificProps.sf !== undefined) {
+        this._stickForce = behaviorSpecificProps.sf;
+      }
+
+      // Clear user inputs between frames only if requested.
+      this._clearInputsBetweenFrames = !!options.clearInputs;
+      // And ignore default controls if not asked otherwise.
+      this._ignoreDefaultControlsAsSyncedByNetwork = !options.keepControl;
+    }
+
+    override applyBehaviorOverriding(behaviorData): boolean {
+      if (behaviorData.allowDiagonals !== undefined) {
+        this._allowDiagonals = behaviorData.allowDiagonals;
+      }
+      if (behaviorData.acceleration !== undefined) {
+        this._acceleration = behaviorData.acceleration;
+      }
+      if (behaviorData.deceleration !== undefined) {
+        this._deceleration = behaviorData.deceleration;
+      }
+      if (behaviorData.maxSpeed !== undefined) {
+        this._maxSpeed = behaviorData.maxSpeed;
+      }
+      if (behaviorData.angularMaxSpeed !== undefined) {
+        this._angularMaxSpeed = behaviorData.angularMaxSpeed;
+      }
+      if (behaviorData.rotateObject !== undefined) {
+        this._rotateObject = behaviorData.rotateObject;
+      }
+      if (behaviorData.angleOffset !== undefined) {
+        this._angleOffset = behaviorData.angleOffset;
+      }
+      if (behaviorData.ignoreDefaultControls !== undefined) {
+        this._ignoreDefaultControls = behaviorData.ignoreDefaultControls;
       }
       if (
-        oldBehaviorData.ignoreDefaultControls !==
-        newBehaviorData.ignoreDefaultControls
-      ) {
-        this._ignoreDefaultControls = newBehaviorData.ignoreDefaultControls;
-      }
-      if (
-        oldBehaviorData.platformType !== newBehaviorData.platformType ||
-        oldBehaviorData.customIsometryAngle !==
-          newBehaviorData.customIsometryAngle
+        behaviorData.platformType !== undefined ||
+        behaviorData.customIsometryAngle !== undefined
       ) {
         this.setViewpoint(
-          newBehaviorData.platformType,
-          newBehaviorData.customIsometryAngle
+          behaviorData.platformType,
+          behaviorData.customIsometryAngle
         );
       }
-      if (
-        oldBehaviorData.movementAngleOffset !==
-        newBehaviorData.movementAngleOffset
-      ) {
-        this._movementAngleOffset = newBehaviorData.movementAngleOffset;
+      if (behaviorData.movementAngleOffset !== undefined) {
+        this._movementAngleOffset = behaviorData.movementAngleOffset;
       }
       return true;
     }
 
     setViewpoint(viewpoint: string, customIsometryAngle: float): void {
       if (viewpoint === 'PixelIsometry') {
-        this._basisTransformation = new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
-          Math.atan(0.5)
-        );
+        this._basisTransformation =
+          new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
+            Math.atan(0.5)
+          );
       } else if (viewpoint === 'TrueIsometry') {
-        this._basisTransformation = new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
-          Math.PI / 6
-        );
+        this._basisTransformation =
+          new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
+            Math.PI / 6
+          );
       } else if (viewpoint === 'CustomIsometry') {
-        this._basisTransformation = new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
-          (customIsometryAngle * Math.PI) / 180
-        );
+        this._basisTransformation =
+          new gdjs.TopDownMovementRuntimeBehavior.IsometryTransformation(
+            (customIsometryAngle * Math.PI) / 180
+          );
       } else {
         this._basisTransformation = null;
       }
@@ -192,22 +305,36 @@ namespace gdjs {
       return this._xVelocity !== 0 || this._yVelocity !== 0;
     }
 
-    getSpeed() {
-      return Math.sqrt(
-        this._xVelocity * this._xVelocity + this._yVelocity * this._yVelocity
-      );
+    getSpeed(): float {
+      return Math.hypot(this._xVelocity, this._yVelocity);
     }
 
-    getXVelocity() {
+    getXVelocity(): float {
       return this._xVelocity;
     }
 
-    getYVelocity() {
+    setXVelocity(velocityX: float): void {
+      this._xVelocity = velocityX;
+    }
+
+    getYVelocity(): float {
       return this._yVelocity;
+    }
+
+    setYVelocity(velocityY: float): void {
+      this._yVelocity = velocityY;
     }
 
     getAngle(): float {
       return this._angle;
+    }
+
+    isMovementAngleAround(degreeAngle: float, tolerance: float) {
+      return (
+        Math.abs(
+          gdjs.evtTools.common.angleDifference(this._angle, degreeAngle)
+        ) <= tolerance
+      );
     }
 
     setMovementAngleOffset(movementAngleOffset: float): void {
@@ -218,55 +345,55 @@ namespace gdjs {
       return this._movementAngleOffset;
     }
 
-    doStepPreEvents(runtimeScene: gdjs.RuntimeScene) {
+    doStepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {
       const LEFTKEY = 37;
       const UPKEY = 38;
       const RIGHTKEY = 39;
       const DOWNKEY = 40;
 
       //Get the player input:
-      // @ts-ignore
-      this._leftKey |=
-        !this._ignoreDefaultControls &&
-        runtimeScene.getGame().getInputManager().isKeyPressed(LEFTKEY);
-      // @ts-ignore
-      this._rightKey |=
-        !this._ignoreDefaultControls &&
-        runtimeScene.getGame().getInputManager().isKeyPressed(RIGHTKEY);
-      // @ts-ignore
-      this._downKey |=
-        !this._ignoreDefaultControls &&
-        runtimeScene.getGame().getInputManager().isKeyPressed(DOWNKEY);
-      // @ts-ignore
-      this._upKey |=
-        !this._ignoreDefaultControls &&
-        runtimeScene.getGame().getInputManager().isKeyPressed(UPKEY);
+      this._leftKey ||
+        (this._leftKey =
+          !this.shouldIgnoreDefaultControls() &&
+          instanceContainer.getGame().getInputManager().isKeyPressed(LEFTKEY));
+      this._rightKey ||
+        (this._rightKey =
+          !this.shouldIgnoreDefaultControls() &&
+          instanceContainer.getGame().getInputManager().isKeyPressed(RIGHTKEY));
+      this._downKey ||
+        (this._downKey =
+          !this.shouldIgnoreDefaultControls() &&
+          instanceContainer.getGame().getInputManager().isKeyPressed(DOWNKEY));
+      this._upKey ||
+        (this._upKey =
+          !this.shouldIgnoreDefaultControls() &&
+          instanceContainer.getGame().getInputManager().isKeyPressed(UPKEY));
+
+      const elapsedTime = this.owner.getElapsedTime();
+
+      if (!this._leftKey) {
+        this._leftKeyPressedDuration = 0;
+      } else {
+        this._leftKeyPressedDuration += elapsedTime;
+      }
+      if (!this._rightKey) {
+        this._rightKeyPressedDuration = 0;
+      } else {
+        this._rightKeyPressedDuration += elapsedTime;
+      }
+      if (!this._downKey) {
+        this._downKeyPressedDuration = 0;
+      } else {
+        this._downKeyPressedDuration += elapsedTime;
+      }
+      if (!this._upKey) {
+        this._upKeyPressedDuration = 0;
+      } else {
+        this._upKeyPressedDuration += elapsedTime;
+      }
 
       let direction = -1;
       if (!this._allowDiagonals) {
-        const elapsedTime = this.owner.getElapsedTime(runtimeScene);
-
-        if (!this._leftKey) {
-          this._leftKeyPressedDuration = 0;
-        } else {
-          this._leftKeyPressedDuration += elapsedTime;
-        }
-        if (!this._rightKey) {
-          this._rightKeyPressedDuration = 0;
-        } else {
-          this._rightKeyPressedDuration += elapsedTime;
-        }
-        if (!this._downKey) {
-          this._downKeyPressedDuration = 0;
-        } else {
-          this._downKeyPressedDuration += elapsedTime;
-        }
-        if (!this._upKey) {
-          this._upKeyPressedDuration = 0;
-        } else {
-          this._upKeyPressedDuration += elapsedTime;
-        }
-
         if (this._upKey && !this._downKey) {
           direction = 6;
         } else if (!this._upKey && this._downKey) {
@@ -320,58 +447,98 @@ namespace gdjs {
         }
       }
 
+      const hookContext =
+        gdjs.TopDownMovementRuntimeBehavior._topDownMovementHookContext;
+      for (const topDownMovementHook of this._topDownMovementHooks) {
+        hookContext._setDirection(direction);
+        direction = topDownMovementHook.overrideDirection(hookContext);
+      }
+      hookContext._setDirection(direction);
+      for (const topDownMovementHook of this._topDownMovementHooks) {
+        topDownMovementHook.beforeSpeedUpdate(hookContext);
+      }
+
       const object = this.owner;
-      const timeDelta = this.owner.getElapsedTime(runtimeScene) / 1000;
-      let directionInRad = 0;
-      let directionInDeg = 0;
+      const timeDelta = this.owner.getElapsedTime() / 1000;
       const previousVelocityX = this._xVelocity;
       const previousVelocityY = this._yVelocity;
+      this._wasStickUsed = false;
 
+      // These 4 values are not actually used.
+      // JavaScript doesn't allow to declare
+      // variables without assigning them a value.
+      let directionInRad = 0;
+      let directionInDeg = 0;
+
+      let isMoving = false;
+      let targetedSpeed = 0;
       // Update the speed of the object:
       if (direction !== -1) {
+        isMoving = true;
         directionInRad =
           ((direction + this._movementAngleOffset / 45) * Math.PI) / 4.0;
         directionInDeg = direction * 45 + this._movementAngleOffset;
-        this._xVelocity +=
-          this._acceleration * timeDelta * Math.cos(directionInRad);
-        this._yVelocity +=
-          this._acceleration * timeDelta * Math.sin(directionInRad);
+        targetedSpeed = this._maxSpeed;
       } else if (this._stickForce !== 0) {
+        isMoving = true;
         if (!this._allowDiagonals) {
           this._stickAngle = 90 * Math.floor((this._stickAngle + 45) / 90);
         }
         directionInDeg = this._stickAngle + this._movementAngleOffset;
         directionInRad = (directionInDeg * Math.PI) / 180;
-        const norm = this._acceleration * timeDelta * this._stickForce;
-        this._xVelocity += norm * Math.cos(directionInRad);
-        this._yVelocity += norm * Math.sin(directionInRad);
+        targetedSpeed = this._maxSpeed * this._stickForce;
 
-        this._stickForce = 0;
+        this._wasStickUsed = true;
       } else if (this._yVelocity !== 0 || this._xVelocity !== 0) {
+        isMoving = true;
         directionInRad = Math.atan2(this._yVelocity, this._xVelocity);
         directionInDeg = (directionInRad * 180.0) / Math.PI;
-        const xVelocityWasPositive = this._xVelocity >= 0;
-        const yVelocityWasPositive = this._yVelocity >= 0;
-        this._xVelocity -=
-          this._deceleration * timeDelta * Math.cos(directionInRad);
-        this._yVelocity -=
-          this._deceleration * timeDelta * Math.sin(directionInRad);
-        if (this._xVelocity > 0 !== xVelocityWasPositive) {
-          this._xVelocity = 0;
-        }
-        if (this._yVelocity > 0 !== yVelocityWasPositive) {
-          this._yVelocity = 0;
-        }
       }
+      if (isMoving) {
+        // This makes the trigo resilient to rounding errors on directionInRad.
+        let cos = Math.cos(directionInRad);
+        let sin = Math.sin(directionInRad);
+        if (cos === -1 || cos === 1) {
+          sin = 0;
+        }
+        if (sin === -1 || sin === 1) {
+          cos = 0;
+        }
+
+        let currentSpeed = Math.hypot(this._xVelocity, this._yVelocity);
+        const dotProduct = this._xVelocity * cos + this._yVelocity * sin;
+        if (dotProduct < 0) {
+          // The object is turning back.
+          // Keep the negative velocity projected on the new direction.
+          currentSpeed = dotProduct;
+        }
+        const speed = TopDownMovementRuntimeBehavior.getAcceleratedSpeed(
+          currentSpeed,
+          targetedSpeed,
+          this._maxSpeed,
+          this._acceleration,
+          this._deceleration,
+          timeDelta,
+          this._useLegacyTurnBack
+        );
+        this._xVelocity = speed * cos;
+        this._yVelocity = speed * sin;
+      }
+
       const squaredSpeed =
         this._xVelocity * this._xVelocity + this._yVelocity * this._yVelocity;
       if (squaredSpeed > this._maxSpeed * this._maxSpeed) {
-        this._xVelocity = this._maxSpeed * Math.cos(directionInRad);
-        this._yVelocity = this._maxSpeed * Math.sin(directionInRad);
+        const ratio = this._maxSpeed / Math.sqrt(squaredSpeed);
+        this._xVelocity *= ratio;
+        this._yVelocity *= ratio;
       }
 
       // No acceleration for angular speed for now.
       this._angularSpeed = this._angularMaxSpeed;
+
+      for (const topDownMovementHook of this._topDownMovementHooks) {
+        topDownMovementHook.beforePositionUpdate(hookContext);
+      }
 
       // Position object.
       // This is a Verlet integration considering the acceleration as constant.
@@ -403,16 +570,84 @@ namespace gdjs {
         if (this._rotateObject) {
           object.rotateTowardAngle(
             directionInDeg + this._angleOffset,
-            this._angularSpeed,
-            runtimeScene
+            this._angularSpeed
           );
         }
       }
 
-      this._leftKey = false;
-      this._rightKey = false;
-      this._upKey = false;
-      this._downKey = false;
+      this._wasLeftKeyPressed = this._leftKey;
+      this._wasRightKeyPressed = this._rightKey;
+      this._wasUpKeyPressed = this._upKey;
+      this._wasDownKeyPressed = this._downKey;
+      if (this._clearInputsBetweenFrames) {
+        this._leftKey = false;
+        this._rightKey = false;
+        this._upKey = false;
+        this._downKey = false;
+        this._stickForce = 0;
+      }
+    }
+
+    private static getAcceleratedSpeed(
+      currentSpeed: float,
+      targetedSpeed: float,
+      speedMax: float,
+      acceleration: float,
+      deceleration: float,
+      timeDelta: float,
+      useLegacyTurnBack: boolean = false
+    ): float {
+      let newSpeed = currentSpeed;
+      const turningBackAcceleration = useLegacyTurnBack
+        ? acceleration
+        : Math.max(acceleration, deceleration);
+      if (targetedSpeed < 0) {
+        if (currentSpeed <= targetedSpeed) {
+          // Reduce the speed to match the stick force.
+          newSpeed = Math.min(
+            targetedSpeed,
+            currentSpeed + turningBackAcceleration * timeDelta
+          );
+        } else if (currentSpeed <= 0) {
+          // Accelerate
+          newSpeed -= Math.max(-speedMax, acceleration * timeDelta);
+        } else {
+          // Turn back at least as fast as it would stop.
+          newSpeed = Math.max(
+            targetedSpeed,
+            currentSpeed - turningBackAcceleration * timeDelta
+          );
+        }
+      } else if (targetedSpeed > 0) {
+        if (currentSpeed >= targetedSpeed) {
+          // Reduce the speed to match the stick force.
+          newSpeed = Math.max(
+            targetedSpeed,
+            currentSpeed - turningBackAcceleration * timeDelta
+          );
+        } else if (currentSpeed >= 0) {
+          // Accelerate
+          newSpeed = Math.min(
+            speedMax,
+            currentSpeed + acceleration * timeDelta
+          );
+        } else {
+          // Turn back at least as fast as it would stop.
+          newSpeed = Math.min(
+            targetedSpeed,
+            currentSpeed + turningBackAcceleration * timeDelta
+          );
+        }
+      } else {
+        // Decelerate and stop.
+        if (currentSpeed < 0) {
+          newSpeed = Math.min(currentSpeed + deceleration * timeDelta, 0);
+        }
+        if (currentSpeed > 0) {
+          newSpeed = Math.max(currentSpeed - deceleration * timeDelta, 0);
+        }
+      }
+      return newSpeed;
     }
 
     simulateControl(input: string) {
@@ -429,6 +664,13 @@ namespace gdjs {
 
     ignoreDefaultControls(ignore: boolean) {
       this._ignoreDefaultControls = ignore;
+    }
+
+    shouldIgnoreDefaultControls() {
+      return (
+        this._ignoreDefaultControls ||
+        this._ignoreDefaultControlsAsSyncedByNetwork
+      );
     }
 
     simulateLeftKey() {
@@ -451,14 +693,105 @@ namespace gdjs {
       this._stickAngle = stickAngle % 360;
       this._stickForce = Math.max(0, Math.min(1, stickForce));
     }
+
+    /**.
+     * @param input The control to be tested [Left,Right,Up,Down,Stick].
+     * @returns true if the key was used since the last `doStepPreEvents` call.
+     */
+    isUsingControl(input: string): boolean {
+      if (input === 'Left') {
+        return this._leftKeyPressedDuration > 0;
+      }
+      if (input === 'Right') {
+        return this._rightKeyPressedDuration > 0;
+      }
+      if (input === 'Up') {
+        return this._upKeyPressedDuration > 0;
+      }
+      if (input === 'Down') {
+        return this._downKeyPressedDuration > 0;
+      }
+      if (input === 'Stick') {
+        return this._wasStickUsed;
+      }
+      return false;
+    }
+
+    getLastStickInputAngle() {
+      return this._stickAngle;
+    }
+
+    /**
+     * A hook must typically be registered by a behavior that requires this one
+     * in its onCreate function.
+     * The hook must stay forever to avoid side effects like a hooks order
+     * change. To handle deactivated behavior, the hook can check that its
+     * behavior is activated before doing anything.
+     */
+    registerHook(
+      hook: gdjs.TopDownMovementRuntimeBehavior.TopDownMovementHook
+    ) {
+      this._topDownMovementHooks.push(hook);
+    }
   }
+
+  /** @category Behaviors > Top-down movement */
   export namespace TopDownMovementRuntimeBehavior {
+    export class TopDownMovementHookContext {
+      private direction: integer = -1;
+
+      /**
+       * @returns The movement direction from 0 for left to 7 for up-left and
+       * -1 for no direction.
+       */
+      getDirection(): integer {
+        return this.direction;
+      }
+
+      /**
+       * This method won't change the direction used by the top-down movement
+       * behavior.
+       */
+      _setDirection(direction: integer): void {
+        this.direction = direction;
+      }
+    }
+
+    // This should be a static attribute but it's not possible because of
+    // declaration order.
+    export const _topDownMovementHookContext =
+      new gdjs.TopDownMovementRuntimeBehavior.TopDownMovementHookContext();
+
+    /**
+     * Allow extensions relying on the top-down movement to customize its
+     * behavior a bit.
+     */
+    export interface TopDownMovementHook {
+      /**
+       * Return the direction to use instead of the direction given in
+       * parameter.
+       */
+      overrideDirection(hookContext: TopDownMovementHookContext): integer;
+      /**
+       * Called before the acceleration and new direction is applied to the
+       * velocity.
+       */
+      beforeSpeedUpdate(hookContext: TopDownMovementHookContext): void;
+      /**
+       * Called before the velocity is applied to the object position and
+       * angle.
+       */
+      beforePositionUpdate(hookContext: TopDownMovementHookContext): void;
+    }
+
     export interface BasisTransformation {
       toScreen(worldPoint: FloatPoint, screenPoint: FloatPoint): void;
     }
 
+    /** @category Behaviors > Top-down movement */
     export class IsometryTransformation
-      implements gdjs.TopDownMovementRuntimeBehavior.BasisTransformation {
+      implements gdjs.TopDownMovementRuntimeBehavior.BasisTransformation
+    {
       private _screen: float[][];
 
       /**

@@ -1,5 +1,8 @@
+// @flow
+import { type ComponentType } from 'react';
 import UnknownEvent from './Renderers/UnknownEvent';
 import StandardEvent from './Renderers/StandardEvent';
+import ElseEvent from './Renderers/ElseEvent';
 import GroupEvent from './Renderers/GroupEvent';
 import CommentEvent from './Renderers/CommentEvent';
 import ForEachEvent from './Renderers/ForEachEvent';
@@ -8,11 +11,13 @@ import RepeatEvent from './Renderers/RepeatEvent';
 import WhileEvent from './Renderers/WhileEvent';
 import LinkEvent from './Renderers/LinkEvent';
 import JsCodeEvent from './Renderers/JsCodeEvent';
+import { type EventRendererProps } from './Renderers/EventRenderer';
 
-export default {
+const EventsRenderingService = {
   components: {
     unknownEvent: UnknownEvent,
     'BuiltinCommonInstructions::Standard': StandardEvent,
+    'BuiltinCommonInstructions::Else': ElseEvent,
     'BuiltinCommonInstructions::Group': GroupEvent,
     'BuiltinCommonInstructions::Comment': CommentEvent,
     'BuiltinCommonInstructions::ForEach': ForEachEvent,
@@ -22,12 +27,19 @@ export default {
     'BuiltinCommonInstructions::Link': LinkEvent,
     'BuiltinCommonInstructions::JsCode': JsCodeEvent,
   },
-  getEventComponent: function(event) {
+  // $FlowFixMe[missing-this-annot]
+  getEventComponent: function(
+    event: gdBaseEvent
+  ): ComponentType<EventRendererProps> {
     if (this.components.hasOwnProperty(event.getType()))
       return this.components[event.getType()];
     else return this.components.unknownEvent;
   },
-  registerEvent: function(eventType, renderFunction) {
+  // $FlowFixMe[missing-this-annot]
+  registerEvent: function(
+    eventType: string,
+    renderFunction: ComponentType<EventRendererProps>
+  ) {
     if (!this.components.hasOwnProperty(eventType)) {
       console.warn(
         'Tried to register renderer for events "' +
@@ -40,3 +52,5 @@ export default {
     this.components[eventType] = renderFunction;
   },
 };
+
+export default EventsRenderingService;

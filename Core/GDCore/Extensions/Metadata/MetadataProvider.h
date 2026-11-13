@@ -15,6 +15,9 @@ class ExpressionMetadata;
 class ExpressionMetadata;
 class Platform;
 class PlatformExtension;
+class ObjectsContainersList;
+struct FunctionCallNode;
+struct ExpressionNode;
 }  // namespace gd
 
 namespace gd {
@@ -234,6 +237,23 @@ class GD_CORE_API MetadataProvider {
   static const gd::ExpressionMetadata& GetObjectAnyExpressionMetadata(
       const gd::Platform& platform, gd::String objectType, gd::String exprType);
 
+  static const gd::ExpressionMetadata& GetFunctionCallMetadata(
+    const gd::Platform& platform,
+    const gd::ObjectsContainersList &objectsContainersList,
+    FunctionCallNode& node);
+
+  static const gd::ParameterMetadata* GetFunctionCallParameterMetadata(
+    const gd::Platform& platform,
+    const gd::ObjectsContainersList &objectsContainersList,
+    FunctionCallNode& functionCall,
+    ExpressionNode& parameter);
+
+  static const gd::ParameterMetadata* GetFunctionCallParameterMetadata(
+    const gd::Platform& platform,
+    const gd::ObjectsContainersList &objectsContainersList,
+    FunctionCallNode& functionCall,
+    int parameterIndex);
+
   /**
    * Get information about an expression from its type.
    * Works for behavior expressions.
@@ -253,6 +273,14 @@ class GD_CORE_API MetadataProvider {
     return &metadata == &badBehaviorMetadata;
   }
 
+  static bool IsBadObjectMetadata(const gd::ObjectMetadata& metadata) {
+    return &metadata == &badObjectInfo;
+  }
+
+  static bool IsBadEffectMetadata(const gd::EffectMetadata& metadata) {
+    return &metadata == &badEffectMetadata;
+  }
+
   virtual ~MetadataProvider();
 
  private:
@@ -264,8 +292,8 @@ class GD_CORE_API MetadataProvider {
   static EffectMetadata badEffectMetadata;
   static gd::InstructionMetadata badInstructionMetadata;
   static gd::ExpressionMetadata badExpressionMetadata;
-  int useless;  // Useless member to avoid emscripten "must have a positive
-                // integer typeid pointer" runtime error.
+  int useless = 0;  // Useless member to avoid emscripten "must have a positive
+                    // integer typeid pointer" runtime error.
 };
 
 }  // namespace gd

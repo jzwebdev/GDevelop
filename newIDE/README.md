@@ -1,9 +1,9 @@
 # GDevelop IDE
 
-This is the GDevelop 5 editor. It is based on [React](https://facebook.github.io/react/), [Material-UI](http://www.material-ui.com), [Pixi.js](https://github.com/pixijs/pixi.js) and [Electron](https://electron.atom.io/).
+This is the GDevelop 5 editor. It is based on [React](https://facebook.github.io/react/), [Material-UI](http://www.material-ui.com), [Pixi.js](https://github.com/pixijs/pixi.js), [Three.js](https://github.com/mrdoob/three.js) and [Electron](https://electron.atom.io/) for the desktop app.
 It uses GDevelop [core C++ classes compiled to Javascript](https://github.com/4ian/GDevelop.js) to work with GDevelop games.
 
-![GDevelop editor](https://raw.githubusercontent.com/4ian/GDevelop/master/newIDE/gd-ide-screenshot.png "GDevelop editor")
+![GDevelop editor](https://raw.githubusercontent.com/4ian/GDevelop/master/newIDE/GDevelop%20screenshot.png "GDevelop editor")
 
 ## 1) Installation 💻
 
@@ -23,8 +23,8 @@ npm start # or yarn start
 
 This will open the app in your web browser.
 
-Images resources, GDJS Runtime, extensions will be copied in resources, and [libGD.js](https://github.com/4ian/GDevelop.js) will be downloaded automatically. If you wish, you can
-[build libGD.js by yourself](https://github.com/4ian/GDevelop.js) (useful if you modified GDevelop native code like extensions).
+Images resources, GDJS Runtime, extensions will be copied in resources, and [libGD.js](https://github.com/4ian/GDevelop/tree/master/GDevelop.js) will be downloaded automatically. If you wish, you can
+[build libGD.js by yourself](https://github.com/4ian/GDevelop/tree/master/GDevelop.js) (useful if you modified GDevelop native code like extensions).
 
 > Note for Linux: If you get an error message that looks like this:
 > `Error: watch GD/newIDE/app/some/file ENOSPC` then follow the instructions [here](https://stackoverflow.com/questions/22475849/node-js-error-enospc) to fix.
@@ -32,9 +32,6 @@ Images resources, GDJS Runtime, extensions will be copied in resources, and [lib
 ### Development of the standalone app
 
 You can run the standalone app with Electron. **Make sure that you've launched `npm start` (or `yarn start`) in the `app` folder before** (see above) and **keep it running** (in development, the app is served from a local server, even for the standalone app).
-
-> Note for Windows: With **Node.js 14 or older**, there is an error related to `git-sh-setup` when running npm install.
-> To solve this problem: add [this folder to your path environment variable](https://stackoverflow.com/questions/49256190/how-to-fix-git-sh-setup-file-not-found-in-windows) **OR** run `npm install` in newIDE/electron-app/app **before** npm install in newIDE/electron-app.
 
 ```bash
 cd newIDE/app && npm start # Be sure to have this running in another terminal, before the rest!
@@ -79,19 +76,13 @@ npm run format # or yarn format
 
 It's pretty easy to create new themes. Check the [README about themes](./README-themes.md)
 
-### Development of the game engine or extensions.
+### Development of the game engine or extensions
 
-Make sure to have the standalone app running with Electron.
+- If you want to create/modify _extensions_, check the [README about extensions](./README-extensions.md) for step-by-step explanations to get started in 5 minutes.
+- The _game engine core_ ([GDJS](https://github.com/4ian/GDevelop/tree/master/GDJS)) is in [GDJS/Runtime folder](https://github.com/4ian/GDevelop/tree/master/GDJS/Runtime).
 
--   If you want to create/modify _extensions_, check the [README about extensions](./README-extensions.md) for step-by-step explanations to get started in 5 minutes.
-
--   The _game engine core_ ([GDJS](https://github.com/4ian/GDevelop/tree/master/GDJS)) is in [GDJS/Runtime folder](https://github.com/4ian/GDevelop/tree/master/GDJS/Runtime).
-
-If you modify any file while the IDE is running with Electron, a watcher will _automatically import_ your changes (look at the console to be sure).
-
-You can then _launch a preview_ in GDevelop (again, be sure to be using [the standalone app running with Electron](https://github.com/4ian/GDevelop/blob/master/newIDE/README.md#development-of-the-standalone-app) to be sure to have your changes reflected immediately).
-
-> If you deactivated the watcher in preferences, run the `import-GDJS-Runtime.js` script manually (`cd newIDE/app/scripts` then `node import-GDJS-Runtime.js`) after every change, before launching a preview.
+If you modify any file while the editor is running, a watcher will _automatically rebuild_ the engine (look at the console to be sure).
+You can then _launch a preview_ in GDevelop.
 
 ### Recommended tools for development
 
@@ -101,12 +92,135 @@ Any text editor is fine, but it's a good idea to have one with _Prettier_ (code 
 
 ### Testing and developing with the cloud storage providers (Google Drive, Dropbox, OneDrive, etc...)
 
-Cloud storage providers are set up with development keys when you're running GDevelop in development mode. For these, to work, you must execute the web-app not from the traditional `http://localhost:3000` origin, but from `http://gdevelop-app-local:3000`:
+Cloud storage providers are set up with development keys when you're running GDevelop in development mode. For these, to work, you must execute the web-app not from the traditional `http://localhost:3000` origin, but from `http://gdevelop-app-local.com:3000`:
 
 -   Set up a [redirection in your hosts file](https://www.howtogeek.com/howto/27350/beginner-geek-how-to-edit-your-hosts-file/), that should look like: `127.0.0.1 gdevelop-app-local.com`.
--   Launch then the web app from `http://gdevelop-app-local:3000`.
+-   Launch the web app from `http://gdevelop-app-local.com:3000`.
 
 > This is only necessary if you want to have cloud storage providers working in development. If not done, GDevelop will simply display an error while trying to use them.
+
+## (Optional) Building a portable bundle for CI / headless usage 🤖
+
+Build a self-contained zip (no installer, no code-signing) that can be
+extracted on a CI runner and used to execute CLI commands:
+
+```bash
+cd newIDE/electron-app
+npm install
+
+# Linux / macOS
+GD_PORTABLE_BUILD=true npm run build -- --publish never
+
+# Windows (PowerShell)
+$Env:GD_PORTABLE_BUILD='true'; npm run build -- --publish never
+```
+
+The resulting zip contains the full editor. After extracting, run commands like:
+
+```bash
+# Windows
+GDevelop.exe --disable-update-check --run-command EXPORT_HTML5_EXTERNAL path\to\game.json
+
+# Linux (install required libs: sudo apt install -y libnss3 libasound2t64)
+./gdevelop --no-sandbox --disable-update-check \
+  --run-command EXPORT_HTML5_EXTERNAL /path/to/game.json
+```
+
+`IMPORT_EXTENSION_AND_SAVE` imports one or more extension files into the project and saves it. Pass
+each extension path with a repeated `--cmd-args` flag:
+
+```bash
+# Windows
+GDevelop.exe --disable-update-check --run-command IMPORT_EXTENSION_AND_SAVE path\to\game.json ^
+  --cmd-args path\to\FirstExtension.json --cmd-args path\to\SecondExtension.json
+
+# Linux
+./gdevelop --no-sandbox --disable-update-check \
+  --run-command IMPORT_EXTENSION_AND_SAVE /path/to/game.json \
+  --cmd-args /path/to/FirstExtension.json --cmd-args /path/to/SecondExtension.json
+```
+
+#### Scripting a project with the editor functions
+
+The functions used by the GDevelop AI to explore and edit a project can be called from the CLI
+(the functions handled by the GDevelop AI itself, like docs search or sub-agents, are not available).
+Events are written with `generate_events` and the "EventScript" syntax (see
+`app/src/EditorFunctions/PublicApi/event-script-guide.md`): they are compiled by the GDevelop
+backend (login required, free), never written by an agent.
+
+```bash
+# List the functions (and if they modify the project):
+gdevelop --run-command LIST_EDITOR_FUNCTIONS --json /path/to/game.json
+
+# Run calls given as JSON (a file, inline JSON, or - for stdin). They run one after the other
+# and stop at the first failure. The project is saved unless --dry-run is given.
+gdevelop --run-command RUN_EDITOR_FUNCTIONS /path/to/game.json --json \
+  --cmd-args '[{ "name": "create_scene", "arguments": { "scene_name": "GameOver" } }]'
+
+# Run a script calling the functions (the same API as the scripts of the GDevelop AI agents).
+# --read-only only allows the functions that don't modify the project.
+gdevelop --run-command RUN_EDITOR_SCRIPT /path/to/game.json --json --cmd-args script.js
+```
+
+`--json` prints the result as JSON on stdout (the logs are printed on stderr), `--results-path` writes it to a file.
+When the project is opened in a running editor, the calls are made in this editor (refreshing it, without saving the project).
+
+`gdevelop --mcp /path/to/game.json` serves the functions to an AI agent with the
+[Model Context Protocol](https://modelcontextprotocol.io) (stdio transport), for example with Claude Code:
+`claude mcp add gdevelop -- gdevelop --mcp /path/to/game.json`. Each function is a tool, with the
+argument schemas of `app/src/EditorFunctions/PublicApi/` (exported from the GDevelop AI backend),
+plus `save_project` and `read_script_api_definition`. Add `--show` to watch the agent work in the
+editor, `--read-only` to only expose the functions not modifying the project.
+In development, `--generation-api-url http://localhost:3013` uses a local `generation-api`.
+
+#### Running a request of the GDevelop AI
+
+`RUN_AI_REQUEST` sends a request to the GDevelop AI in the Ask AI editor, as a user would type it,
+and lets it work until it is done (login required, this uses the AI credits of the user). It is made
+to compare what prompts, models or tools versions give on the same requests. Without a project, the
+AI creates one:
+
+```bash
+gdevelop --run-command RUN_AI_REQUEST --json --cmd-args request.json
+```
+
+The request is a JSON object: `userRequest` (required), `aiConfigurationPresetId`, `toolsVersion`
+(instead of the one of the editor), `continueMessage` (answered when the AI stops with work left,
+at most `maxUserContinues` times, once by default), `timeoutMs` (the request is then suspended), `payWithCredits` (use the credits of the user once the
+AI credits of their plan are used), `judgeTestSource` (the source of a gameplay test run
+once the request is finished, to take the same screenshots of every game), `outputDirectory` (where
+the results of this test and its screenshots are written) and `localCopyPath` (where a copy of the
+project is saved). The result gives the identifier of the request, to read it on the backend, and
+its `status`: `finished`, `waiting_for_user` (the AI stopped with work left and was not answered),
+`error` or `timeout`.
+
+On a machine where nobody can log in by hand (CI), set the `GDEVELOP_CLI_EMAIL` and
+`GDEVELOP_CLI_PASSWORD` environment variables: an editor running a command logs in with this account
+when nobody is logged in. The account is the same for the development and production APIs: a
+development editor (`npm start`) uses the development API, a packaged one the production API.
+Each editor running a command has its own temporary folder (previews, gameplay tests), so several
+can run at the same time, each with its own `--user-data-dir`.
+
+The MCP server of the running editor has the same as two tools: `start_ai_request` and
+`wait_for_ai_request` (called until the request ended, as a request takes minutes).
+
+Extra flags: `--keep-open` (don't quit after command), `--dev-tools` (open DevTools), 
+             `--block-on-diagnostic-errors` / `--no-block-on-diagnostic-errors` (export should fail when the project has diagnostic errors)
+
+If the same project is already open in a running editor, the command runs in that
+window (fire-and-forget; the CLI exits without waiting or reporting the real result).
+Otherwise the command runs headless with a real exit code (including CI).
+
+### Making the CLI available on PATH
+
+When GDevelop is installed with the Windows NSIS installer, the install
+directory is added to the current user's `PATH` automatically. Open a new
+terminal after installing, then run `GDevelop --run-command ...`.
+
+For other builds (macOS `.dmg`, Linux AppImage/`.deb`), run the command
+palette command **"Install GDevelop CLI in PATH"** from the running app:
+on Windows it appends the install directory to the user `PATH`; on
+macOS/Linux it creates a `gdevelop` symlink in `/usr/local/bin`.
 
 ## (Optional) Building and deploying the standalone app 📦
 

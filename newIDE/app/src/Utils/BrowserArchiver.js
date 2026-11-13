@@ -1,7 +1,8 @@
 // @flow
-
 import { initializeZipJs } from './Zip.js';
-import path from 'path';
+import { downloadUrlsToBlobs, type ItemResult } from './BlobDownloader';
+import path from 'path-browserify';
+import { shortenString } from './StringHelpers.js';
 
 export type BlobFileDescriptor = {|
   filePath: string,
@@ -17,20 +18,6 @@ export type UrlFileDescriptor = {|
   filePath: string,
   url: string,
 |};
-
-const addSearchParameterToUrl = (
-  url: string,
-  urlEncodedParameterName: string,
-  urlEncodedValue: string
-) => {
-  if (url.startsWith('data:') || url.startsWith('blob:')) {
-    // blob/data protocol does not support search parameters, which are useless anyway.
-    return url;
-  }
-
-  const separator = url.indexOf('?') === -1 ? '?' : '&';
-  return url + separator + urlEncodedParameterName + '=' + urlEncodedValue;
-};
 
 function eachCallback<T>(
   array: Array<T>,
@@ -57,80 +44,46 @@ function eachCallback<T>(
   callNextCallback();
 }
 
-export const downloadUrlsToBlobs = async ({
+export const downloadUrlFilesToBlobFiles = async ({
   urlFiles,
   onProgress,
 }: {|
   urlFiles: Array<UrlFileDescriptor>,
   onProgress: (count: number, total: number) => void,
 |}): Promise<Array<BlobFileDescriptor>> => {
-  let count = 0;
-  return Promise.all(
-    urlFiles
-      .filter(({ url }) => url.indexOf('.h') === -1) // TODO
-      .map(({ url, filePath }) => {
-        // To avoid strange/hard to understand CORS issues, we add a dummy parameter.
-        // By doing so, we force browser to consider this URL as different than the one traditionally
-        // used to render the resource in the editor (usually as an `<img>` or as a background image).
-        // If we don't add this distinct parameter, it can happen that browsers fail to load the image
-        // as it's already in the **browser cache** but with slightly different request parameters -
-        // making the CORS checks fail (even if it's coming from the browser cache).
-        //
-        // It's happening sometimes (according to loading order probably) in Chrome and (more often)
-        // in Safari. It might be linked to Amazon S3 + CloudFront that "doesn't support the Vary: Origin header".
-        // To be safe, we entirely avoid the issue with this parameter, making the browsers consider
-        // the resources for use in Pixi.js and for the rest of the editor as entirely separate.
-        //
-        // See:
-        // - https://stackoverflow.com/questions/26140487/cross-origin-amazon-s3-not-working-using-chrome
-        // - https://stackoverflow.com/questions/20253472/cors-problems-with-amazon-s3-on-the-latest-chomium-and-google-canary
-        // - https://stackoverflow.com/a/20299333
-        //
-        // Search for "cors-cache-workaround" in the codebase for the same workarounds.
-        const urlWithParameters = addSearchParameterToUrl(
-          url,
-          'gdUsage',
-          'export'
-        );
+  const downloadedBlobs: Array<
+    ItemResult<UrlFileDescriptor>
+    // $FlowFixMe[incompatible-type]
+  > = await downloadUrlsToBlobs({
+    urlContainers: urlFiles.filter(({ url }) => url.indexOf('.h') === -1), // Should be useless now, still keep it by safety.
+    onProgress,
+  });
 
-        return fetch(urlWithParameters)
-          .then(
-            response => {
-              if (!response.ok) {
-                console.error(
-                  `Error while downloading "${urlWithParameters}"`,
-                  response
-                );
-                throw new Error(
-                  `Error while downloading "${urlWithParameters}" (status: ${
-                    response.status
-                  })`
-                );
-              }
-              return response.blob();
-            },
-            error => {
-              console.error(
-                `Error while downloading "${urlWithParameters}"`,
-                error
-              );
-              throw new Error(
-                `Error while downloading "${urlWithParameters}" (network error)`
-              );
-            }
-          )
-          .then(blob => {
-            count++;
-            onProgress(count, urlFiles.length);
-            return {
-              filePath,
-              blob,
-            };
-          });
-      })
-  ).then((downloadedBlobs: Array<BlobFileDescriptor>) => {
-    console.info('All downloads done');
-    return downloadedBlobs;
+  const erroredUrls = downloadedBlobs.filter(downloadedBlob => {
+    return !!downloadedBlob.error || !downloadedBlob.blob;
+  });
+  if (erroredUrls.length) {
+    const errorMessages = erroredUrls
+      .map(({ error }) =>
+        error ? error.message : 'Unknown error during download.'
+      )
+      .filter(Boolean)
+      .join(',\n');
+
+    throw new Error(
+      `Could not download ${erroredUrls.length} files:\n ${shortenString(
+        errorMessages,
+        300
+      )}`
+    );
+  }
+
+  return downloadedBlobs.map(({ item, blob }) => {
+    return {
+      // $FlowFixMe[incompatible-type] - any non existing blob is discarded before.
+      blob,
+      filePath: item.filePath,
+    };
   });
 };
 
@@ -143,11 +96,13 @@ export const archiveFiles = async ({
   blobFiles,
   basePath,
   onProgress,
+  sizeLimit,
 }: {|
   textFiles: Array<TextFileDescriptor>,
   blobFiles: Array<BlobFileDescriptor>,
   basePath: string,
   onProgress: (count: number, total: number) => void,
+  sizeLimit?: number,
 |}): Promise<Blob> => {
   const zipJs: ZipJs = await initializeZipJs();
 
@@ -156,6 +111,7 @@ export const archiveFiles = async ({
 
   return new Promise((resolve, reject) => {
     zipJs.createWriter(
+      // $FlowFixMe[invalid-constructor]
       new zipJs.BlobWriter('application/zip'),
       function(zipWriter) {
         eachCallback(
@@ -166,6 +122,7 @@ export const archiveFiles = async ({
 
             zipWriter.add(
               relativeFilePath,
+              // $FlowFixMe[invalid-constructor]
               new zipJs.BlobReader(blob),
               () => {
                 zippedFilesCount++;
@@ -186,6 +143,7 @@ export const archiveFiles = async ({
 
                 zipWriter.add(
                   relativeFilePath,
+                  // $FlowFixMe[invalid-constructor]
                   new zipJs.TextReader(text),
                   () => {
                     zippedFilesCount++;
@@ -199,12 +157,170 @@ export const archiveFiles = async ({
               },
               () => {
                 zipWriter.close((blob: Blob) => {
+                  const fileSize = blob.size;
+                  if (sizeLimit && fileSize > sizeLimit) {
+                    const roundFileSizeInMb = Math.round(
+                      fileSize / (1000 * 1000)
+                    );
+                    reject(
+                      new Error(
+                        `Archive is of size ${roundFileSizeInMb} MB, which is above the limit allowed of ${sizeLimit /
+                          (1000 * 1000)} MB.`
+                      )
+                    );
+                  }
                   resolve(blob);
                 });
               }
             );
           }
         );
+      },
+      error => {
+        console.error('Error while making zip:', error);
+        reject(error);
+      }
+    );
+  });
+};
+
+export const listArchiveFiles = async ({
+  archiveBlob,
+  onProgress,
+  sizeLimit,
+}: {|
+  archiveBlob: Blob,
+  onProgress: (count: number, total: number) => void,
+  sizeLimit?: number,
+|}): Promise<any> => {
+  const zipJs: ZipJs = await initializeZipJs();
+
+  return new Promise((resolve, reject) => {
+    zipJs.createReader(
+      // $FlowFixMe[invalid-constructor]
+      new zipJs.BlobReader(archiveBlob),
+      function(zipReader) {
+        zipReader.getEntries(entries => {
+          const enumeratedEntries = entries.map(entry => entry.filename);
+          zipReader.close(() => {
+            resolve(enumeratedEntries);
+          });
+        });
+      },
+      error => {
+        console.error('Error while making zip:', error);
+        reject(error);
+      }
+    );
+  });
+};
+
+export type ArchiveReader = {|
+  getFileBlob: (filePath: string, contentType: string) => Promise<Blob>,
+  close: () => Promise<void>,
+|};
+
+/**
+ * Open an archive once to read several files from it,
+ * instead of reading the whole archive index for each file.
+ */
+export const openArchive = async (
+  archiveBlob: Blob
+): Promise<ArchiveReader> => {
+  const zipJs: ZipJs = await initializeZipJs();
+
+  return new Promise((resolve, reject) => {
+    let isOpened = false;
+    // Zip.js reports reading errors through the reader error callback,
+    // so the file being read must be rejected from there.
+    let rejectCurrentFile: ?(error: any) => void = null;
+    zipJs.createReader(
+      // $FlowFixMe[invalid-constructor]
+      new zipJs.BlobReader(archiveBlob),
+      function(zipReader) {
+        zipReader.getEntries(entries => {
+          const entriesByFilePath = new Map(
+            entries.map(entry => [entry.filename, entry])
+          );
+          isOpened = true;
+          resolve({
+            getFileBlob: (filePath: string, contentType: string) =>
+              new Promise((resolveFile, rejectFile) => {
+                const entry = entriesByFilePath.get(filePath);
+                if (!entry) {
+                  rejectFile(
+                    new Error(`The archive doesn't contain: ${filePath}`)
+                  );
+                  return;
+                }
+                rejectCurrentFile = rejectFile;
+                entry.getData(
+                  // $FlowFixMe[invalid-constructor]
+                  new zipJs.BlobWriter(contentType),
+                  blob => {
+                    rejectCurrentFile = null;
+                    resolveFile(blob);
+                  }
+                );
+              }),
+            close: () =>
+              new Promise(resolveClose => {
+                zipReader.close(resolveClose);
+              }),
+          });
+        });
+      },
+      error => {
+        console.error('Error while reading zip:', error);
+        if (!isOpened) {
+          reject(error);
+        } else if (rejectCurrentFile) {
+          rejectCurrentFile(error);
+          rejectCurrentFile = null;
+        }
+      }
+    );
+  });
+};
+
+export const getFileBlob = async ({
+  archiveBlob,
+  filePath,
+  contentType,
+  onProgress,
+  sizeLimit,
+}: {|
+  archiveBlob: Blob,
+  filePath: string,
+  contentType: string,
+  onProgress: (count: number, total: number) => void,
+  sizeLimit?: number,
+|}): Promise<Blob> => {
+  const zipJs: ZipJs = await initializeZipJs();
+
+  return new Promise((resolve, reject) => {
+    zipJs.createReader(
+      // $FlowFixMe[invalid-constructor]
+      new zipJs.BlobReader(archiveBlob),
+      function(zipReader) {
+        zipReader.getEntries(entries => {
+          const entry = entries.find(entry => entry.filename === filePath);
+          if (!entry) {
+            const error = `The archive doesn't contain: ${filePath}`;
+            console.error(error);
+            reject(error);
+            return;
+          }
+          entry.getData(
+            // $FlowFixMe[invalid-constructor]
+            new zipJs.BlobWriter(contentType),
+            result => {
+              zipReader.close(() => {
+                resolve(result);
+              });
+            }
+          );
+        });
       },
       error => {
         console.error('Error while making zip:', error);

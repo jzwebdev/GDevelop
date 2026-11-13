@@ -2,26 +2,67 @@
 import { Trans } from '@lingui/macro';
 import * as React from 'react';
 import FlatButton from '../UI/FlatButton';
-import Dialog from '../UI/Dialog';
-import { useSerializableObjectCancelableEditor } from '../Utils/SerializableObjectCancelableEditor';
-import VariablesList from './index';
-import useForceUpdate from '../Utils/UseForceUpdate';
+import Dialog, { DialogPrimaryButton } from '../UI/Dialog';
+import { useSerializableObjectsCancelableEditor } from '../Utils/SerializableObjectCancelableEditor';
 import HotReloadPreviewButton, {
   type HotReloadPreviewButtonProps,
 } from '../HotReload/HotReloadPreviewButton';
+import useDismissableTutorialMessage from '../Hints/useDismissableTutorialMessage';
+import { Column, Line } from '../UI/Grid';
+import VariablesList from './VariablesList';
+import HelpButton from '../UI/HelpButton';
+import { getVariablePathFromNodeId } from './VariableToTreeNodeHandling';
+import { Tabs } from '../UI/Tabs';
+import { useResponsiveWindowSize } from '../UI/Responsive/ResponsiveWindowMeasurer';
+import { ProjectScopedContainersAccessor } from '../InstructionOrExpression/EventsScope';
+import { insertInVariablesContainer } from '../Utils/VariablesUtils';
+import { getRootVariableName } from '../EventsSheet/ParameterFields/VariableField';
+import { getNodeIdFromVariableName } from './VariableToTreeNodeHandling';
+
+const gd: libGDevelop = global.gd;
+
+export type VariableDialogOpeningProps = {
+  variableName: string,
+  shouldCreate: boolean,
+  variableType: 'number' | 'string' | 'boolean' | null,
+};
+
+type TabProps = {
+  id: string,
+  label: React.Node,
+  variablesContainer: gdVariablesContainer,
+  inheritedVariablesContainer?: gdVariablesContainer,
+  loopIndexVariableName?: string,
+  onRenameLoopIndexVariable?: (newName: string) => void,
+  onRemoveLoopIndexVariable?: () => void,
+  emptyPlaceholderTitle?: React.Node,
+  emptyPlaceholderDescription?: React.Node,
+  /**
+   * Deprecated - will be removed once we don't want to display completions
+   * for variables not declared but still used in events.
+   */
+  onComputeAllVariableNames: () => Array<string>,
+};
 
 type Props = {|
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
   onCancel: () => void,
-  onApply: () => void,
+  onApply: (selectedVariableName: string | null) => void,
   open: boolean,
   onEditObjectVariables?: () => void,
   title: React.Node,
-  emptyExplanationMessage?: React.Node,
-  emptyExplanationSecondMessage?: React.Node,
-  variablesContainer: gdVariablesContainer,
-  hotReloadPreviewButtonProps?: ?HotReloadPreviewButtonProps,
-  onComputeAllVariableNames: () => Array<string>,
+  tabs: Array<TabProps>,
+  objectName?: ?string,
+  initialInstances?: ?gdInitialInstancesContainer,
+  initiallyOpenTabId?: string,
+  initiallySelectedVariable: VariableDialogOpeningProps | null,
+  isListLocked: boolean,
+
+  project: gdProject,
+  hotReloadPreviewButtonProps: HotReloadPreviewButtonProps | null,
+
   helpPagePath: ?string,
+  id?: string,
 |};
 
 const VariablesEditorDialog = ({
@@ -30,40 +71,164 @@ const VariablesEditorDialog = ({
   open,
   onEditObjectVariables,
   title,
-  emptyExplanationMessage,
-  emptyExplanationSecondMessage,
-  variablesContainer,
+  project,
   hotReloadPreviewButtonProps,
-  onComputeAllVariableNames,
   helpPagePath,
-}: Props) => {
-  const forceUpdate = useForceUpdate();
-  const onCancelChanges = useSerializableObjectCancelableEditor({
-    serializableObject: variablesContainer,
+  id,
+  tabs,
+  initiallyOpenTabId,
+  initiallySelectedVariable,
+  projectScopedContainersAccessor,
+  objectName,
+  initialInstances,
+  isListLocked,
+}: Props): React.Node => {
+  const serializableObjects = React.useMemo(
+    () =>
+      new Map(
+        tabs.map(({ id, variablesContainer }) => [id, variablesContainer])
+      ),
+    [tabs]
+  );
+  const {
+    onCancelChanges,
+    notifyOfChange,
+    getOriginalContentSerializedElements,
+  } = useSerializableObjectsCancelableEditor({
+    serializableObjects,
     onCancel,
+    // Variables persistent UUIDs are persisted in the project file, so they
+    // must be kept stable: only set them for variables not having one yet.
+    ensurePersistentUuids: true,
   });
+
+  const lastSelectedVariableNodeId = React.useRef<string | null>(null);
+  const onSelectedVariableChange = React.useCallback((nodes: Array<string>) => {
+    lastSelectedVariableNodeId.current =
+      nodes.length > 0 ? nodes[nodes.length - 1] : null;
+  }, []);
+
+  const shouldCreateVariable = React.useRef<boolean>(
+    initiallySelectedVariable ? initiallySelectedVariable.shouldCreate : false
+  );
+  const actualInitiallySelectedVariableName = React.useRef<?string>(
+    initiallySelectedVariable ? initiallySelectedVariable.variableName : null
+  );
+  if (shouldCreateVariable.current) {
+    shouldCreateVariable.current = false;
+    const tabIndex = Math.max(
+      0,
+      // $FlowFixMe[missing-local-annot]
+      // $FlowFixMe[incompatible-exact]
+      tabs.indexOf(({ id }) => id === initiallyOpenTabId)
+    );
+    const { variablesContainer, inheritedVariablesContainer } = tabs[tabIndex];
+    const { name: actualVariableName } = insertInVariablesContainer(
+      variablesContainer,
+      initiallySelectedVariable
+        ? getRootVariableName(initiallySelectedVariable.variableName)
+        : 'Variable',
+      null,
+      variablesContainer.count(),
+      inheritedVariablesContainer,
+      initiallySelectedVariable ? initiallySelectedVariable.variableType : null
+    );
+    actualInitiallySelectedVariableName.current = actualVariableName;
+    lastSelectedVariableNodeId.current = getNodeIdFromVariableName(
+      actualVariableName
+    );
+  }
+
+  const { isMobile } = useResponsiveWindowSize();
+  const { DismissableTutorialMessage } = useDismissableTutorialMessage(
+    'intro-variables'
+  );
+  const [currentTab, setCurrentTab] = React.useState(
+    initiallyOpenTabId || tabs[0].id
+  );
+
+  const onRefactorAndApply = React.useCallback(
+    async () => {
+      const originalContentSerializedElements = getOriginalContentSerializedElements();
+      for (const {
+        id,
+        variablesContainer,
+        inheritedVariablesContainer,
+      } of tabs) {
+        const originalContentSerializedElement = originalContentSerializedElements.get(
+          id
+        );
+        if (
+          inheritedVariablesContainer ||
+          // It can't actually happen.
+          !originalContentSerializedElement
+        ) {
+          // No refactoring to do - this is a variable container of an instance
+          // (or something else that overrides variables from another container),
+          // which does not have an impact on the rest of the project.
+        } else {
+          const changeset = gd.WholeProjectRefactorer.computeChangesetForVariablesContainer(
+            originalContentSerializedElement,
+            variablesContainer
+          );
+          if (objectName && initialInstances) {
+            gd.WholeProjectRefactorer.applyRefactoringForObjectVariablesContainer(
+              project,
+              variablesContainer,
+              initialInstances,
+              objectName,
+              changeset,
+              originalContentSerializedElement
+            );
+          } else {
+            gd.WholeProjectRefactorer.applyRefactoringForVariablesContainer(
+              project,
+              variablesContainer,
+              changeset,
+              originalContentSerializedElement
+            );
+          }
+        }
+      }
+      const tab = tabs.find(({ id }) => id === currentTab);
+      if (tab) {
+        onApply(
+          lastSelectedVariableNodeId.current &&
+            getVariablePathFromNodeId(
+              lastSelectedVariableNodeId.current,
+              tab.variablesContainer
+            )
+        );
+      }
+    },
+    [
+      getOriginalContentSerializedElements,
+      tabs,
+      objectName,
+      initialInstances,
+      project,
+      currentTab,
+      onApply,
+    ]
+  );
 
   return (
     <Dialog
-      onApply={onApply}
-      noMargin
+      title={title}
       actions={[
         <FlatButton
           label={<Trans>Cancel</Trans>}
           onClick={onCancelChanges}
-          key={'Cancel'}
+          key="Cancel"
         />,
-        <FlatButton
+        <DialogPrimaryButton
           label={<Trans>Apply</Trans>}
           primary
-          keyboardFocused
-          onClick={onApply}
-          key={'Apply'}
+          onClick={onRefactorAndApply}
+          key="Apply"
+          id="apply-button"
         />,
       ]}
-      open={open}
-      cannotBeDismissed={true}
-      onRequestClose={onCancelChanges}
       secondaryActions={[
         onEditObjectVariables ? (
           <FlatButton
@@ -77,30 +242,85 @@ const VariablesEditorDialog = ({
           <HotReloadPreviewButton
             key="hot-reload-preview-button"
             {...hotReloadPreviewButtonProps}
+            // Code generation is required because the code access to variables
+            // with a number identifier that may change.
+            isCodeGenerationRequired
           />
         ) : null,
+        helpPagePath ? (
+          <HelpButton helpPagePath={helpPagePath} key="help" />
+        ) : null,
       ]}
-      title={title}
+      onRequestClose={onCancelChanges}
+      onApply={onRefactorAndApply}
+      open={open}
       flexBody
       fullHeight
+      id={id}
+      fixedContent={
+        tabs.length > 1 ? (
+          <Tabs
+            value={currentTab}
+            onChange={setCurrentTab}
+            options={tabs.map(({ label, id }) => ({
+              label,
+              value: id,
+              id,
+            }))}
+            // Enforce scroll on mobile, because the tabs have long names.
+            variant={isMobile ? 'scrollable' : undefined}
+          />
+        ) : null
+      }
     >
-      <VariablesList
-        commitVariableValueOnBlur={
-          // Reduce the number of re-renders by saving the variable value only when the field is blurred.
-          // We don't do that by default because the VariablesList can be used in a component like
-          // InstancePropertiesEditor, that can be unmounted at any time, before the text fields get a
-          // chance to be blurred.
-          true
+      {tabs.map(
+        ({
+          id,
+          variablesContainer,
+          inheritedVariablesContainer,
+          loopIndexVariableName,
+          onRenameLoopIndexVariable,
+          onRemoveLoopIndexVariable,
+          emptyPlaceholderTitle,
+          emptyPlaceholderDescription,
+          onComputeAllVariableNames,
+        }) => {
+          return (
+            currentTab === id && (
+              <Column expand noMargin noOverflowParent id={id} key={id}>
+                {variablesContainer.count() > 0 && DismissableTutorialMessage && (
+                  <Line>
+                    <Column expand>{DismissableTutorialMessage}</Column>
+                  </Line>
+                )}
+                <VariablesList
+                  projectScopedContainersAccessor={
+                    projectScopedContainersAccessor
+                  }
+                  variablesContainer={variablesContainer}
+                  areObjectVariables={!!objectName}
+                  initiallySelectedVariableName={
+                    actualInitiallySelectedVariableName.current
+                  }
+                  inheritedVariablesContainer={inheritedVariablesContainer}
+                  emptyPlaceholderTitle={emptyPlaceholderTitle || null}
+                  emptyPlaceholderDescription={
+                    emptyPlaceholderDescription || null
+                  }
+                  onComputeAllVariableNames={onComputeAllVariableNames}
+                  helpPagePath={helpPagePath}
+                  onVariablesUpdated={notifyOfChange}
+                  onSelectedVariableChange={onSelectedVariableChange}
+                  isListLocked={isListLocked}
+                  loopIndexVariableName={loopIndexVariableName}
+                  onRenameLoopIndexVariable={onRenameLoopIndexVariable}
+                  onRemoveLoopIndexVariable={onRemoveLoopIndexVariable}
+                />
+              </Column>
+            )
+          );
         }
-        variablesContainer={variablesContainer}
-        emptyExplanationMessage={emptyExplanationMessage}
-        emptyExplanationSecondMessage={emptyExplanationSecondMessage}
-        onSizeUpdated={
-          forceUpdate /*Force update to ensure dialog is properly positioned*/
-        }
-        onComputeAllVariableNames={onComputeAllVariableNames}
-        helpPagePath={helpPagePath}
-      />
+      )}
     </Dialog>
   );
 };

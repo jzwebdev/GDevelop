@@ -1,8 +1,15 @@
 // @flow
 import axios from 'axios';
 import { GDevelopUserApi } from './ApiConfigs';
+import { type Profile } from './Authentication';
+import { type MessageByLocale } from '../i18n/MessageByLocale';
 
 import { type AuthenticatedUser } from '../../Profile/AuthenticatedUserContext';
+import { extractGDevelopApiErrorStatusAndCode } from './Errors';
+import {
+  ensureIsArray,
+  ensureIsNullOrObjectHasProperty,
+} from '../DataValidator';
 
 export const TRIVIAL_FIRST_EVENT = 'trivial_first-event';
 export const TRIVIAL_FIRST_BEHAVIOR = 'trivial_first-behavior';
@@ -11,6 +18,8 @@ export const TRIVIAL_FIRST_WEB_EXPORT = 'trivial_first-web-export';
 export const TRIVIAL_FIRST_EXTENSION = 'trivial_first-extension';
 export const TRIVIAL_FIRST_EFFECT = 'trivial_first-effect';
 export const TRIVIAL_FIRST_DEBUG = 'trivial_first-debug';
+export const getTutorialCompletedAchievementId = (tutorialId: string): string =>
+  'trivial_in-app-tutorial-completed_' + tutorialId;
 
 export type Badge = {|
   seen: boolean,
@@ -19,18 +28,21 @@ export type Badge = {|
   achievementId: string,
 |};
 
-export type Achievement = {|
+export type Achievement = {
   id: string,
   category: string,
-  name: string,
-  description: string,
-|};
+  nameByLocale: MessageByLocale,
+  descriptionByLocale: MessageByLocale,
+  shortDescriptionByLocale: MessageByLocale,
+  rewardValueInCredits?: number,
+  iconUrl?: string,
+};
 
-export type AchievementWithBadgeData = {|
+export type AchievementWithBadgeData = {
   ...Achievement,
   seen?: boolean,
   unlockedAt: ?Date,
-|};
+};
 
 const isAchievementAlreadyClaimed = (
   badges: Badge[],
@@ -39,24 +51,29 @@ const isAchievementAlreadyClaimed = (
   return badges.map(badge => badge.achievementId).includes(achievementId);
 };
 
-const createOrEnsureBadgeForUser = async (
-  authenticatedUser: AuthenticatedUser,
-  achievementId: string
-): Promise<?Badge> => {
-  const {
+export const createOrEnsureBadgeForUser = async (
+  {
     badges,
-    firebaseUser,
+    profile,
     getAuthorizationHeader,
     onBadgesChanged,
-  } = authenticatedUser;
-  if (!badges || !firebaseUser) return null;
+  }: {
+    badges: ?Array<Badge>,
+    profile: ?Profile,
+    getAuthorizationHeader: () => Promise<string>,
+    onBadgesChanged: () => Promise<void>,
+  },
+  achievementId: string
+): Promise<?Badge> => {
+  if (!badges || !profile) return null;
   if (isAchievementAlreadyClaimed(badges, achievementId)) {
     return null;
   }
 
-  const userId = firebaseUser.uid;
+  const userId = profile.id;
   try {
     const authorizationHeader = await getAuthorizationHeader();
+    // $FlowFixMe[underconstrained-implicit-instantiation]
     const response = await axios.post(
       `${GDevelopUserApi.baseUrl}/user/${userId}/badge`,
       {
@@ -72,12 +89,17 @@ const createOrEnsureBadgeForUser = async (
       }
     );
     onBadgesChanged();
-    return response.data;
-  } catch (err) {
-    if (err.response && err.response.status === 409) {
+    return ensureIsNullOrObjectHasProperty({
+      data: response.data,
+      propertyName: 'achievementId',
+      endpointName: '/user/{id}/badge of User API',
+    });
+  } catch (error) {
+    const extractedStatusAndCode = extractGDevelopApiErrorStatusAndCode(error);
+    if (extractedStatusAndCode && extractedStatusAndCode.status === 409) {
       console.warn('Badge already exists');
     } else {
-      throw err;
+      throw error;
     }
   }
 };
@@ -99,9 +121,11 @@ export const addCreateBadgePreHookIfNotClaimed = <
     return callback;
   }
 
-  // $FlowFixMe - hard to (or can't?) express the exact function being passed.
+  // $FlowFixMe[incompatible-type] - hard to (or can't?) express the exact function being passed.
+  // $FlowFixMe[missing-local-annot]
   return (...args) => {
     try {
+      // $FlowFixMe[incompatible-type]
       createOrEnsureBadgeForUser(authenticatedUser, achievementId);
     } catch (err) {
       console.error(`Couldn't create badge ${achievementId}; ${err}`);
@@ -110,10 +134,14 @@ export const addCreateBadgePreHookIfNotClaimed = <
   };
 };
 
-export const getAchievements = (): Promise<Array<Achievement>> => {
-  return axios
-    .get(`${GDevelopUserApi.baseUrl}/achievement`)
-    .then(response => response.data);
+export const getAchievements = async (): Promise<Array<Achievement>> => {
+  // $FlowFixMe[underconstrained-implicit-instantiation]
+  const response = await axios.get(`${GDevelopUserApi.baseUrl}/achievement`);
+
+  return ensureIsArray({
+    data: response.data,
+    endpointName: '/achievement of User API',
+  });
 };
 
 export const markBadgesAsSeen = async (
@@ -133,6 +161,7 @@ export const markBadgesAsSeen = async (
   const userId = firebaseUser.uid;
   try {
     const authorizationHeader = await getAuthorizationHeader();
+    // $FlowFixMe[underconstrained-implicit-instantiation]
     const response = await axios.patch(
       `${GDevelopUserApi.baseUrl}/user/${userId}/badge`,
       unseenBadges.map(badge => ({
@@ -149,7 +178,9 @@ export const markBadgesAsSeen = async (
       }
     );
     onBadgesChanged();
-    return response.data;
+    const data = response.data;
+    // Note: response.data might be undefined for PATCH requests, so we don't validate it
+    return data;
   } catch (err) {
     console.error(`Couldn't mark badges as seen: ${err}`);
   }
@@ -158,8 +189,9 @@ export const markBadgesAsSeen = async (
 export const compareAchievements = (
   a: AchievementWithBadgeData,
   b: AchievementWithBadgeData
-) => {
+): any | number => {
   if (b.unlockedAt && a.unlockedAt) {
+    // $FlowFixMe[unsafe-arithmetic]
     return b.unlockedAt - a.unlockedAt;
   } else if (a.unlockedAt && !b.unlockedAt) {
     return -1;

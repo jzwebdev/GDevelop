@@ -4,6 +4,8 @@
  * This project is released under the MIT License.
  */
 
+// NOLINTBEGIN
+
 #ifndef GDCORE_UTF8_STRING_H
 #define GDCORE_UTF8_STRING_H
 
@@ -13,11 +15,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <SFML/System/String.hpp>
 
 #include "GDCore/Utf8/utf8.h"
-
-namespace sf {class String;};
 
 namespace gd
 {
@@ -121,11 +120,6 @@ public:
      */
     String(const std::u32string &string);
 
-    /**
-     * Constructs a string from an sf::String.
-     */
-    String(const sf::String &string);
-
 /**
  * \}
  */
@@ -145,8 +139,6 @@ public:
      * \endcode
      */
     String& operator=(const char *characters);
-
-    String& operator=(const sf::String &string);
 
     String& operator=(const std::u32string &string);
 
@@ -229,9 +221,9 @@ public:
     static String From(T value)
     {
         static_assert(!std::is_same<T, std::string>::value, "Can't use gd::String::From with std::string.");
-        static_assert(!std::is_same<T, sf::String>::value, "Can't use gd::String::From with sf::String.");
 
         std::ostringstream oss;
+        oss.precision(16);
         oss << value;
         return gd::String(oss.str().c_str());
     }
@@ -244,7 +236,6 @@ public:
     T To() const
     {
         static_assert(!std::is_same<T, std::string>::value, "Can't use gd::String::To with std::string.");
-        static_assert(!std::is_same<T, sf::String>::value, "Can't use gd::String::To with sf::String.");
 
         T value;
         std::istringstream oss(m_string);
@@ -273,13 +264,6 @@ public:
      * \return a String created from a std::u32string.
      */
     static String FromUTF32( const std::u32string &string );
-
-    /**
-     * \return a String created from a sf::String (UTF32).
-     *
-     * See \ref Conversions1 for more information.
-     */
-    static String FromSfString( const sf::String &sfString );
 
     /**
      * \return a String created an UTF8 encoded std::string.
@@ -311,20 +295,6 @@ public:
      * \return a std::u32string.
      */
     std::u32string ToUTF32() const;
-
-    /**
-     * \return a sf::String from the current string.
-     *
-     * See \ref Conversions1 for more information.
-     */
-    sf::String ToSfString() const;
-
-    /**
-     * Implicit conversion operator to sf::String.
-     *
-     * See \ref Conversions1 for more information.
-     */
-    operator sf::String() const;
 
     /**
      * \return a UTF8 encoded std::string from the current string.
@@ -556,6 +526,16 @@ public:
     String LowerCase() const;
 
     /**
+     * \brief Returns the string with the first letter in upper case.
+     */
+    String CapitalizeFirstLetter() const;
+
+    /**
+     * \brief Returns the string with the first letter in lower case.
+     */
+    String UncapitalizeFirstLetter() const;
+
+    /**
      * \brief Searches a string for a specified substring and returns a new string where all occurrences of this substring is replaced.
      * \param search The string that will be replaced by the new string.
      * \param replacement The value to replace the old substring with.
@@ -617,32 +597,32 @@ public:
     String substr( size_type start = 0, size_type length = npos ) const;
 
     /**
-     * \return the position of the first occurence of **search** starting from **pos**.
+     * \return the position of the first occurrence of **search** starting from **pos**.
      */
     size_type find( const String &search, size_type pos = 0 ) const;
 
     /**
-     * \return the position of the first occurence of **search** starting from **pos**.
+     * \return the position of the first occurrence of **search** starting from **pos**.
      */
     size_type find( const char *search, size_type pos = 0 ) const;
 
     /**
-     * \return the position of the first occurence of **search** starting from **pos**.
+     * \return the position of the first occurrence of **search** starting from **pos**.
      */
     size_type find( const value_type search, size_type pos = 0 ) const;
 
     /**
-     * \return the position of the last occurence of **search** starting before **pos**.
+     * \return the position of the last occurrence of **search** starting before **pos**.
      */
     size_type rfind( const String &search, size_type pos = npos ) const;
 
     /**
-     * \return the position of the last occurence of **search** starting before **pos**.
+     * \return the position of the last occurrence of **search** starting before **pos**.
      */
     size_type rfind( const char *search, size_type pos = npos ) const;
 
     /**
-     * \return the position of the last occurence of **search** starting before **pos**.
+     * \return the position of the last occurrence of **search** starting before **pos**.
      */
     size_type rfind( const value_type &search, size_type pos = npos ) const;
 
@@ -691,7 +671,7 @@ public:
 
     /**
      * \brief Do a case-insensitive search
-     * \return the position of the first occurence of **search** starting from **pos**.
+     * \return the position of the first occurrence of **search** starting from **pos**.
      *
      * \note This method isn't very efficient as it is linear on the string size times the
      * search string size
@@ -731,6 +711,10 @@ String GD_CORE_API operator+(String lhs, const char *rhs);
  * converted to gd::String assuming it's encoded in UTF8).
  */
 String GD_CORE_API operator+(const char *lhs, const String &rhs);
+
+const String& GD_CORE_API operator||(const String &lhs, const String &rhs);
+
+String GD_CORE_API operator||(String lhs, const char *rhs);
 
 /**
  * \}
@@ -885,7 +869,7 @@ namespace std
  * on the string size and so is the operator[]().
  *
  * \section Conversion Conversions from/to other string types
- * The String handles implicit conversion with sf::String (implicit constructor and implicit conversion
+ * The String handles implicit conversion with std::String (implicit constructor and implicit conversion
  * operator).
  *
  * **However, this is not the case with std::string** as this conversion is not often lossless (mostly on Windows).
@@ -893,16 +877,6 @@ namespace std
  * to convert a std::string to a String. However, if you want to get a String object from a string literal, you can
  * directly use the operator=() or the constructor as they are supporting const char* as argument (it assumes the string
  * literal is encoded in UTF8, so you'll need to put the u8 prefix).
- *
- * \subsection Conversions1 Implicit conversion from/to sf::String
- * \code
- * //Get a String from sf::String
- * sf::String sfmlStr("This is a test ! ");
- * gd::String str1(sfmlStr); //Now contains "This is a test ! " encoded in UTF8
- *
- * //Get a sf::String from String
- * sf::String anotherSfmlString = str; //anotherSfmlString now contains "Another test ! "
- * \endcode
  *
  * \subsection Conversions2 Conversion from/to std::string
  * \code
@@ -932,3 +906,5 @@ namespace std
  * In Unicode, uppercasing/lowercasing strings to compare them in a case-insensitive way is not recommended.
  * That's why the function gd::CaseInsensitiveEquiv exists to compare two strings in a case-insensitive way.
  */
+
+// NOLINTEND

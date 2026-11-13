@@ -5,76 +5,147 @@
  */
 
 namespace gdjs {
+  /**
+   * @category Objects > Particle Emitter
+   */
   export type ParticleEmitterObjectDataType = {
-    emitterAngleA: number;
-    emitterForceMin: number;
-    emitterAngleB: number;
-    zoneRadius: number;
-    emitterForceMax: number;
-    particleLifeTimeMax: number;
-    particleLifeTimeMin: number;
-    particleGravityY: number;
-    particleGravityX: number;
-    particleRed2: number;
-    particleRed1: number;
-    particleGreen2: number;
-    particleGreen1: number;
-    particleBlue2: number;
-    particleBlue1: number;
-    particleSize2: number;
-    particleSize1: number;
-    particleAngle2: number;
-    particleAngle1: number;
-    particleAlpha1: number;
+    /**
+     * @deprecated Data not used
+     */
+    emitterAngleA: float;
+    emitterForceMin: float;
+    /**
+     * Cone spray angle (degrees)
+     */
+    emitterAngleB: float;
+    zoneRadius: float;
+    emitterForceMax: float;
+    particleLifeTimeMax: float;
+    particleLifeTimeMin: float;
+    particleGravityY: float;
+    particleGravityX: float;
+    particleColor2: string;
+    particleColor1: string;
+    particleSize2: float;
+    particleSize1: float;
+    /**
+     * Particle max rotation speed (degrees/second)
+     */
+    particleAngle2: float;
+    /**
+     * Particle min rotation speed (degrees/second)
+     */
+    particleAngle1: float;
+    particleAlpha1: float;
     rendererType: string;
     particleAlpha2: number;
     rendererParam2: number;
     rendererParam1: number;
-    particleSizeRandomness1: number;
-    particleSizeRandomness2: number;
-    maxParticleNb: number;
+    particleSizeRandomness1: float;
+    particleSizeRandomness2: float;
+    maxParticleNb: integer;
     additive: boolean;
     /** Resource name for image in particle */
     textureParticleName: string;
-    tank: number;
-    flow: number;
+    tank: integer;
+    flow: float;
     /** Destroy the object when there is no particles? */
     destroyWhenNoParticles: boolean;
+    jumpForwardInTimeOnCreation: float;
   };
 
+  /**
+   * @category Objects > Particle Emitter
+   */
   export type ParticleEmitterObjectData = ObjectData &
     ParticleEmitterObjectDataType;
 
   /**
-   * Displays particles.
+   * @category Objects > Particle Emitter
    */
-  export class ParticleEmitterObject extends gdjs.RuntimeObject {
-    angleA: number;
-    angleB: number;
-    forceMin: number;
-    forceMax: float;
-    zoneRadius: number;
-    lifeTimeMin: number;
-    lifeTimeMax: float;
-    gravityX: number;
-    gravityY: number;
-    colorR1: number;
-    colorR2: number;
-    colorG1: number;
-    colorG2: number;
-    colorB1: number;
-    colorB2: number;
+  export type ParticleEmitterObjectNetworkSyncDataType = {
+    // Technically, all attributes can change at runtime, so we sync as many as possible.
+    // TODO: ensure we only send props that change to optimize the sync.
+    // dirty attributes are not synced, they are defined by the update method if the value has changed.
+    // Particle Rotation Speed
+    prms: number;
+    prmx: number;
+    // Max Particles Count
+    mpc: number;
+    // Additive Rendering
+    addr: boolean;
+    // Angle
+    angb: number;
+    // Force
+    formin: number;
+    formax: number;
+    // Zone Radius
+    zr: number;
+    // Life Time
+    ltmin: number;
+    ltmax: number;
+    // Gravity
+    gravx: number;
+    gravy: number;
+    // Color
+    color1: number;
+    color2: number;
+    // Size
     size1: number;
     size2: number;
+    // Alpha
+    alp1: number;
+    alp2: number;
+    // Flow
+    flow: number;
+    // Tank
+    tank: number;
+    // Texture
+    text: string;
+    // Pause
+    paused: boolean;
+  };
+
+  /** @category Objects > Particle Emitter */
+  export type ParticleEmitterObjectNetworkSyncData = ObjectNetworkSyncData &
+    ParticleEmitterObjectNetworkSyncDataType;
+
+  /**
+   * Displays particles.
+   * @category Objects > Particle Emitter
+   */
+  export class ParticleEmitterObject extends gdjs.RuntimeObject {
+    /**
+     * @deprecated Data not used
+     */
+    angleA: float;
+    angleB: float;
+    forceMin: float;
+    forceMax: float;
+    zoneRadius: float;
+    lifeTimeMin: float;
+    lifeTimeMax: float;
+    gravityX: float;
+    gravityY: float;
+    color1: integer;
+    color2: integer;
+    size1: float;
+    size2: float;
     alpha1: number;
     alpha2: number;
     rendererType: string;
     rendererParam1: number;
     rendererParam2: number;
     texture: string;
-    flow: number;
-    tank: number;
+    flow: float;
+    tank: integer;
     destroyWhenNoParticles: boolean;
+    particleRotationMinSpeed: float;
+    particleRotationMaxSpeed: float;
+    maxParticlesCount: integer;
+    additiveRendering: boolean;
+    jumpForwardInTimeOnCreation: float;
+    _jumpForwardInTimeCompleted: boolean = false;
     _posDirty: boolean = true;
     _angleDirty: boolean = true;
     _forceDirty: boolean = true;
@@ -86,26 +157,41 @@ namespace gdjs {
     _alphaDirty: boolean = true;
     _flowDirty: boolean = true;
     _tankDirty: boolean = true;
+    _particleRotationSpeedDirty: boolean = true;
+    _maxParticlesCountDirty: boolean = true;
+    _additiveRenderingDirty: boolean = true;
     // Don't mark texture as dirty if not using one.
     _textureDirty: boolean;
+    /**
+     * `true` only when the emission is paused by events.
+     * It allows to tell the end of emission apart from it.
+     */
+    _isEmissionPaused: boolean = false;
 
     // @ts-ignore
     _renderer: gdjs.ParticleEmitterObjectRenderer;
 
+    width: float = 32;
+    height: float = 32;
+
     /**
-     * @param the object belongs to
+     * @param instanceContainer the container the object belongs to
      * @param particleObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      particleObjectData: ParticleEmitterObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      particleObjectData: ParticleEmitterObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, particleObjectData);
+      super(instanceContainer, particleObjectData, instanceData);
       this._renderer = new gdjs.ParticleEmitterObjectRenderer(
-        runtimeScene,
+        instanceContainer,
         this,
         particleObjectData
       );
+      if (instanceContainer.getGame().isInGameEdition()) {
+        this._renderer.setHelperVisible(true);
+      }
       this.angleA = particleObjectData.emitterAngleA;
       this.angleB = particleObjectData.emitterAngleB;
       this.forceMin = particleObjectData.emitterForceMin;
@@ -115,12 +201,12 @@ namespace gdjs {
       this.lifeTimeMax = particleObjectData.particleLifeTimeMax;
       this.gravityX = particleObjectData.particleGravityX;
       this.gravityY = particleObjectData.particleGravityY;
-      this.colorR1 = particleObjectData.particleRed1;
-      this.colorR2 = particleObjectData.particleRed2;
-      this.colorG1 = particleObjectData.particleGreen1;
-      this.colorG2 = particleObjectData.particleGreen2;
-      this.colorB1 = particleObjectData.particleBlue1;
-      this.colorB2 = particleObjectData.particleBlue2;
+      this.color1 = gdjs.rgbOrHexStringToNumber(
+        particleObjectData.particleColor1
+      );
+      this.color2 = gdjs.rgbOrHexStringToNumber(
+        particleObjectData.particleColor2
+      );
       this.size1 = particleObjectData.particleSize1;
       this.size2 = particleObjectData.particleSize2;
       this.alpha1 = particleObjectData.particleAlpha1;
@@ -132,38 +218,44 @@ namespace gdjs {
       this.flow = particleObjectData.flow;
       this.tank = particleObjectData.tank;
       this.destroyWhenNoParticles = particleObjectData.destroyWhenNoParticles;
+      this.particleRotationMinSpeed = particleObjectData.particleAngle1;
+      this.particleRotationMaxSpeed = particleObjectData.particleAngle2;
+      this.maxParticlesCount = particleObjectData.maxParticleNb;
+      this.additiveRendering = particleObjectData.additive;
+      this.jumpForwardInTimeOnCreation =
+        particleObjectData.jumpForwardInTimeOnCreation;
       this._textureDirty = this.texture !== '';
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
       this.onCreated();
     }
 
-    setX(x: number): void {
+    override setX(x: float): void {
       if (this.x !== x) {
         this._posDirty = true;
       }
       super.setX(x);
     }
 
-    setY(y: number): void {
+    override setY(y: float): void {
       if (this.y !== y) {
         this._posDirty = true;
       }
       super.setY(y);
     }
 
-    setAngle(angle): void {
+    override setAngle(angle: float): void {
       if (this.angle !== angle) {
         this._angleDirty = true;
       }
       super.setAngle(angle);
     }
 
-    getRendererObject() {
+    override getRendererObject() {
       return this._renderer.getRendererObject();
     }
 
-    updateFromObjectData(
+    override updateFromObjectData(
       oldObjectData: ParticleEmitterObjectData,
       newObjectData: ParticleEmitterObjectData
     ): boolean {
@@ -175,6 +267,18 @@ namespace gdjs {
       }
       if (oldObjectData.emitterForceMin !== newObjectData.emitterForceMin) {
         this.setEmitterForceMin(newObjectData.emitterForceMin);
+      }
+      if (oldObjectData.particleAngle1 !== newObjectData.particleAngle1) {
+        this.setParticleRotationMinSpeed(newObjectData.particleAngle1);
+      }
+      if (oldObjectData.particleAngle2 !== newObjectData.particleAngle2) {
+        this.setParticleRotationMaxSpeed(newObjectData.particleAngle2);
+      }
+      if (oldObjectData.maxParticleNb !== newObjectData.maxParticleNb) {
+        this.setMaxParticlesCount(newObjectData.maxParticleNb);
+      }
+      if (oldObjectData.additive !== newObjectData.additive) {
+        this.setAdditiveRendering(newObjectData.additive);
       }
       if (oldObjectData.emitterForceMax !== newObjectData.emitterForceMax) {
         this.setEmitterForceMax(newObjectData.emitterForceMax);
@@ -198,23 +302,11 @@ namespace gdjs {
       if (oldObjectData.particleGravityY !== newObjectData.particleGravityY) {
         this.setParticleGravityY(newObjectData.particleGravityY);
       }
-      if (oldObjectData.particleRed1 !== newObjectData.particleRed1) {
-        this.setParticleRed1(newObjectData.particleRed1);
+      if (oldObjectData.particleColor1 !== newObjectData.particleColor1) {
+        this.setParticleColor1(newObjectData.particleColor1);
       }
-      if (oldObjectData.particleRed2 !== newObjectData.particleRed2) {
-        this.setParticleRed2(newObjectData.particleRed2);
-      }
-      if (oldObjectData.particleGreen1 !== newObjectData.particleGreen1) {
-        this.setParticleGreen1(newObjectData.particleGreen1);
-      }
-      if (oldObjectData.particleGreen2 !== newObjectData.particleGreen2) {
-        this.setParticleGreen2(newObjectData.particleGreen2);
-      }
-      if (oldObjectData.particleBlue1 !== newObjectData.particleBlue1) {
-        this.setParticleBlue1(newObjectData.particleBlue1);
-      }
-      if (oldObjectData.particleBlue2 !== newObjectData.particleBlue2) {
-        this.setParticleBlue2(newObjectData.particleBlue2);
+      if (oldObjectData.particleColor2 !== newObjectData.particleColor2) {
+        this.setParticleColor2(newObjectData.particleColor2);
       }
       if (oldObjectData.particleSize1 !== newObjectData.particleSize1) {
         this.setParticleSize1(newObjectData.particleSize1);
@@ -231,7 +323,10 @@ namespace gdjs {
       if (
         oldObjectData.textureParticleName !== newObjectData.textureParticleName
       ) {
-        this.setTexture(newObjectData.textureParticleName, this._runtimeScene);
+        this.setTexture(
+          newObjectData.textureParticleName,
+          this.getRuntimeScene()
+        );
       }
       if (oldObjectData.flow !== newObjectData.flow) {
         this.setFlow(newObjectData.flow);
@@ -259,7 +354,7 @@ namespace gdjs {
         oldObjectData.rendererParam2 !== newObjectData.rendererParam2
       ) {
         // Destroy the renderer, ensure it's removed from the layer.
-        const layer = this._runtimeScene.getLayer(this.layer);
+        const layer = this.getInstanceContainer().getLayer(this.layer);
         layer
           .getRenderer()
           .removeRendererObject(this._renderer.getRendererObject());
@@ -267,29 +362,169 @@ namespace gdjs {
 
         // and recreate the renderer, which will add itself to the layer.
         this._renderer = new gdjs.ParticleEmitterObjectRenderer(
-          this._runtimeScene,
+          this.getInstanceContainer(),
           this,
           newObjectData
         );
 
         // Consider every state dirty as the renderer was just re-created, so it needs
         // to be repositioned, angle updated, etc...
-        this._posDirty = this._angleDirty = this._forceDirty = this._zoneRadiusDirty = true;
-        this._lifeTimeDirty = this._gravityDirty = this._colorDirty = this._sizeDirty = true;
-        this._alphaDirty = this._flowDirty = this._tankDirty = this._textureDirty = true;
+        this._posDirty =
+          this._angleDirty =
+          this._forceDirty =
+          this._zoneRadiusDirty =
+            true;
+        this._lifeTimeDirty =
+          this._gravityDirty =
+          this._colorDirty =
+          this._sizeDirty =
+            true;
+        this._alphaDirty =
+          this._flowDirty =
+          this._tankDirty =
+          this._textureDirty =
+            true;
       }
       return true;
     }
 
-    update(runtimeScene): void {
+    override getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): ParticleEmitterObjectNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        prms: this.particleRotationMinSpeed,
+        prmx: this.particleRotationMaxSpeed,
+        mpc: this.maxParticlesCount,
+        addr: this.additiveRendering,
+        angb: this.angleB,
+        formin: this.forceMin,
+        formax: this.forceMax,
+        zr: this.zoneRadius,
+        ltmin: this.lifeTimeMin,
+        ltmax: this.lifeTimeMax,
+        gravx: this.gravityX,
+        gravy: this.gravityY,
+        color1: this.color1,
+        color2: this.color2,
+        size1: this.size1,
+        size2: this.size2,
+        alp1: this.alpha1,
+        alp2: this.alpha2,
+        flow: this.flow,
+        tank: this.tank,
+        text: this.texture,
+        paused: this._isEmissionPaused,
+      };
+    }
+
+    override updateFromNetworkSyncData(
+      syncData: ParticleEmitterObjectNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(syncData, options);
+      if (syncData.x !== undefined) {
+        this.setX(syncData.x);
+      }
+      if (syncData.y !== undefined) {
+        this.setY(syncData.y);
+      }
+      if (syncData.a !== undefined) {
+        this.setAngle(syncData.a);
+      }
+      if (syncData.prms !== undefined) {
+        this.setParticleRotationMinSpeed(syncData.prms);
+      }
+      if (syncData.prmx !== undefined) {
+        this.setParticleRotationMaxSpeed(syncData.prmx);
+      }
+      if (syncData.mpc !== undefined) {
+        this.setMaxParticlesCount(syncData.mpc);
+      }
+      if (syncData.addr !== undefined) {
+        this.setAdditiveRendering(syncData.addr);
+      }
+      if (syncData.angb !== undefined) {
+        this.setEmitterAngleB(syncData.angb);
+      }
+      if (syncData.formin !== undefined) {
+        this.setEmitterForceMin(syncData.formin);
+      }
+      if (syncData.formax !== undefined) {
+        this.setEmitterForceMax(syncData.formax);
+      }
+      if (syncData.zr !== undefined) {
+        this.setZoneRadius(syncData.zr);
+      }
+      if (syncData.ltmin !== undefined) {
+        this.setParticleLifeTimeMin(syncData.ltmin);
+      }
+      if (syncData.ltmax !== undefined) {
+        this.setParticleLifeTimeMax(syncData.ltmax);
+      }
+      if (syncData.gravx !== undefined) {
+        this.setParticleGravityX(syncData.gravx);
+      }
+      if (syncData.gravy !== undefined) {
+        this.setParticleGravityY(syncData.gravy);
+      }
+      if (syncData.color1 !== undefined) {
+        this.setParticleColor1AsNumber(syncData.color1);
+      }
+      if (syncData.color2 !== undefined) {
+        this.setParticleColor2AsNumber(syncData.color2);
+      }
+      if (syncData.size1 !== undefined) {
+        this.setParticleSize1(syncData.size1);
+      }
+      if (syncData.size2 !== undefined) {
+        this.setParticleSize2(syncData.size2);
+      }
+      if (syncData.alp1 !== undefined) {
+        this.setParticleAlpha1(syncData.alp1);
+      }
+      if (syncData.alp2 !== undefined) {
+        this.setParticleAlpha2(syncData.alp2);
+      }
+      if (syncData.flow !== undefined) {
+        this.setFlow(syncData.flow);
+      }
+      if (syncData.tank !== undefined) {
+        this.setTank(syncData.tank);
+      }
+      if (syncData.text !== undefined) {
+        this.setTexture(syncData.text, this.getRuntimeScene());
+      }
+      if (syncData.paused !== undefined) {
+        if (syncData.paused) {
+          this.stopEmission();
+        } else {
+          this.startEmission();
+        }
+      }
+    }
+
+    override update(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       if (this._posDirty) {
         this._renderer.setPosition(this.getX(), this.getY());
+      }
+      if (this._particleRotationSpeedDirty) {
+        this._renderer.setParticleRotationSpeed(
+          this.particleRotationMinSpeed,
+          this.particleRotationMaxSpeed
+        );
+      }
+      if (this._maxParticlesCountDirty) {
+        this._renderer.setMaxParticlesCount(this.maxParticlesCount);
+      }
+      if (this._additiveRenderingDirty) {
+        this._renderer.setAdditiveRendering(this.additiveRendering);
       }
       if (this._angleDirty) {
         const angle = this.getAngle();
         this._renderer.setAngle(
-          this.angle - this.angleB / 2.0,
-          this.angle + this.angleB / 2.0
+          angle - this.angleB / 2.0,
+          angle + this.angleB / 2.0
         );
       }
       if (this._forceDirty) {
@@ -305,14 +540,7 @@ namespace gdjs {
         this._renderer.setGravity(this.gravityX, this.gravityY);
       }
       if (this._colorDirty) {
-        this._renderer.setColor(
-          this.colorR1,
-          this.colorG1,
-          this.colorB1,
-          this.colorR2,
-          this.colorG2,
-          this.colorB2
-        );
+        this._renderer.setColor(this.color1, this.color2);
       }
       if (this._sizeDirty) {
         this._renderer.setSize(this.size1, this.size2);
@@ -324,27 +552,84 @@ namespace gdjs {
         this._renderer.resetEmission(this.flow, this.tank);
       }
       if (this._textureDirty) {
-        this._renderer.setTextureName(this.texture, runtimeScene);
+        this._renderer.setTextureName(this.texture, instanceContainer);
       }
-      this._posDirty = this._angleDirty = this._forceDirty = this._zoneRadiusDirty = false;
-      this._lifeTimeDirty = this._gravityDirty = this._colorDirty = this._sizeDirty = false;
-      this._alphaDirty = this._flowDirty = this._textureDirty = this._tankDirty = false;
-      this._renderer.update(this.getElapsedTime(runtimeScene) / 1000.0);
+      this._posDirty =
+        this._angleDirty =
+        this._forceDirty =
+        this._zoneRadiusDirty =
+          false;
+      this._lifeTimeDirty =
+        this._gravityDirty =
+        this._colorDirty =
+        this._sizeDirty =
+          false;
+      this._alphaDirty =
+        this._flowDirty =
+        this._textureDirty =
+        this._tankDirty =
+          false;
+      this._additiveRenderingDirty =
+        this._maxParticlesCountDirty =
+        this._particleRotationSpeedDirty =
+          false;
+      this._renderer.update(this.getElapsedTime() / 1000.0);
       if (
-        this._renderer.hasStarted() &&
+        this.destroyWhenNoParticles &&
         this.getParticleCount() === 0 &&
-        this.destroyWhenNoParticles
+        this._renderer.hasStarted() &&
+        !this._isEmissionPaused &&
+        this._renderer._mayHaveEndedEmission()
       ) {
-        this.deleteFromScene(runtimeScene);
+        this.deleteFromScene();
+      }
+      if (
+        this.jumpForwardInTimeOnCreation > 0 &&
+        this._jumpForwardInTimeCompleted === false
+      ) {
+        this._renderer.update(this.jumpForwardInTimeOnCreation);
+        this._jumpForwardInTimeCompleted = true;
       }
     }
 
-    onDestroyFromScene(runtimeScene: gdjs.RuntimeScene): void {
+    override onDestroyed(): void {
       this._renderer.destroy();
-      super.onDestroyFromScene(runtimeScene);
+      super.onDestroyed();
     }
 
-    getEmitterForceMin(): number {
+    override getOriginalWidth(): float {
+      return 32;
+    }
+
+    override getOriginalHeight(): float {
+      return 32;
+    }
+
+    override setWidth(width: float): void {
+      this.width = width;
+    }
+
+    override setHeight(height: float): void {
+      this.height = height;
+    }
+
+    override getWidth(): float {
+      return this.width;
+    }
+
+    override getHeight(): float {
+      return this.height;
+    }
+
+    override getDrawableX(): float {
+      return this.getX() - this.getCenterX();
+    }
+
+    override getDrawableY(): float {
+      return this.getY() - this.getCenterY();
+    }
+
+    getEmitterForceMin(): float {
       return this.forceMin;
     }
 
@@ -358,7 +643,7 @@ namespace gdjs {
       }
     }
 
-    getEmitterForceMax(): number {
+    getEmitterForceMax(): float {
       return this.forceMax;
     }
 
@@ -372,10 +657,60 @@ namespace gdjs {
       }
     }
 
+    setParticleRotationMinSpeed(speed: float): void {
+      if (this.particleRotationMinSpeed !== speed) {
+        this._particleRotationSpeedDirty = true;
+        this.particleRotationMinSpeed = speed;
+      }
+    }
+
+    getParticleRotationMinSpeed(): float {
+      return this.particleRotationMinSpeed;
+    }
+
+    setParticleRotationMaxSpeed(speed: float): void {
+      if (this.particleRotationMaxSpeed !== speed) {
+        this._particleRotationSpeedDirty = true;
+        this.particleRotationMaxSpeed = speed;
+      }
+    }
+
+    getParticleRotationMaxSpeed(): float {
+      return this.particleRotationMaxSpeed;
+    }
+
+    setMaxParticlesCount(count: integer): void {
+      if (this.maxParticlesCount !== count) {
+        this._maxParticlesCountDirty = true;
+        this.maxParticlesCount = count;
+      }
+    }
+
+    getMaxParticlesCount(): integer {
+      return this.maxParticlesCount;
+    }
+
+    setAdditiveRendering(enabled: boolean) {
+      if (this.additiveRendering !== enabled) {
+        this._additiveRenderingDirty = true;
+        this.additiveRendering = enabled;
+      }
+    }
+
+    getAdditiveRendering(): boolean {
+      return this.additiveRendering;
+    }
+
+    /**
+     * @deprecated Prefer using getAngle
+     */
     getEmitterAngle(): float {
       return (this.angleA + this.angleB) / 2.0;
     }
 
+    /**
+     * @deprecated Prefer using setAngle
+     */
     setEmitterAngle(angle: float): void {
       const oldAngle = this.getEmitterAngle();
       if (angle !== oldAngle) {
@@ -385,10 +720,16 @@ namespace gdjs {
       }
     }
 
+    /**
+     * @deprecated This function returns data that is not used.
+     */
     getEmitterAngleA(): float {
       return this.angleA;
     }
 
+    /**
+     * @deprecated This function sets data that is not used.
+     */
     setEmitterAngleA(angle: float): void {
       if (this.angleA !== angle) {
         this._angleDirty = true;
@@ -408,17 +749,11 @@ namespace gdjs {
     }
 
     getConeSprayAngle(): float {
-      return Math.abs(this.angleB - this.angleA);
+      return this.getEmitterAngleB();
     }
 
     setConeSprayAngle(angle: float): void {
-      const oldCone = this.getConeSprayAngle();
-      if (oldCone !== angle) {
-        this._angleDirty = true;
-        const midAngle = this.getEmitterAngle();
-        this.angleA = midAngle - angle / 2.0;
-        this.angleB = midAngle + angle / 2.0;
-      }
+      this.setEmitterAngleB(angle);
     }
 
     getZoneRadius(): float {
@@ -512,13 +847,26 @@ namespace gdjs {
       const oldLength = this.getParticleGravityLength();
       if (oldLength !== length) {
         this._gravityDirty = true;
-        this.gravityX *= length / oldLength;
-        this.gravityY *= length / oldLength;
+        if (oldLength === 0) {
+          this.gravityX = 0;
+          this.gravityY = length;
+        } else {
+          this.gravityX *= length / oldLength;
+          this.gravityY *= length / oldLength;
+        }
       }
     }
 
+    getParticleColorStart(): integer {
+      return this.color1;
+    }
+
+    getParticleColorEnd(): integer {
+      return this.color2;
+    }
+
     getParticleRed1(): number {
-      return this.colorR1;
+      return gdjs.hexNumberToRGBArray(this.color1)[0];
     }
 
     setParticleRed1(red: number): void {
@@ -528,14 +876,14 @@ namespace gdjs {
       if (red > 255) {
         red = 255;
       }
-      if (this.colorR1 !== red) {
-        this._colorDirty = true;
-        this.colorR1 = red;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color1);
+      this.setParticleColor1AsNumber(
+        gdjs.rgbToHexNumber(red, existingColor[1], existingColor[2])
+      );
     }
 
     getParticleRed2(): number {
-      return this.colorR2;
+      return gdjs.hexNumberToRGBArray(this.color2)[0];
     }
 
     setParticleRed2(red: number): void {
@@ -545,14 +893,14 @@ namespace gdjs {
       if (red > 255) {
         red = 255;
       }
-      if (this.colorR2 !== red) {
-        this._colorDirty = true;
-        this.colorR2 = red;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color2);
+      this.setParticleColor2AsNumber(
+        gdjs.rgbToHexNumber(red, existingColor[1], existingColor[2])
+      );
     }
 
     getParticleGreen1(): number {
-      return this.colorG1;
+      return gdjs.hexNumberToRGBArray(this.color1)[1];
     }
 
     setParticleGreen1(green: number): void {
@@ -562,14 +910,14 @@ namespace gdjs {
       if (green > 255) {
         green = 255;
       }
-      if (this.colorG1 !== green) {
-        this._colorDirty = true;
-        this.colorG1 = green;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color1);
+      this.setParticleColor1AsNumber(
+        gdjs.rgbToHexNumber(existingColor[0], green, existingColor[2])
+      );
     }
 
     getParticleGreen2(): number {
-      return this.colorG2;
+      return gdjs.hexNumberToRGBArray(this.color2)[1];
     }
 
     setParticleGreen2(green: number): void {
@@ -579,14 +927,14 @@ namespace gdjs {
       if (green > 255) {
         green = 255;
       }
-      if (this.colorG2 !== green) {
-        this._colorDirty = true;
-        this.colorG2 = green;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color2);
+      this.setParticleColor2AsNumber(
+        gdjs.rgbToHexNumber(existingColor[0], green, existingColor[2])
+      );
     }
 
     getParticleBlue1(): number {
-      return this.colorB1;
+      return gdjs.hexNumberToRGBArray(this.color1)[2];
     }
 
     setParticleBlue1(blue: number): void {
@@ -596,14 +944,14 @@ namespace gdjs {
       if (blue > 255) {
         blue = 255;
       }
-      if (this.colorB1 !== blue) {
-        this._colorDirty = true;
-        this.colorB1 = blue;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color1);
+      this.setParticleColor1AsNumber(
+        gdjs.rgbToHexNumber(existingColor[0], existingColor[1], blue)
+      );
     }
 
     getParticleBlue2(): number {
-      return this.colorB2;
+      return gdjs.hexNumberToRGBArray(this.color2)[2];
     }
 
     setParticleBlue2(blue: number): void {
@@ -613,30 +961,32 @@ namespace gdjs {
       if (blue > 255) {
         blue = 255;
       }
-      if (this.colorB2 !== blue) {
-        this._colorDirty = true;
-        this.colorB2 = blue;
-      }
+      const existingColor = gdjs.hexNumberToRGBArray(this.color2);
+      this.setParticleColor2AsNumber(
+        gdjs.rgbToHexNumber(existingColor[0], existingColor[1], blue)
+      );
     }
 
-    setParticleColor1(rgbColor: string): void {
-      const colors = rgbColor.split(';');
-      if (colors.length < 3) {
-        return;
-      }
-      this.setParticleRed1(parseInt(colors[0], 10));
-      this.setParticleGreen1(parseInt(colors[1], 10));
-      this.setParticleBlue1(parseInt(colors[2], 10));
+    setParticleColor1AsNumber(color: integer): void {
+      this.color1 = color;
+      this._colorDirty = true;
     }
 
-    setParticleColor2(rgbColor: string): void {
-      const colors = rgbColor.split(';');
-      if (colors.length < 3) {
-        return;
-      }
-      this.setParticleRed2(parseInt(colors[0], 10));
-      this.setParticleGreen2(parseInt(colors[1], 10));
-      this.setParticleBlue2(parseInt(colors[2], 10));
+    setParticleColor1(rgbOrHexColor: string): void {
+      this.setParticleColor1AsNumber(
+        gdjs.rgbOrHexStringToNumber(rgbOrHexColor)
+      );
+    }
+
+    setParticleColor2AsNumber(color: integer): void {
+      this.color2 = color;
+      this._colorDirty = true;
+    }
+
+    setParticleColor2(rgbOrHexColor: string): void {
+      this.setParticleColor2AsNumber(
+        gdjs.rgbOrHexStringToNumber(rgbOrHexColor)
+      );
     }
 
     getParticleSize1(): float {
@@ -687,10 +1037,12 @@ namespace gdjs {
     }
 
     startEmission(): void {
+      this._isEmissionPaused = false;
       this._renderer.start();
     }
 
     stopEmission(): void {
+      this._isEmissionPaused = true;
       this._renderer.stop();
     }
 
@@ -706,26 +1058,26 @@ namespace gdjs {
       this._renderer.recreate();
     }
 
-    getFlow(): number {
+    getFlow(): float {
       return this.flow;
     }
 
-    setFlow(flow: number): void {
+    setFlow(flow: float): void {
       if (this.flow !== flow) {
         this.flow = flow;
         this._flowDirty = true;
       }
     }
 
-    getParticleCount(): number {
+    getParticleCount(): integer {
       return this._renderer.getParticleCount();
     }
 
-    getTank(): number {
+    getTank(): integer {
       return this.tank;
     }
 
-    setTank(tank: number): void {
+    setTank(tank: integer): void {
       this.tank = tank;
       this._tankDirty = true;
     }
@@ -734,13 +1086,20 @@ namespace gdjs {
       return this.texture;
     }
 
-    setTexture(texture: string, runtimeScene: gdjs.RuntimeScene): void {
+    setTexture(
+      texture: string,
+      instanceContainer: gdjs.RuntimeInstanceContainer
+    ): void {
       if (this.texture !== texture) {
-        if (this._renderer.isTextureNameValid(texture, runtimeScene)) {
+        if (this._renderer.isTextureNameValid(texture, instanceContainer)) {
           this.texture = texture;
           this._textureDirty = true;
         }
       }
+    }
+
+    jumpEmitterForwardInTime(timeSkipped: float): void {
+      this._renderer.update(timeSkipped);
     }
   }
   gdjs.registerObject(

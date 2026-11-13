@@ -3,7 +3,7 @@ import { Trans } from '@lingui/macro';
 import { t } from '@lingui/macro';
 
 import * as React from 'react';
-import EditorMosaic from '../UI/EditorMosaic';
+import EditorMosaic, { type EditorMosaicInterface } from '../UI/EditorMosaic';
 import Background from '../UI/Background';
 import get from 'lodash/get';
 import RaisedButton from '../UI/RaisedButton';
@@ -40,6 +40,7 @@ type Props = {|
   profilerOutput: ?ProfilerOutput,
   profilingInProgress: boolean,
   logsManager: LogsManager,
+  onOpenedEditorsChanged: () => void,
 |};
 
 type State = {|
@@ -70,23 +71,37 @@ const initialMosaicEditorNodes = {
  * currently selected inspector.
  */
 export default class DebuggerContent extends React.Component<Props, State> {
-  state = {
+  state: State = {
     selectedInspector: null,
     selectedInspectorFullPath: [],
     rawMode: false,
   };
 
-  _editors: ?EditorMosaic = null;
+  _editors: ?EditorMosaicInterface = null;
 
-  openProfiler = () => {
-    if (this._editors) this._editors.openEditor('profiler', 'end', 75, 'row');
+  isProfilerShown = (): any => {
+    return (
+      !!this._editors &&
+      this._editors.getOpenedEditorNames().includes('profiler')
+    );
   };
 
-  openConsole = () => {
-    if (this._editors) this._editors.openEditor('console', 'start', 40, 'row');
+  isConsoleShown = (): any => {
+    return (
+      !!this._editors &&
+      this._editors.getOpenedEditorNames().includes('console')
+    );
   };
 
-  render() {
+  toggleProfiler = () => {
+    if (this._editors) this._editors.toggleEditor('profiler', 'bottom');
+  };
+
+  toggleConsole = () => {
+    if (this._editors) this._editors.toggleEditor('console', 'bottom');
+  };
+
+  render(): any {
     const {
       gameData,
       onRefresh,
@@ -97,6 +112,7 @@ export default class DebuggerContent extends React.Component<Props, State> {
       profilerOutput,
       profilingInProgress,
       logsManager,
+      onOpenedEditorsChanged,
     } = this.props;
     const {
       selectedInspector,
@@ -234,13 +250,17 @@ export default class DebuggerContent extends React.Component<Props, State> {
         {({ getDefaultEditorMosaicNode, setDefaultEditorMosaicNode }) => (
           <EditorMosaic
             ref={editors => (this._editors = editors)}
+            // $FlowFixMe[incompatible-type]
             editors={editors}
+            centralNodeId="selected-inspector"
             initialNodes={
+              // $FlowFixMe[incompatible-type]
               getDefaultEditorMosaicNode('debugger') || initialMosaicEditorNodes
             }
             onPersistNodes={node =>
               setDefaultEditorMosaicNode('debugger', node)
             }
+            onOpenedEditorsChanged={onOpenedEditorsChanged}
           />
         )}
       </PreferencesContext.Consumer>

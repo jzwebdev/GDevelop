@@ -7,7 +7,9 @@
 #define GDCORE_EFFECTS_CONTAINER_H
 #include <memory>
 #include <vector>
+#include <algorithm>
 
+#include "GDCore/Project/MemoryTrackedRegistry.h"
 #include "GDCore/String.h"
 
 namespace gd {
@@ -63,7 +65,7 @@ class GD_CORE_API EffectsContainer {
   std::size_t GetEffectPosition(const gd::String& name) const;
 
   /**
-   * Return the number of effecst.
+   * Return the number of effects.
    */
   std::size_t GetEffectsCount() const;
 
@@ -90,6 +92,11 @@ class GD_CORE_API EffectsContainer {
   void RemoveEffect(const gd::String& name);
 
   /**
+   * \brief Move the specified effect at a new position in the list.
+   */
+  void MoveEffect(std::size_t oldIndex, std::size_t newIndex);
+
+  /**
    * Swap the position of two effects.
    */
   void SwapEffects(std::size_t firstEffectIndex, std::size_t secondEffectIndex);
@@ -104,10 +111,16 @@ class GD_CORE_API EffectsContainer {
    */
   void UnserializeFrom(const SerializerElement& element);
 
+  /**
+   * \brief Clear all effects of the container.
+   */
+  inline void Clear() { effects.clear(); }
+
  private:
   std::vector<std::shared_ptr<gd::Effect>> effects;
   static Effect badEffect;
   void Init(const EffectsContainer& other);
+  gd::MemoryTracked _memoryTracked{this, "EffectsContainer"};
 };
 }  // namespace gd
 

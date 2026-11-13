@@ -9,7 +9,7 @@ This project is released under the MIT License.
 #define SHAPEPAINTEROBJECT_H
 #include <vector>
 
-#include "GDCore/Project/Object.h"
+#include "GDCore/Project/ObjectConfiguration.h"
 namespace gd {
 class Object;
 class InitialInstance;
@@ -26,84 +26,75 @@ class GD_EXTENSION_API ShapePainterObjectBase {
   ShapePainterObjectBase();
   virtual ~ShapePainterObjectBase(){};
 
-  inline void SetOutlineSize(float size) { outlineSize = size; };
-  inline float GetOutlineSize() const { return outlineSize; };
+  inline void SetOutlineSize(double size) { outlineSize = size; };
+  inline double GetOutlineSize() const { return outlineSize; };
 
-  void SetOutlineOpacity(float val);
-  inline float GetOutlineOpacity() const { return outlineOpacity; };
+  void SetOutlineOpacity(double val);
+  inline double GetOutlineOpacity() const { return outlineOpacity; };
 
-  void SetOutlineColor(unsigned int r, unsigned int v, unsigned int b);
-  inline unsigned int GetOutlineColorR() const { return outlineColorR; };
-  inline unsigned int GetOutlineColorG() const { return outlineColorG; };
-  inline unsigned int GetOutlineColorB() const { return outlineColorB; };
+  void SetOutlineColor(const gd::String& color) { outlineColor = color; };
+  const gd::String& GetOutlineColor() const { return outlineColor; };
 
-  /** Used by GD events generated code : Prefer using original SetOutlineColor
-   */
-  void SetOutlineColor(const gd::String& color);
+  void SetFillOpacity(double val);
+  inline double GetFillOpacity() const { return fillOpacity; };
 
-  void SetFillOpacity(float val);
-  inline float GetFillOpacity() const { return fillOpacity; };
-
-  void SetFillColor(unsigned int r, unsigned int v, unsigned int b);
-  inline unsigned int GetFillColorR() const { return fillColorR; };
-  inline unsigned int GetFillColorG() const { return fillColorG; };
-  inline unsigned int GetFillColorB() const { return fillColorB; };
-
-  /** Used by GD events generated code : Prefer using original SetFillColor
-   */
-  void SetFillColor(const gd::String& color);
+  void SetFillColor(const gd::String& color) { fillColor = color; };
+  const gd::String& GetFillColor() const { return fillColor; };
 
   inline void SetCoordinatesAbsolute() { absoluteCoordinates = true; }
   inline void SetCoordinatesRelative() { absoluteCoordinates = false; }
-  inline bool AreCoordinatesAbsolute() { return absoluteCoordinates; }
+  inline bool AreCoordinatesAbsolute() const { return absoluteCoordinates; }
 
   inline void SetClearBetweenFrames(bool value) { clearBetweenFrames = value; }
-  inline bool IsClearedBetweenFrames() { return clearBetweenFrames; }
+  inline bool IsClearedBetweenFrames() const { return clearBetweenFrames; }
+
+  inline const gd::String& GetAntialiasing() const { return antialiasing; }
+  inline void SetAntialiasing(const gd::String& value) { antialiasing = value; }
 
  protected:
   virtual void DoUnserializeFrom(gd::Project& project,
                                  const gd::SerializerElement& element);
-#if defined(GD_IDE_ONLY)
   virtual void DoSerializeTo(gd::SerializerElement& element) const;
-#endif
 
  private:
   // Fill color
-  unsigned int fillColorR;
-  unsigned int fillColorG;
-  unsigned int fillColorB;
+  gd::String fillColor;
   float fillOpacity;
 
   // Outline
   int outlineSize;
-  unsigned int outlineColorR;
-  unsigned int outlineColorG;
-  unsigned int outlineColorB;
+  gd::String outlineColor;
   float outlineOpacity;
 
   bool absoluteCoordinates;
   bool clearBetweenFrames;
+
+  // Antialiasing
+  gd::String antialiasing;
 };
 
 /**
  * \brief The Shape Painter object used for storage and by the IDE.
  */
-class GD_EXTENSION_API ShapePainterObject : public gd::Object,
+class GD_EXTENSION_API ShapePainterObject : public gd::ObjectConfiguration,
                                             public ShapePainterObjectBase {
  public:
-  ShapePainterObject(gd::String name_);
+  ShapePainterObject();
   virtual ~ShapePainterObject(){};
-  virtual std::unique_ptr<gd::Object> Clone() const {
+  virtual std::unique_ptr<gd::ObjectConfiguration> Clone() const override {
     return gd::make_unique<ShapePainterObject>(*this);
   }
 
+  virtual std::map<gd::String, gd::PropertyDescriptor>
+  GetProperties() const override;
+
+  virtual bool UpdateProperty(const gd::String &name,
+                              const gd::String &value) override;
+
  private:
   virtual void DoUnserializeFrom(gd::Project& project,
-                                 const gd::SerializerElement& element);
-#if defined(GD_IDE_ONLY)
-  virtual void DoSerializeTo(gd::SerializerElement& element) const;
-
-#endif
+                                 const gd::SerializerElement& element) override;
+  virtual void DoSerializeTo(gd::SerializerElement& element) const override;
 };
 
 #endif  // SHAPEPAINTEROBJECT_H

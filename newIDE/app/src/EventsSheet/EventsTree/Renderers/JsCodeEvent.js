@@ -1,8 +1,6 @@
 // @flow
 import * as React from 'react';
 import classNames from 'classnames';
-import ExpandMore from '@material-ui/icons/ExpandMore';
-import ExpandLess from '@material-ui/icons/ExpandLess';
 import Button from '@material-ui/core/Button';
 import InlinePopover from '../../InlinePopover';
 import ObjectField from '../../ParameterFields/ObjectField';
@@ -16,7 +14,15 @@ import { type EventRendererProps } from './EventRenderer';
 import Measure from 'react-measure';
 import { CodeEditor } from '../../../CodeEditor';
 import { shouldActivate } from '../../../UI/KeyboardShortcuts/InteractionKeys';
+import { type ParameterFieldInterface } from '../../ParameterFields/ParameterFieldCommons';
 import { Trans } from '@lingui/macro';
+import ChevronArrowTop from '../../../UI/CustomSvgIcons/ChevronArrowTop';
+import ChevronArrowBottom from '../../../UI/CustomSvgIcons/ChevronArrowBottom';
+import { exceptionallyGuardAgainstDeadObject } from '../../../Utils/IsNullPtr';
+import UnsavedChangesContext, {
+  type UnsavedChanges,
+} from '../../../MainFrame/UnsavedChangesContext';
+
 const gd: libGDevelop = global.gd;
 
 const fontFamily = '"Lucida Console", Monaco, monospace';
@@ -42,6 +48,9 @@ const styles = {
     color: '#d4d4d4',
     overflowX: 'hidden',
     maxWidth: '100%',
+    whiteSpace: 'normal',
+    wordBreak: 'normal',
+    overflowWrap: 'anywhere',
   },
   comment: {
     color: '#777',
@@ -66,7 +75,10 @@ export default class JsCodeEvent extends React.Component<
   EventRendererProps,
   State
 > {
-  _objectField: ?ObjectField = null;
+  static contextType: React.Context<UnsavedChanges> = UnsavedChangesContext;
+
+  _objectField: ?ParameterFieldInterface = null;
+  // $FlowFixMe[missing-local-annot]
   state = {
     editingObject: false,
     editingPreviousValue: null,
@@ -74,10 +86,48 @@ export default class JsCodeEvent extends React.Component<
   };
 
   _input: ?any;
+  _inlineCodeBeforeChanges: ?string;
+
+  onFocus = () => {
+    const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
+    this._inlineCodeBeforeChanges = jsCodeEvent.getInlineCode();
+  };
+
+  onBlur = () => {
+    const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
+    const inlineCodeAfterChanges = jsCodeEvent.getInlineCode();
+    if (this._inlineCodeBeforeChanges !== inlineCodeAfterChanges)
+      this.props.onEndEditingEvent();
+  };
 
   onChange = (newValue: string) => {
     const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
     jsCodeEvent.setInlineCode(newValue);
+
+    // The JS Event is modified live as the user types, so flag the
+    // project as having unsaved changes immediately.
+    const unsavedChanges: UnsavedChanges = this.context;
+    unsavedChanges.triggerUnsavedChanges();
+  };
+
+  saveEditorState = ({
+    scrollTop,
+    cursorColumn,
+    cursorLine,
+  }: {
+    scrollTop: number,
+    cursorColumn: number,
+    cursorLine: number,
+  }): void => {
+    const jsCodeEvent = exceptionallyGuardAgainstDeadObject(
+      gd.asJsCodeEvent(this.props.event)
+    );
+    if (!jsCodeEvent) {
+      return;
+    }
+    jsCodeEvent.setScrollTop(scrollTop);
+    jsCodeEvent.setCursorColumn(cursorColumn);
+    jsCodeEvent.setCursorLine(cursorLine);
   };
 
   editObject = (domEvent: any) => {
@@ -123,9 +173,13 @@ export default class JsCodeEvent extends React.Component<
     const { anchorEl } = this.state;
 
     // Put back the focus after closing the inline popover.
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-type]
     if (anchorEl) anchorEl.focus();
-
+    const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
+    const { editingPreviousValue } = this.state;
+    if (editingPreviousValue !== jsCodeEvent.getParameterObjects()) {
+      this.props.onEndEditingEvent();
+    }
     this.setState({
       editingObject: false,
       editingPreviousValue: null,
@@ -138,7 +192,7 @@ export default class JsCodeEvent extends React.Component<
     jsCodeEvent.setEventsSheetExpanded(!jsCodeEvent.isEventsSheetExpanded());
   };
 
-  _getCodeEditorHeight = () => {
+  _getCodeEditorHeight = (): any => {
     const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
 
     // Always use the minimum height when collapsed.
@@ -151,7 +205,7 @@ export default class JsCodeEvent extends React.Component<
     return Math.max(MINIMUM_EDITOR_HEIGHT, heightToFillSheet);
   };
 
-  render() {
+  render(): any {
     const jsCodeEvent = gd.asJsCodeEvent(this.props.event);
     const parameterObjects = jsCodeEvent.getParameterObjects();
 
@@ -225,9 +279,9 @@ export default class JsCodeEvent extends React.Component<
     const expandIcon = (
       <div style={styles.expandIcon}>
         {jsCodeEvent.isEventsSheetExpanded() ? (
-          <ExpandLess fontSize="small" color="inherit" />
+          <ChevronArrowTop fontSize="small" color="inherit" />
         ) : (
-          <ExpandMore fontSize="small" color="inherit" />
+          <ChevronArrowBottom fontSize="small" color="inherit" />
         )}
       </div>
     );
@@ -242,14 +296,23 @@ export default class JsCodeEvent extends React.Component<
               [largeSelectedArea]: this.props.selected,
             })}
             ref={measureRef}
+            id={`${this.props.idPrefix}-js-code`}
           >
             {functionStart}
             <CodeEditor
               value={jsCodeEvent.getInlineCode()}
               onChange={this.onChange}
+              initialScrollTop={jsCodeEvent.getScrollTop()}
+              initialCursorColumn={jsCodeEvent.getCursorColumn()}
+              initialCursorLine={jsCodeEvent.getCursorLine()}
+              saveEditorState={this.saveEditorState}
               width={contentRect.bounds.width - 5}
               height={this._getCodeEditorHeight()}
-              onEditorMounted={() => this.props.onUpdate()}
+              onEditorMounted={() => {
+                this.props.onUpdate();
+              }}
+              onFocus={this.onFocus}
+              onBlur={this.onBlur}
             />
             {functionEnd}
             <Button onClick={this.toggleExpanded} fullWidth size="small">
@@ -266,6 +329,9 @@ export default class JsCodeEvent extends React.Component<
                 scope={this.props.scope}
                 globalObjectsContainer={this.props.globalObjectsContainer}
                 objectsContainer={this.props.objectsContainer}
+                projectScopedContainersAccessor={
+                  this.props.projectScopedContainersAccessor
+                }
                 value={parameterObjects}
                 onChange={text => {
                   jsCodeEvent.setParameterObjects(text);

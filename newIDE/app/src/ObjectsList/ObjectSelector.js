@@ -1,21 +1,47 @@
 // @flow
-import { t } from '@lingui/macro';
 import * as React from 'react';
+import { t, Trans } from '@lingui/macro';
+import { I18n } from '@lingui/react';
 import { enumerateObjectsAndGroups } from './EnumerateObjects';
+import { type FieldFocusFunction } from '../EventsSheet/ParameterFields/ParameterFieldCommons';
 import SemiControlledAutoComplete, {
   type DataSource,
   type SemiControlledAutoCompleteInterface,
 } from '../UI/SemiControlledAutoComplete';
 import ListIcon from '../UI/ListIcon';
 import ObjectsRenderingService from '../ObjectsRendering/ObjectsRenderingService';
+import useForceUpdate from '../Utils/UseForceUpdate';
+import { useOnResource3DPreviewRendered } from '../ResourcesList/ResourcePreview/Resource3DPreviewContext';
 import { type MessageDescriptor } from '../Utils/i18n/MessageDescriptor.flow';
+import { useShouldAutofocusInput } from '../UI/Responsive/ScreenTypeMeasurer';
+import SelectField from '../UI/SelectField';
+import SelectOption from '../UI/SelectOption';
+import { ProjectScopedContainersAccessor } from '../InstructionOrExpression/EventsScope';
+
+const gd: libGDevelop = global.gd;
 
 type Props = {|
-  project: ?gdProject,
-  globalObjectsContainer: gdObjectsContainer,
-  objectsContainer: gdObjectsContainer,
+  project: gdProject,
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
+
+  /** If specified, only this object type should be allowed to be selected. */
   allowedObjectType?: ?string,
+  /**
+   * If specified, an object without these behaviors won't be selectable.
+   * Note that groups with at least 1 incompatible object won't be shown.
+   */
+  requiredCapabilitiesBehaviorTypes?: Array<string>,
+  /**
+   * If specified, an object without these behaviors will show an error.
+   */
+  requiredVisibleBehaviorTypes?: Array<string>,
+
   noGroups?: boolean,
+
+  /** A list of object names to exclude from the autocomplete list (for example if they have already been selected). */
+  excludedObjectOrGroupNames?: Array<string>,
+
+  requireCustomObject?: boolean,
 
   onChoose?: string => void,
   onChange: string => void,
@@ -23,6 +49,7 @@ type Props = {|
   onApply?: () => void,
   value: string,
   errorTextIfInvalid?: React.Node,
+  disabled?: boolean,
 
   fullWidth?: boolean,
   floatingLabelText?: React.Node,
@@ -30,29 +57,42 @@ type Props = {|
   hintText?: MessageDescriptor | string,
   openOnFocus?: boolean,
   margin?: 'none' | 'dense',
+
+  id?: ?string,
 |};
 
 const iconSize = 24;
 
-const getObjectsAndGroupsDataSource = ({
+export const getObjectsAndGroupsDataSource = ({
   project,
-  globalObjectsContainer,
-  objectsContainer,
+  objectsContainersList,
   noGroups,
   allowedObjectType,
+  requiredCapabilitiesBehaviorTypes,
+  excludedObjectOrGroupNames,
+  requireCustomObject,
 }: {|
-  project: ?gdProject,
-  globalObjectsContainer: gdObjectsContainer,
-  objectsContainer: gdObjectsContainer,
+  project: gdProject,
+  objectsContainersList: gdObjectsContainersList,
   noGroups: ?boolean,
   allowedObjectType: ?string,
+  requiredCapabilitiesBehaviorTypes?: Array<string>,
+  excludedObjectOrGroupNames: ?Array<string>,
+  requireCustomObject: ?boolean,
 |}): DataSource => {
-  const list = enumerateObjectsAndGroups(
-    globalObjectsContainer,
-    objectsContainer,
-    allowedObjectType || undefined
+  let { allObjectsList, allGroupsList } = enumerateObjectsAndGroups(
+    objectsContainersList,
+    allowedObjectType || undefined,
+    requiredCapabilitiesBehaviorTypes || []
   );
-  const objects = list.allObjectsList.map(({ object }) => {
+
+  allObjectsList = requireCustomObject
+    ? allObjectsList.filter(({ object }) =>
+        project.hasEventsBasedObject(object.getType())
+      )
+    : allObjectsList;
+
+  const objects = allObjectsList.map(({ object }) => {
     return {
       text: object.getName(),
       value: object.getName(),
@@ -60,7 +100,10 @@ const getObjectsAndGroupsDataSource = ({
         ? () => (
             <ListIcon
               iconSize={iconSize}
-              src={ObjectsRenderingService.getThumbnail(project, object)}
+              src={ObjectsRenderingService.getThumbnail(
+                project,
+                object.getConfiguration()
+              )}
             />
           )
         : undefined,
@@ -68,69 +111,210 @@ const getObjectsAndGroupsDataSource = ({
   });
   const groups = noGroups
     ? []
-    : list.allGroupsList.map(({ group }) => {
+    : allGroupsList.map(({ group }) => {
         return {
           text: group.getName(),
           value: group.getName(),
         };
       });
 
-  return [...objects, { type: 'separator' }, ...groups];
+  let fullList =
+    groups.length === 0
+      ? objects
+      : [...objects, { type: 'separator' }, ...groups];
+
+  fullList = excludedObjectOrGroupNames
+    ? fullList.filter(
+        //$FlowFixMe[incompatible-type]
+        ({ value }) => !excludedObjectOrGroupNames.includes(value)
+      )
+    : fullList;
+
+  // $FlowFixMe[incompatible-type]
+  return fullList;
 };
 
-export default class ObjectSelector extends React.Component<Props, {||}> {
-  _field: ?SemiControlledAutoCompleteInterface;
+export const checkHasRequiredBehaviors = ({
+  objectsContainersList,
+  requiredBehaviorTypes,
+  objectName,
+}: {|
+  objectsContainersList: gdObjectsContainersList,
+  objectName: string,
+  requiredBehaviorTypes?: Array<string>,
+|}): boolean =>
+  getMissingBehaviors({
+    objectsContainersList,
+    requiredBehaviorTypes,
+    objectName,
+  }).length === 0;
 
-  // Don't add a componentWillUnmount that would call onChange. This can lead to
-  // calling callbacks that would then update a deleted instruction parameters.
-
-  focus() {
-    if (this._field) this._field.focus();
+export const getMissingBehaviors = ({
+  objectsContainersList,
+  requiredBehaviorTypes,
+  objectName,
+}: {|
+  objectsContainersList: gdObjectsContainersList,
+  objectName: string,
+  requiredBehaviorTypes?: Array<string>,
+|}): Array<string> => {
+  if (!requiredBehaviorTypes || requiredBehaviorTypes.length === 0) {
+    return [];
   }
 
-  render() {
-    const {
-      value,
-      onChange,
-      onChoose,
-      project,
-      globalObjectsContainer,
-      objectsContainer,
-      allowedObjectType,
-      noGroups,
-      errorTextIfInvalid,
-      margin,
-      onRequestClose,
-      onApply,
-      ...rest
-    } = this.props;
-
-    const objectAndGroups = getObjectsAndGroupsDataSource({
-      project,
-      globalObjectsContainer,
-      objectsContainer,
-      noGroups,
-      allowedObjectType,
-    });
-    const hasValidChoice =
-      objectAndGroups.filter(
-        choice => choice.text !== undefined && value === choice.text
-      ).length !== 0;
-
-    return (
-      <SemiControlledAutoComplete
-        margin={margin}
-        hintText={t`Choose an object`}
-        value={value}
-        onChange={onChange}
-        onChoose={onChoose}
-        onRequestClose={onRequestClose}
-        onApply={onApply}
-        dataSource={objectAndGroups}
-        errorText={hasValidChoice ? undefined : errorTextIfInvalid}
-        ref={field => (this._field = field)}
-        {...rest}
-      />
-    );
+  if (!objectsContainersList.hasObjectOrGroupNamed(objectName)) {
+    // The parser already gives errors for objects which don't exist.
+    return [];
   }
-}
+  return requiredBehaviorTypes.filter(
+    behaviorType =>
+      objectsContainersList
+        .getBehaviorNamesInObjectOrGroup(
+          objectName,
+          behaviorType,
+          /** searchInGroups = */ true
+        )
+        .size() === 0
+  );
+};
+
+export type ObjectSelectorInterface = {| focus: FieldFocusFunction |};
+
+const ObjectSelector: React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<ObjectSelectorInterface>,
+}> = React.forwardRef<Props, ObjectSelectorInterface>((props, ref) => {
+  const fieldRef = React.useRef<?SemiControlledAutoCompleteInterface>(null);
+
+  const focus: FieldFocusFunction = options => {
+    if (fieldRef.current) fieldRef.current.focus(options);
+  };
+  const shouldAutofocusInput = useShouldAutofocusInput();
+
+  React.useImperativeHandle(ref, () => ({ focus }));
+
+  const {
+    value,
+    onChange,
+    onChoose,
+    project,
+    projectScopedContainersAccessor,
+    allowedObjectType,
+    noGroups,
+    errorTextIfInvalid,
+    margin,
+    onRequestClose,
+    onApply,
+    id,
+    excludedObjectOrGroupNames,
+    requireCustomObject,
+    hintText,
+    requiredCapabilitiesBehaviorTypes,
+    requiredVisibleBehaviorTypes,
+    disabled,
+    ...otherProps
+  } = props;
+  useOnResource3DPreviewRendered(useForceUpdate());
+
+  const objectsContainersList = projectScopedContainersAccessor
+    .get()
+    .getObjectsContainersList();
+
+  const objectAndGroups = getObjectsAndGroupsDataSource({
+    project,
+    objectsContainersList,
+    noGroups,
+    allowedObjectType,
+    requiredCapabilitiesBehaviorTypes,
+    excludedObjectOrGroupNames,
+    requireCustomObject,
+  });
+
+  const hasValidChoice =
+    objectAndGroups.filter(
+      choice => choice.text !== undefined && value === choice.text
+    ).length !== 0;
+
+  const hasObjectWithRequiredCapability = checkHasRequiredBehaviors({
+    objectsContainersList,
+    objectName: value,
+    requiredBehaviorTypes: requiredCapabilitiesBehaviorTypes,
+  });
+  const missingVisibleBehaviors = getMissingBehaviors({
+    objectsContainersList,
+    objectName: value,
+    requiredBehaviorTypes: requiredVisibleBehaviorTypes,
+  });
+  const errorText = !hasObjectWithRequiredCapability ? (
+    <Trans>This object exists, but can't be used here.</Trans>
+  ) : missingVisibleBehaviors.length > 0 ? (
+    <Trans>
+      This object misses some behaviors:{' '}
+      {missingVisibleBehaviors
+        .map(
+          behaviorTypeName =>
+            gd.MetadataProvider.getBehaviorMetadata(
+              gd.JsPlatform.get(),
+              behaviorTypeName
+            ).getFullName() || behaviorTypeName
+        )
+        .join(', ')}
+    </Trans>
+  ) : !hasValidChoice ? (
+    errorTextIfInvalid
+  ) : (
+    undefined
+  );
+
+  return disabled ? null : shouldAutofocusInput ? (
+    <SemiControlledAutoComplete
+      margin={margin}
+      hintText={hintText || t`Choose an object`}
+      value={value}
+      onChange={onChange}
+      onChoose={onChoose}
+      onRequestClose={onRequestClose}
+      onApply={onApply}
+      dataSource={objectAndGroups}
+      errorText={errorText}
+      ref={fieldRef}
+      id={id}
+      {...otherProps}
+    />
+  ) : (
+    <I18n>
+      {({ i18n }) => (
+        <SelectField
+          margin={margin}
+          value={value}
+          onChange={(e, i, newValue) => {
+            onChange(newValue);
+            if (onChoose) onChoose(newValue);
+            if (onApply) onApply();
+          }}
+          translatableHintText={hintText || t`Choose an object`}
+          style={{ flex: otherProps.fullWidth ? 1 : undefined }}
+          errorText={errorText}
+          helperMarkdownText={otherProps.helperMarkdownText}
+          floatingLabelText={otherProps.floatingLabelText}
+          id={id}
+        >
+          {objectAndGroups.map((option, index) =>
+            option.type === 'separator' ? (
+              <optgroup key={`group-divider`} label={i18n._(t`Groups`)} />
+            ) : (
+              <SelectOption
+                key={option.value}
+                label={option.value}
+                value={option.value}
+                shouldNotTranslate
+              />
+            )
+          )}
+        </SelectField>
+      )}
+    </I18n>
+  );
+});
+
+export default ObjectSelector;

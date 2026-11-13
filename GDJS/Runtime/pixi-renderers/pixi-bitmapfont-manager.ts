@@ -6,8 +6,6 @@
 namespace gdjs {
   const logger = new gdjs.Logger('Bitmap text');
 
-  import PIXI = GlobalPIXIModule.PIXI;
-
   const defaultBitmapFontKey = 'GDJS-DEFAULT-BITMAP-FONT';
 
   // When a font is unused, we put it in a cache of unused fonts. It's unloaded
@@ -15,6 +13,30 @@ namespace gdjs {
   // in the cache.
   // Set this to 0 to unload from memory ("uninstall") as soon as a font is unused.
   const uninstallCacheSize = 5;
+
+  /**
+   * Workaround: PIXI.BitmapFont keeps a direct reference to the texture it
+   * was installed with (`pageTextures`). When a resource is reloaded (e.g.
+   * during hot-reload after the image file changes on disk), the image manager
+   * creates a new PIXI.Texture but the existing BitmapFont still points to the
+   * old one. Ideally bitmap font resources would declare their image dependency
+   * via `embeddedResourcesMapping` so that resource unloading can cascade the
+   * invalidation automatically. Until then, we detect stale textures here.
+   */
+  const isBitmapFontTextureStale = (
+    bitmapFont: PIXI.BitmapFont,
+    currentTexture: PIXI.Texture
+  ): boolean => {
+    const pageTextures = bitmapFont.pageTextures;
+    return (
+      pageTextures &&
+      Object.values(pageTextures).some(
+        (tex: PIXI.Texture) =>
+          (tex.baseTexture && tex.baseTexture.destroyed) ||
+          tex.baseTexture !== currentTexture.baseTexture
+      )
+    );
+  };
 
   /**
    * We patch the installed font to use a name that is unique for each font data and texture,
@@ -35,13 +57,15 @@ namespace gdjs {
     return PIXI.BitmapFont.available[bitmapFontInstallKey];
   };
 
+  const resourceKinds: Array<ResourceKind> = ['bitmapFont'];
+
   /**
    * PixiBitmapFontManager loads fnt/xml files (using `fetch`), from the "bitmapFont" resources of the game.
    *
    * It installs the "BitmapFont" with PixiJS to be used with PIXI.BitmapText.
+   * @category Resources > Bitmap Fonts
    */
-  export class PixiBitmapFontManager {
-    private _resources: ResourceData[];
+  export class PixiBitmapFontManager implements gdjs.ResourceManager {
     private _imageManager: gdjs.PixiImageManager;
 
     /** Pixi.BitmapFont used, indexed by their BitmapFont name. */
@@ -54,20 +78,26 @@ namespace gdjs {
     private _pixiBitmapFontsToUninstall: string[] = [];
 
     /** Loaded fonts data, indexed by resource name. */
-    private _loadedFontsData: Record<string, any> = {};
+    private _loadedFontsData = new gdjs.ResourceCache<any>();
 
     private _defaultSlugFontName: string | null = null;
 
+    _resourceLoader: gdjs.ResourceLoader;
+
     /**
-     * @param resources The resources data of the game.
+     * @param resourceLoader The resources loader of the game.
      * @param imageManager The image manager to be used to get textures used by fonts.
      */
     constructor(
-      resources: ResourceData[],
+      resourceLoader: gdjs.ResourceLoader,
       imageManager: gdjs.PixiImageManager
     ) {
-      this._resources = resources;
       this._imageManager = imageManager;
+      this._resourceLoader = resourceLoader;
+    }
+
+    getResourceKinds(): ResourceKind[] {
+      return resourceKinds;
     }
 
     /**
@@ -102,14 +132,6 @@ namespace gdjs {
       // Define the default name used for the default bitmap font.
       this._defaultSlugFontName = defaultBitmapFont.font;
       return defaultBitmapFont;
-    }
-
-    /**
-     * Update the resources data of the game. Useful for hot-reloading, should not be used otherwise.
-     * @param resources The resources data of the game.
-     */
-    setResources(resources: ResourceData[]): void {
-      this._resources = resources;
     }
 
     /**
@@ -175,9 +197,12 @@ namespace gdjs {
         }
         if (this._pixiBitmapFontsToUninstall.length > uninstallCacheSize) {
           // Remove the first font (i.e: the oldest one)
-          const oldestUnloadedPixiBitmapFontName = this._pixiBitmapFontsToUninstall.shift() as string;
+          const oldestUnloadedPixiBitmapFontName =
+            this._pixiBitmapFontsToUninstall.shift() as string;
 
-          PIXI.BitmapFont.uninstall(oldestUnloadedPixiBitmapFontName);
+          if (PIXI.BitmapFont.available[oldestUnloadedPixiBitmapFontName]) {
+            PIXI.BitmapFont.uninstall(oldestUnloadedPixiBitmapFontName);
+          }
           logger.log(
             'Bitmap Text',
             'Uninstalled BitmapFont "' +
@@ -201,8 +226,18 @@ namespace gdjs {
       const bitmapFontInstallKey =
         bitmapFontResourceName + '@' + textureAtlasResourceName;
 
+      if (
+        PIXI.BitmapFont.available[bitmapFontInstallKey] &&
+        isBitmapFontTextureStale(
+          PIXI.BitmapFont.available[bitmapFontInstallKey],
+          this._imageManager.getPIXITexture(textureAtlasResourceName)
+        )
+      ) {
+        // Texture was replaced, reinstall the font with the current texture.
+        PIXI.BitmapFont.uninstall(bitmapFontInstallKey);
+      }
+
       if (PIXI.BitmapFont.available[bitmapFontInstallKey]) {
-        // Return the existing BitmapFont that is already in memory and already installed.
         this._markBitmapFontAsUsed(bitmapFontInstallKey);
         return PIXI.BitmapFont.available[bitmapFontInstallKey];
       }
@@ -210,7 +245,9 @@ namespace gdjs {
       // The Bitmap Font is not loaded, load it in memory.
 
       // First get the font data:
-      const fontData = this._loadedFontsData[bitmapFontResourceName];
+      const fontData = this._loadedFontsData.getFromName(
+        bitmapFontResourceName
+      );
       if (!fontData) {
         logger.warn(
           'Could not find Bitmap Font for resource named "' +
@@ -244,46 +281,115 @@ namespace gdjs {
       }
     }
 
+    async processResource(resourceName: string): Promise<void> {
+      // Do nothing because fonts are light enough to be parsed in background.
+    }
+
     /**
      * Load the "bitmapFont" resources of the game, so that they are ready
      * to be used when `obtainBitmapFont` is called.
      */
-    loadBitmapFontData(
-      onProgress: (count: integer, total: integer) => void
-    ): Promise<void[]> {
-      const bitmapFontResources = this._resources.filter(
-        (resource) => resource.kind === 'bitmapFont' && !resource.disablePreload
-      );
-      if (bitmapFontResources.length === 0) {
-        return Promise.resolve([]);
+    async loadResource(resourceName: string): Promise<void> {
+      const resource = this._resourceLoader.getResource(resourceName);
+      if (!resource) {
+        logger.warn(
+          'Unable to find bitmap font for resource "' + resourceName + '".'
+        );
+        return;
+      }
+      if (this._loadedFontsData.get(resource)) {
+        return;
       }
 
-      let loadedCount = 0;
-      return Promise.all(
-        bitmapFontResources.map((bitmapFontResource) => {
-          return fetch(bitmapFontResource.file)
-            .then((response) => response.text())
-            .then((fontData) => {
-              this._loadedFontsData[bitmapFontResource.name] = fontData;
-            })
-            .catch((error) => {
-              logger.error(
-                "Can't fetch the bitmap font file " +
-                  bitmapFontResource.file +
-                  ', error: ' +
-                  error
-              );
-            })
-            .then(() => {
-              loadedCount++;
-              onProgress(loadedCount, bitmapFontResources.length);
-            });
-        })
-      );
+      try {
+        const response = await fetch(
+          this._resourceLoader.getFullUrl(resource.file),
+          {
+            credentials: this._resourceLoader.checkIfCredentialsRequired(
+              resource.file
+            )
+              ? // Any resource stored on the GDevelop Cloud buckets needs the "credentials" of the user,
+                // i.e: its gdevelop.io cookie, to be passed.
+                'include'
+              : // For other resources, use "same-origin" as done by default by fetch.
+                'same-origin',
+          }
+        );
+        if (!response.ok) {
+          throw new Error(
+            `HTTP error while loading bitmap font. Status is ${response.status}.`
+          );
+        }
+
+        const fontDataRaw = await response.text();
+
+        // Sanitize: remove lines starting with # (acting as comments)
+        const sanitizedFontData = fontDataRaw
+          .split('\n')
+          .filter((line) => !line.trim().startsWith('#'))
+          .join('\n');
+
+        this._loadedFontsData.set(resource, sanitizedFontData);
+      } catch (error) {
+        logger.error(
+          "Can't fetch the bitmap font file " +
+            resource.file +
+            ', error: ' +
+            error
+        );
+        this._loadedFontsData.delete(resource);
+        throw error;
+      }
+    }
+
+    /**
+     * To be called when the game is disposed.
+     * Uninstall all the fonts from memory and clear cache of loaded fonts.
+     */
+    dispose(): void {
+      for (const bitmapFontInstallKey in this._pixiBitmapFontsInUse) {
+        PIXI.BitmapFont.uninstall(bitmapFontInstallKey);
+      }
+
+      for (const bitmapFontInstallKey of this._pixiBitmapFontsToUninstall) {
+        PIXI.BitmapFont.uninstall(bitmapFontInstallKey);
+      }
+
+      this._pixiBitmapFontsInUse = {};
+      this._pixiBitmapFontsToUninstall.length = 0;
+      this._loadedFontsData.clear();
+    }
+
+    unloadResource(resourceData: ResourceData): void {
+      this._loadedFontsData.delete(resourceData);
+
+      // Don't eagerly uninstall fonts that are still in use by active objects.
+      // Uninstalling them here would cause PIXI.BitmapText.destroy to crash
+      // (accessing distanceFieldType on undefined) when those objects are
+      // later destroyed during hot-reload. The owning objects will release
+      // the fonts themselves via releaseBitmapFont when they are destroyed.
+
+      for (
+        let index = 0;
+        index < this._pixiBitmapFontsToUninstall.length;
+        index++
+      ) {
+        const bitmapFontInstallKey = this._pixiBitmapFontsToUninstall[index];
+
+        if (bitmapFontInstallKey.startsWith(resourceData.name + '@')) {
+          if (PIXI.BitmapFont.available[bitmapFontInstallKey]) {
+            PIXI.BitmapFont.uninstall(bitmapFontInstallKey);
+          }
+          this._pixiBitmapFontsToUninstall.splice(index, 1);
+          index--;
+        }
+      }
     }
   }
 
   // Register the class to let the engine use it.
+  /** @category Resources > Bitmap Fonts */
   export const BitmapFontManager = gdjs.PixiBitmapFontManager;
+  /** @category Resources > Bitmap Fonts */
   export type BitmapFontManager = gdjs.PixiBitmapFontManager;
 }

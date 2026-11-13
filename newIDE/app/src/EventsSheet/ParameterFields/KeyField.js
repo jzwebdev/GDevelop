@@ -1,131 +1,29 @@
 // @flow
 import { Trans } from '@lingui/macro';
 import { type ParameterInlineRendererProps } from './ParameterInlineRenderer.flow';
-import React, { Component } from 'react';
-import { type ParameterFieldProps } from './ParameterFieldCommons';
-import SemiControlledAutoComplete from '../../UI/SemiControlledAutoComplete';
-
-const keyNames = [
-  'a',
-  'b',
-  'c',
-  'd',
-  'e',
-  'f',
-  'g',
-  'h',
-  'i',
-  'j',
-  'k',
-  'l',
-  'm',
-  'n',
-  'o',
-  'p',
-  'q',
-  'r',
-  's',
-  't',
-  'u',
-  'v',
-  'w',
-  'x',
-  'y',
-  'z',
-  'Num0',
-  'Num1',
-  'Num2',
-  'Num3',
-  'Num4',
-  'Num5',
-  'Num6',
-  'Num7',
-  'Num8',
-  'Num9',
-  'Numpad0',
-  'Numpad1',
-  'Numpad2',
-  'Numpad3',
-  'Numpad4',
-  'Numpad5',
-  'Numpad6',
-  'Numpad7',
-  'Numpad8',
-  'Numpad9',
-  'LShift',
-  'RShift',
-  'LControl',
-  'RControl',
-  'LAlt',
-  'RAlt',
-  'LSystem',
-  'RSystem',
-  'SemiColon',
-  'Comma',
-  'Period',
-  'Quote',
-  'Slash',
-  'BackSlash',
-  'Tilde',
-  'Equal',
-  'Dash',
-  'Space',
-  'Back',
-  'Tab',
-  'Delete',
-  'Insert',
-  'Escape',
-  'PageUp',
-  'PageDown',
-  'End',
-  'Home',
-  'Return',
-  'NumpadPageUp',
-  'NumpadPageDown',
-  'NumpadEnd',
-  'NumpadHome',
-  'NumpadReturn',
-  'Add',
-  'Subtract',
-  'Multiply',
-  'Divide',
-  'NumpadAdd',
-  'NumpadSubtract',
-  'NumpadMultiply',
-  'NumpadDivide',
-  'Left',
-  'Up',
-  'Right',
-  'Down',
-  'NumpadLeft',
-  'NumpadUp',
-  'NumpadRight',
-  'NumpadDown',
-  'F1',
-  'F2',
-  'F3',
-  'F4',
-  'F5',
-  'F6',
-  'F7',
-  'F8',
-  'F9',
-  'F10',
-  'F11',
-  'F12',
-  'Pause',
-];
+import * as React from 'react';
+import {
+  type ParameterFieldProps,
+  type ParameterFieldInterface,
+  type FieldFocusFunction,
+} from './ParameterFieldCommons';
+import SemiControlledAutoComplete, {
+  type SemiControlledAutoCompleteInterface,
+} from '../../UI/SemiControlledAutoComplete';
+import { keyNames } from '../../Utils/KeyboardKeyNames';
 
 const isKeyValid = (key: string) => keyNames.indexOf(key) !== -1;
 
-export default class KeyField extends Component<ParameterFieldProps, {||}> {
-  _field: ?any;
+export default (React.forwardRef<ParameterFieldProps, ParameterFieldInterface>(
+  function KeyField(props: ParameterFieldProps, ref) {
+    const field = React.useRef<?SemiControlledAutoCompleteInterface>(null);
+    const focus: FieldFocusFunction = options => {
+      if (field.current) field.current.focus(options);
+    };
+    React.useImperativeHandle(ref, () => ({
+      focus,
+    }));
 
-  focus() {
-    if (this._field) this._field.focus();
-  }
-
-  render() {
     const {
       value,
       onChange,
@@ -133,11 +31,11 @@ export default class KeyField extends Component<ParameterFieldProps, {||}> {
       parameterMetadata,
       onRequestClose,
       onApply,
-    } = this.props;
+    } = props;
 
     return (
       <SemiControlledAutoComplete
-        margin={this.props.isInline ? 'none' : 'dense'}
+        margin={props.isInline ? 'none' : 'dense'}
         floatingLabelText={
           parameterMetadata ? parameterMetadata.getDescription() : undefined
         }
@@ -154,7 +52,7 @@ export default class KeyField extends Component<ParameterFieldProps, {||}> {
         openOnFocus={!isInline}
         onRequestClose={onRequestClose}
         onApply={onApply}
-        ref={field => (this._field = field)}
+        ref={field}
         errorText={
           !value ? (
             <Trans>You must select a key.</Trans>
@@ -167,12 +65,15 @@ export default class KeyField extends Component<ParameterFieldProps, {||}> {
       />
     );
   }
-}
+): React.ComponentType<{
+  ...ParameterFieldProps,
+  +ref?: React.RefSetter<ParameterFieldInterface>,
+}>);
 
 export const renderInlineKey = ({
   value,
   InvalidParameterValue,
-}: ParameterInlineRendererProps) => {
+}: ParameterInlineRendererProps): string | React.MixedElement => {
   if (!value) {
     return (
       <InvalidParameterValue isEmpty>

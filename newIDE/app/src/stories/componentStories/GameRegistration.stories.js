@@ -1,110 +1,156 @@
 // @flow
 import * as React from 'react';
-import { action } from '@storybook/addon-actions';
+import MockAdapter from 'axios-mock-adapter';
 
-import muiDecorator from '../ThemeDecorator';
 import paperDecorator from '../PaperDecorator';
 
-import { type TestProject } from '../../fixtures/TestProject';
-
-import {
-  GameRegistrationWidget,
-  type GameRegistrationWidgetProps,
-} from '../../GameDashboard/GameRegistration';
+import { GameRegistration } from '../../GameDashboard/GameRegistration';
 import GDevelopJsInitializerDecorator, {
   testProject,
 } from '../GDevelopJsInitializerDecorator';
 import {
-  indieUserProfile,
-  game1,
+  fakeSilverAuthenticatedUser,
+  fakeNotAuthenticatedUser,
 } from '../../fixtures/GDevelopServicesTestData';
-import { type Profile } from '../../Utils/GDevelopServices/Authentication';
-
-const indieUserProfileWithGameStatsEmail: Profile = {
-  ...indieUserProfile,
-  getGameStatsEmail: true,
-};
+import AuthenticatedUserContext from '../../Profile/AuthenticatedUserContext';
+import { client as gameApiClient } from '../../Utils/GDevelopServices/Game';
 
 export default {
-  title: 'GameDashboard/GameRegistrationWidget',
-  component: GameRegistrationWidget,
-  decorators: [paperDecorator, muiDecorator, GDevelopJsInitializerDecorator],
+  title: 'GameDashboard/GameRegistration',
+  component: GameRegistration,
+  decorators: [paperDecorator, GDevelopJsInitializerDecorator],
 };
 
-const defaultProps: GameRegistrationWidgetProps = {
-  authenticated: true,
-  profile: indieUserProfile,
-  onLogin: action('onLogin'),
-  onCreateAccount: action('onCreateAccount'),
-  project: testProject.project,
-  game: game1,
-  setGame: action('setGame'),
-  loadGame: action('loadGame'),
-  onRegisterGame: action('onRegisterGame'),
-  registrationInProgress: false,
-  hideIfRegistered: false,
-  unavailableReason: null,
-  acceptGameStatsEmailInProgress: false,
-  onAcceptGameStatsEmail: action('onAcceptGameStatsEmail'),
-  detailsInitialTab: 'details',
-  setDetailsInitialTab: action('setDetailsInitialTab'),
-  detailsOpened: false,
-  setDetailsOpened: action('setDetailsOpened'),
-  error: null,
-  hideLoader: false,
+export const NoProjectLoaded = (): React.Node => (
+  <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+    <GameRegistration project={null} onGameRegistered={() => {}} />
+  </AuthenticatedUserContext.Provider>
+);
+
+export const NotLoggedIn = (): React.Node => (
+  <AuthenticatedUserContext.Provider value={fakeNotAuthenticatedUser}>
+    <GameRegistration
+      project={testProject.project}
+      onGameRegistered={() => {}}
+    />
+  </AuthenticatedUserContext.Provider>
+);
+
+export const NotAuthorized = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(403, {});
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+      />
+    </AuthenticatedUserContext.Provider>
+  );
 };
 
-export const NoProjectLoaded = () => (
-  <GameRegistrationWidget {...defaultProps} project={null} />
-);
-export const Loading = () => (
-  <GameRegistrationWidget {...defaultProps} game={null} />
-);
-export const LoadingButHidingLoader = () => (
-  <GameRegistrationWidget {...defaultProps} game={null} hideLoader />
-);
-export const NotLoggedIn = () => (
-  <GameRegistrationWidget
-    {...defaultProps}
-    authenticated={false}
-    profile={null}
-  />
-);
-export const GameNotRegistered = () => (
-  <GameRegistrationWidget {...defaultProps} unavailableReason="not-existing" />
-);
-export const NotAuthorized = () => (
-  <GameRegistrationWidget {...defaultProps} unavailableReason="unauthorized" />
-);
-export const Errored = () => (
-  <GameRegistrationWidget
-    {...defaultProps}
-    error={new Error('there was an error')}
-  />
-);
-export const LoadedButHidingIfRegistered = () => (
-  <GameRegistrationWidget {...defaultProps} hideIfRegistered />
-);
-export const EmailNotAccepted = () => (
-  <GameRegistrationWidget {...defaultProps} profile={indieUserProfile} />
-);
-export const EmailAccepted = () => (
-  <GameRegistrationWidget
-    {...defaultProps}
-    profile={indieUserProfileWithGameStatsEmail}
-  />
-);
-export const EmailAcceptedButHidingIfSubscribed = () => (
-  <GameRegistrationWidget
-    {...defaultProps}
-    profile={indieUserProfileWithGameStatsEmail}
-    hideIfSubscribed
-  />
-);
-export const DetailsOpened = () => (
-  <GameRegistrationWidget
-    {...defaultProps}
-    profile={indieUserProfileWithGameStatsEmail}
-    detailsOpened
-  />
-);
+export const GameNotExisting = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(404, {});
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+      />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+export const ErrorLoadingGame = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(500, {});
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+      />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+export const RegisteredWithAdditionalActions = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(200, {
+      id: 'game-id',
+      name: 'My game',
+    });
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+        suggestAdditionalActions
+      />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+export const RegisteredWithLoader = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(200, {
+      id: 'game-id',
+      name: 'My game',
+    });
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+      />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+export const RegisteredWithoutLoader = (): React.Node => {
+  const gameServiceMock = new MockAdapter(gameApiClient, {
+    delayResponse: 500,
+  });
+  gameServiceMock
+    .onGet('/game/', { params: { userId: 'indie-user' } })
+    .reply(200, {
+      id: 'game-id',
+      name: 'My game',
+    });
+
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <GameRegistration
+        project={testProject.project}
+        onGameRegistered={() => {}}
+        hideLoader
+      />
+    </AuthenticatedUserContext.Provider>
+  );
+};

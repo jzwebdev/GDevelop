@@ -5,52 +5,68 @@ export type UnsavedChanges = {|
   hasUnsavedChanges: boolean,
   sealUnsavedChanges: () => void,
   triggerUnsavedChanges: () => void,
+  getChangesCount: () => number,
+  getTimeOfFirstChangeSinceLastSave: () => number | null,
 |};
 
 const initialState: UnsavedChanges = {
   hasUnsavedChanges: false,
   sealUnsavedChanges: () => {},
   triggerUnsavedChanges: () => {},
+  getChangesCount: () => 0,
+  getTimeOfFirstChangeSinceLastSave: () => null,
 };
 
-const UnsavedChangesContext = React.createContext<UnsavedChanges>(initialState);
+const UnsavedChangesContext: React.Context<UnsavedChanges> = React.createContext<UnsavedChanges>(
+  initialState
+);
 
 export default UnsavedChangesContext;
-
-type State = {|
-  hasUnsavedChanges: boolean,
-|};
 
 type Props = {|
   children?: React.Node,
 |};
 
-export class UnsavedChangesContextProvider extends React.Component<
-  Props,
-  State
-> {
-  state = { hasUnsavedChanges: false };
-  triggerUnsavedChanges = (): void => {
-    if (!this.state.hasUnsavedChanges)
-      this.setState({ hasUnsavedChanges: true });
-  };
+export const UnsavedChangesContextProvider = (
+  props: Props
+): React.MixedElement => {
+  const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState<boolean>(
+    false
+  );
+  const changesCount = React.useRef<number>(0); // Cannot be stored in a state variable, otherwise it re-renders children at each change.
+  const timeOfFirstChangeSinceLastSave = React.useRef<number | null>(null); // Cannot be stored in a state variable, otherwise it re-renders children at each change.
 
-  sealUnsavedChanges = (): void => {
-    if (this.state.hasUnsavedChanges)
-      this.setState({ hasUnsavedChanges: false });
-  };
+  const triggerUnsavedChanges = React.useCallback((): void => {
+    if (changesCount.current === 0) {
+      timeOfFirstChangeSinceLastSave.current = Date.now();
+    }
+    changesCount.current = changesCount.current + 1;
+    setHasUnsavedChanges(true);
+  }, []);
 
-  render() {
-    const unsavedChanges: UnsavedChanges = {
-      ...this.state,
-      triggerUnsavedChanges: this.triggerUnsavedChanges,
-      sealUnsavedChanges: this.sealUnsavedChanges,
-    };
+  const sealUnsavedChanges = React.useCallback((): void => {
+    changesCount.current = 0;
+    timeOfFirstChangeSinceLastSave.current = null;
+    setHasUnsavedChanges(false);
+  }, []);
 
-    return (
-      <UnsavedChangesContext.Provider value={unsavedChanges}>
-        {this.props.children}
-      </UnsavedChangesContext.Provider>
-    );
-  }
-}
+  const getChangesCount = React.useCallback(() => changesCount.current, []);
+  const getTimeOfFirstChangeSinceLastSave = React.useCallback(
+    () => timeOfFirstChangeSinceLastSave.current,
+    []
+  );
+
+  return (
+    <UnsavedChangesContext.Provider
+      value={{
+        hasUnsavedChanges,
+        triggerUnsavedChanges,
+        sealUnsavedChanges,
+        getChangesCount,
+        getTimeOfFirstChangeSinceLastSave,
+      }}
+    >
+      {props.children}
+    </UnsavedChangesContext.Provider>
+  );
+};

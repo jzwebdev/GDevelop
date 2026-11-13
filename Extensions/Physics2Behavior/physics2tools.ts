@@ -1,13 +1,46 @@
 namespace gdjs {
+  /**
+   * @category Behaviors > Physics 2D
+   */
   export namespace physics2 {
-    export const objectsCollide = function (
+    export const areObjectsColliding = function (
       objectsLists1: Hashtable<Array<gdjs.RuntimeObject>>,
       behaviorName: string,
       objectsLists2: Hashtable<Array<gdjs.RuntimeObject>>,
       inverted: boolean
     ) {
       return gdjs.evtTools.object.twoListsTest(
-        gdjs.Physics2RuntimeBehavior.collisionTest,
+        gdjs.Physics2RuntimeBehavior.areObjectsColliding,
+        objectsLists1,
+        objectsLists2,
+        inverted,
+        behaviorName
+      );
+    };
+
+    export const haveObjectsStartedColliding = function (
+      objectsLists1: Hashtable<Array<gdjs.RuntimeObject>>,
+      behaviorName: string,
+      objectsLists2: Hashtable<Array<gdjs.RuntimeObject>>,
+      inverted: boolean
+    ) {
+      return gdjs.evtTools.object.twoListsTest(
+        gdjs.Physics2RuntimeBehavior.hasCollisionStartedBetween,
+        objectsLists1,
+        objectsLists2,
+        inverted,
+        behaviorName
+      );
+    };
+
+    export const haveObjectsStoppedColliding = function (
+      objectsLists1: Hashtable<Array<gdjs.RuntimeObject>>,
+      behaviorName: string,
+      objectsLists2: Hashtable<Array<gdjs.RuntimeObject>>,
+      inverted: boolean
+    ) {
+      return gdjs.evtTools.object.twoListsTest(
+        gdjs.Physics2RuntimeBehavior.hasCollisionStoppedBetween,
         objectsLists1,
         objectsLists2,
         inverted,

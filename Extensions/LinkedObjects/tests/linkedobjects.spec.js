@@ -6,112 +6,162 @@ describe('gdjs.LinksManager', function () {
     object3Names,
     eventsFunctionContext
   ) => {
-    const runtimeGame = new gdjs.RuntimeGame({
-      variables: [],
-      // @ts-ignore - missing properties.
-      properties: { windowWidth: 800, windowHeight: 600 },
-      resources: { resources: [] },
-    });
+    const runtimeGame = gdjs.getPixiRuntimeGame();
     const runtimeScene = new gdjs.RuntimeScene(runtimeGame);
     runtimeScene.loadFromScene({
-      layers: [
-        {
-          name: '',
-          visibility: true,
-          cameras: [],
-          effects: [],
-          ambientLightColorR: 127,
-          ambientLightColorB: 127,
-          ambientLightColorG: 127,
-          isLightingLayer: false,
-          followBaseLayerCamera: false,
+      sceneData: {
+        layers: [
+          {
+            name: '',
+            visibility: true,
+            cameras: [],
+            effects: [],
+            ambientLightColorR: 127,
+            ambientLightColorB: 127,
+            ambientLightColorG: 127,
+            isLightingLayer: false,
+            followBaseLayerCamera: false,
+          },
+        ],
+        variables: [],
+        behaviorsSharedData: [],
+        objects: [],
+        objectsGroups: [],
+        instances: [],
+        r: 0,
+        v: 0,
+        b: 0,
+        mangledName: 'Scene1',
+        name: 'Scene1',
+        stopSoundsOnStartup: false,
+        title: '',
+        renderer3DWorldScale: 100,
+        usedResources: [],
+        uiSettings: {
+          grid: false,
+          gridType: 'rectangular',
+          gridWidth: 10,
+          gridHeight: 10,
+          gridDepth: 10,
+          gridOffsetX: 0,
+          gridOffsetY: 0,
+          gridOffsetZ: 0,
+          gridColor: 0,
+          gridAlpha: 1,
+          snap: false,
         },
-      ],
-      variables: [],
-      behaviorsSharedData: [],
-      objects: [],
-      instances: [],
-      r: 0,
-      v: 0,
-      b: 0,
-      mangledName: 'Scene1',
-      name: 'Scene1',
-      stopSoundsOnStartup: false,
-      title: '',
+      },
+      usedExtensionsWithVariablesData: [],
     });
 
     const manager = gdjs.LinksManager.getManager(runtimeScene);
 
-    const object1A = new gdjs.RuntimeObject(runtimeScene, {
-      name: object1Names[0],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
-    const object1B = new gdjs.RuntimeObject(runtimeScene, {
-      name: object1Names[1],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object1A = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object1Names[0],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
+    const object1B = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object1Names[1],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object1C = new gdjs.RuntimeObject(runtimeScene, {
-      name: object1Names[2],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object1C = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object1Names[2],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object2A = new gdjs.RuntimeObject(runtimeScene, {
-      name: object2Names[0],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object2A = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object2Names[0],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object2B = new gdjs.RuntimeObject(runtimeScene, {
-      name: object2Names[1],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object2B = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object2Names[1],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object2C = new gdjs.RuntimeObject(runtimeScene, {
-      name: object2Names[2],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object2C = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object2Names[2],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object3A = new gdjs.RuntimeObject(runtimeScene, {
-      name: object3Names[0],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object3A = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object3Names[0],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object3B = new gdjs.RuntimeObject(runtimeScene, {
-      name: object3Names[1],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object3B = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object3Names[1],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
-    const object3C = new gdjs.RuntimeObject(runtimeScene, {
-      name: object3Names[2],
-      type: '',
-      behaviors: [],
-      variables: [],
-      effects: [],
-    });
+    const object3C = new gdjs.RuntimeObject(
+      runtimeScene,
+      {
+        name: object3Names[2],
+        type: '',
+        behaviors: [],
+        variables: [],
+        effects: [],
+      },
+      undefined
+    );
 
     runtimeScene.addObject(object1A);
     runtimeScene.addObject(object1B);
@@ -239,14 +289,14 @@ describe('gdjs.LinksManager', function () {
       manager.removeAllLinksOf(object1A);
       manager.removeAllLinksOf(object1A);
       {
-        const { pickedSomething, objectsLists } = pickObjectsLinkedTo(
+        const { pickedSomething } = pickObjectsLinkedTo(
           object1A,
           Hashtable.newFrom({ obj2: [object2A, object2B, object2C] })
         );
         expect(pickedSomething).to.be(false);
       }
       {
-        const { pickedSomething, objectsLists } = pickObjectsLinkedTo(
+        const { pickedSomething } = pickObjectsLinkedTo(
           object2A,
           Hashtable.newFrom({ obj1: [object1A, object1B, object1C] })
         );

@@ -3,7 +3,10 @@
  *  2013 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
-  /** Initial properties for a Tiled Sprite object */
+  /**
+   * Initial properties for a Tiled Sprite object
+   * @category Objects > Tiled Sprite
+   */
   export type TiledSpriteObjectDataType = {
     /** Default width of the object, if the instance has no custom width. */
     width: number;
@@ -12,12 +15,35 @@ namespace gdjs {
     texture: string;
   };
 
+  /**
+   * @category Objects > Tiled Sprite
+   */
   export type TiledSpriteObjectData = ObjectData & TiledSpriteObjectDataType;
 
   /**
-   * The TiledSpriteRuntimeObject displays a tiled texture.
+   * @category Objects > Tiled Sprite
    */
-  export class TiledSpriteRuntimeObject extends gdjs.RuntimeObject {
+  export type TiledSpriteNetworkSyncDataType = {
+    xo: number;
+    yo: number;
+    op: number;
+    color: string;
+  };
+
+  /**
+   * @category Objects > Tiled Sprite
+   */
+  export type TiledSpriteNetworkSyncData = ObjectNetworkSyncData &
+    TiledSpriteNetworkSyncDataType;
+
+  /**
+   * The TiledSpriteRuntimeObject displays a tiled texture.
+   * @category Objects > Tiled Sprite
+   */
+  export class TiledSpriteRuntimeObject
+    extends gdjs.RuntimeObject
+    implements gdjs.Resizable, gdjs.OpacityHandler
+  {
     _xOffset: float = 0;
     _yOffset: float = 0;
     opacity: float = 255;
@@ -29,18 +55,22 @@ namespace gdjs {
 
     _renderer: gdjs.TiledSpriteRuntimeObjectRenderer;
 
+    _objectData: TiledSpriteObjectData;
+
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The container the object belongs to.
      * @param tiledSpriteObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      tiledSpriteObjectData: TiledSpriteObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      tiledSpriteObjectData: TiledSpriteObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, tiledSpriteObjectData);
+      super(instanceContainer, tiledSpriteObjectData, instanceData);
+      this._objectData = tiledSpriteObjectData;
       this._renderer = new gdjs.TiledSpriteRuntimeObjectRenderer(
         this,
-        runtimeScene,
+        instanceContainer,
         tiledSpriteObjectData.texture
       );
       this._width = 0;
@@ -53,8 +83,9 @@ namespace gdjs {
     }
 
     updateFromObjectData(oldObjectData, newObjectData): boolean {
+      this._objectData = newObjectData;
       if (oldObjectData.texture !== newObjectData.texture) {
-        this.setTexture(newObjectData.texture, this._runtimeScene);
+        this.setTexture(newObjectData.texture, this.getRuntimeScene());
       }
       if (oldObjectData.width !== newObjectData.width) {
         this.setWidth(newObjectData.width);
@@ -65,15 +96,47 @@ namespace gdjs {
       return true;
     }
 
+    getNetworkSyncData(
+      syncOptons: GetNetworkSyncDataOptions
+    ): TiledSpriteNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptons),
+        xo: this.getXOffset(),
+        yo: this.getYOffset(),
+        op: this.getOpacity(),
+        color: this.getColor(),
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: TiledSpriteNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      // Texture is not synchronized, see if this is asked or not.
+
+      if (networkSyncData.xo !== undefined) {
+        this.setXOffset(networkSyncData.xo);
+      }
+      if (networkSyncData.yo !== undefined) {
+        this.setYOffset(networkSyncData.yo);
+      }
+      if (networkSyncData.op !== undefined) {
+        this.setOpacity(networkSyncData.op);
+      }
+      if (networkSyncData.color !== undefined) {
+        this.setColor(networkSyncData.color);
+      }
+    }
+
     getRendererObject() {
       return this._renderer.getRendererObject();
     }
 
-    onDestroyFromScene(runtimeScene): void {
-      super.onDestroyFromScene(runtimeScene);
-      if ((this._renderer as any).onDestroy) {
-        (this._renderer as any).onDestroy();
-      }
+    onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
     }
 
     /**
@@ -84,6 +147,11 @@ namespace gdjs {
         this.setWidth(initialInstanceData.width);
         this.setHeight(initialInstanceData.height);
       }
+      this.setOpacity(
+        initialInstanceData.opacity === undefined
+          ? 255
+          : initialInstanceData.opacity
+      );
     }
 
     /**
@@ -106,11 +174,14 @@ namespace gdjs {
 
     /**
      * Assign a new texture to the Tiled Sprite object.
-     * @param textureName The name of the image texture ressource.
-     * @param runtimeScene The scene in which the texture is used.
+     * @param textureName The name of the image texture resource.
+     * @param instanceContainer The container in which the texture is used.
      */
-    setTexture(textureName: string, runtimeScene: gdjs.RuntimeScene): void {
-      this._renderer.setTexture(textureName, runtimeScene);
+    setTexture(
+      textureName: string,
+      instanceContainer: gdjs.RuntimeInstanceContainer
+    ): void {
+      this._renderer.setTexture(textureName, instanceContainer);
     }
 
     /**
@@ -147,7 +218,7 @@ namespace gdjs {
 
       this._width = width;
       this._renderer.setWidth(width);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -159,7 +230,25 @@ namespace gdjs {
 
       this._height = height;
       this._renderer.setHeight(height);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
+    }
+
+    /**
+     * Set the size of the Tiled Sprite object.
+     * @param width The new width.
+     * @param height The new height.
+     */
+    setSize(width: float, height: float): void {
+      this.setWidth(width);
+      this.setHeight(height);
+    }
+
+    override getOriginalWidth(): float {
+      return this._objectData.width;
+    }
+
+    override getOriginalHeight(): float {
+      return this._objectData.height;
     }
 
     /**
@@ -196,10 +285,6 @@ namespace gdjs {
       return this._yOffset;
     }
 
-    /**
-     * Change the transparency of the object.
-     * @param opacity The new opacity, between 0 (transparent) and 255 (opaque).
-     */
     setOpacity(opacity: float): void {
       if (opacity < 0) {
         opacity = 0;
@@ -211,10 +296,6 @@ namespace gdjs {
       this._renderer.updateOpacity();
     }
 
-    /**
-     * Get the transparency of the object.
-     * @return The opacity, between 0 (transparent) and 255 (opaque).
-     */
     getOpacity(): number {
       return this.opacity;
     }
@@ -240,10 +321,14 @@ namespace gdjs {
     // Implement support for get/set scale:
 
     /**
-     * Get scale of the tiled sprite object.
+     * Get the scale of the object (or the geometric mean of the X and Y scale in case they are different).
+     *
+     * @return the scale of the object (or the geometric mean of the X and Y scale in case they are different).
      */
     getScale(): float {
-      return (this.getScaleX() + this.getScaleY()) / 2.0;
+      const scaleX = Math.abs(this.getScaleX());
+      const scaleY = Math.abs(this.getScaleY());
+      return scaleX === scaleY ? scaleX : Math.sqrt(scaleX * scaleY);
     }
 
     /**

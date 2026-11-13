@@ -1,43 +1,48 @@
+/// <reference path="helper/TileMapHelper.d.ts" />
+/// <reference path="pixi-tilemap/dist/pixi-tilemap.d.ts" />
 namespace gdjs {
-  const logger = new gdjs.Logger('Tilemap object');
-
   /**
    * The PIXI.js renderer for the Tile map runtime object.
    *
    * @class TileMapRuntimeObjectPixiRenderer
+   * @category Renderers > Tile Map
    */
   export class TileMapRuntimeObjectPixiRenderer {
-    _object: any;
-    _runtimeScene: gdjs.RuntimeScene;
+    private _object:
+      | gdjs.TileMapRuntimeObject
+      | gdjs.SimpleTileMapRuntimeObject;
 
-    // @ts-ignore - pixi-tilemap types to be added.
-    _pixiObject: any;
+    private _pixiObject: PIXI.tilemap.CompositeTilemap;
+    private _lastCullingLeftBound = 0;
+    private _lastCullingRightBound = 0;
+    private _lastCullingTopBound = 0;
+    private _lastCullingBottomBound = 0;
 
     /**
      * @param runtimeObject The object to render
-     * @param runtimeScene The gdjs.RuntimeScene in which the object is
+     * @param instanceContainer The gdjs.RuntimeScene in which the object is
      */
     constructor(
-      runtimeObject: gdjs.TileMapRuntimeObject,
-      runtimeScene: gdjs.RuntimeScene
+      runtimeObject:
+        | gdjs.TileMapRuntimeObject
+        | gdjs.SimpleTileMapRuntimeObject,
+      instanceContainer: gdjs.RuntimeInstanceContainer
     ) {
       this._object = runtimeObject;
-      this._runtimeScene = runtimeScene;
+
+      // This setting allows tile maps with more than 16K tiles.
+      PIXI.tilemap.settings.use32bitIndex = true;
 
       // Load (or reset)
-      if (this._pixiObject === undefined) {
-        // @ts-ignore - pixi-tilemap types to be added.
-        this._pixiObject = new PIXI.tilemap.CompositeRectTileLayer(0);
-      }
+      this._pixiObject = new PIXI.tilemap.CompositeTilemap();
       this._pixiObject.tileAnim = [0, 0];
 
-      runtimeScene
+      instanceContainer
         .getLayer('')
         .getRenderer()
         .addRendererObject(this._pixiObject, runtimeObject.getZOrder());
       this.updateAngle();
       this.updateOpacity();
-      this.updateTileMap();
       this.updatePosition();
     }
 
@@ -45,86 +50,15 @@ namespace gdjs {
       return this._pixiObject;
     }
 
-    incrementAnimationFrameX(runtimeScene) {
+    incrementAnimationFrameX(instanceContainer: gdjs.RuntimeInstanceContainer) {
       this._pixiObject.tileAnim[0] += 1;
     }
 
-    _loadTileMapWithTileset(tileMapJsonData, tilesetJsonData) {
-      // @ts-ignore - TODO: Add typings for pixi-tilemap-helper.
-      const pixiTileMapData = PixiTileMapHelper.loadPixiTileMapData(
-        (textureName) =>
-          this._runtimeScene
-            .getGame()
-            .getImageManager()
-            .getPIXITexture(textureName),
-        tilesetJsonData
-          ? { ...tileMapJsonData, tilesets: [tilesetJsonData] }
-          : tileMapJsonData,
-        this._object._tilemapAtlasImage,
-        this._object._tilemapJsonFile,
-        this._object._tilesetJsonFile
-      );
-      if (pixiTileMapData) {
-        // @ts-ignore - TODO: Add typings for pixi-tilemap-helper.
-        PixiTileMapHelper.updatePixiTileMap(
-          this._pixiObject,
-          pixiTileMapData,
-          this._object._displayMode,
-          this._object._layerIndex,
-          // @ts-ignore - TODO: Add typings for pako.
-          pako
-        );
-      }
-    }
-
-    updateTileMap(): void {
-      this._runtimeScene
-        .getGame()
-        .getJsonManager()
-        .loadJson(this._object._tilemapJsonFile, (error, tileMapJsonData) => {
-          if (error) {
-            logger.error(
-              'An error happened while loading a Tilemap JSON data:',
-              error
-            );
-            return;
-          }
-          if (this._object._tilesetJsonFile) {
-            this._runtimeScene
-              .getGame()
-              .getJsonManager()
-              .loadJson(
-                this._object._tilesetJsonFile,
-                (error, tilesetJsonData) => {
-                  if (error) {
-                    logger.error(
-                      'An error happened while loading Tileset JSON data:',
-                      error
-                    );
-                    return;
-                  }
-                  this._loadTileMapWithTileset(
-                    tileMapJsonData,
-                    tilesetJsonData
-                  );
-                }
-              );
-          } else {
-            this._loadTileMapWithTileset(tileMapJsonData, null);
-          }
-        });
-    }
-
     updatePosition(): void {
-      const originalWidth = this._pixiObject.width / this._pixiObject.scale.x;
-      const originalHeight = this._pixiObject.height / this._pixiObject.scale.y;
-      this._pixiObject.pivot.x = originalWidth / 2;
-      this._pixiObject.pivot.y = originalHeight / 2;
-
-      this._pixiObject.position.x = this._object.x + this._pixiObject.width / 2;
-
-      this._pixiObject.position.y =
-        this._object.y + this._pixiObject.height / 2;
+      this._pixiObject.pivot.x = this._object.getOriginalWidth() / 2;
+      this._pixiObject.pivot.y = this._object.getOriginalHeight() / 2;
+      this._pixiObject.position.x = this._object.x + this.getWidth() / 2;
+      this._pixiObject.position.y = this._object.y + this.getHeight() / 2;
     }
 
     updateAngle(): void {
@@ -132,30 +66,173 @@ namespace gdjs {
     }
 
     updateOpacity(): void {
-      this._pixiObject.alpha = this._object._opacity / 255;
+      const newAlpha = this._object._opacity / 255;
+      if (this._pixiObject.alpha === newAlpha) {
+        return;
+      }
+
+      this._pixiObject.alpha = newAlpha;
+      const tileMap = this._object.getTileMap();
+      if (!tileMap) return;
+      for (const layer of tileMap.getLayers()) {
+        const isLayerHidden =
+          (this._object.getDisplayMode() === 'index' &&
+            this._object.getDisplayedLayerIndex() !== layer.id) ||
+          (this._object.getDisplayMode() === 'visible' && !layer.isVisible());
+
+        // Only set alpha on editable layers that are not hidden,
+        // as others are not rendered.
+        if (isLayerHidden) continue;
+        if (layer instanceof TileMapHelper.EditableTileMapLayer) {
+          layer.setAlpha(this._pixiObject.alpha);
+        }
+      }
+
+      // Changing the alpha requires a full re-render of the tile map.
+      this._object.updateTileMap(true);
     }
 
-    setWidth(width): void {
-      this._pixiObject.width = width / this._pixiObject.scale.x;
-      this._pixiObject.pivot.x = width / 2;
-      this.updatePosition();
+    setWidth(width: float): void {
+      this._pixiObject.scale.x = width / this._object.getOriginalWidth();
+      this._pixiObject.position.x = this._object.x + width / 2;
     }
 
-    setHeight(height): void {
-      this._pixiObject.height = height / this._pixiObject.scale.y;
-      this._pixiObject.pivot.y = height / 2;
-      this.updatePosition();
+    setHeight(height: float): void {
+      this._pixiObject.scale.y = height / this._object.getOriginalHeight();
+      this._pixiObject.position.y = this._object.y + height / 2;
+    }
+
+    setScaleX(scaleX: float): void {
+      this._pixiObject.scale.x = scaleX;
+      const width = scaleX * this._object.getOriginalWidth();
+      this._pixiObject.position.x = this._object.x + width / 2;
+    }
+
+    setScaleY(scaleY: float): void {
+      this._pixiObject.scale.y = scaleY;
+      const height = scaleY * this._object.getOriginalHeight();
+      this._pixiObject.position.y = this._object.y + height / 2;
     }
 
     getWidth(): float {
-      return this._pixiObject.width;
+      return this._object.getOriginalWidth() * this._pixiObject.scale.x;
     }
 
     getHeight(): float {
-      return this._pixiObject.height;
+      return this._object.getOriginalHeight() * this._pixiObject.scale.y;
+    }
+
+    getScaleX(): float {
+      return this._pixiObject.scale.x;
+    }
+
+    getScaleY(): float {
+      return this._pixiObject.scale.y;
+    }
+
+    refreshPixiTileMap(
+      textureCache: TileMapHelper.TileTextureCache,
+      forceRefresh: boolean
+    ) {
+      const object = this._object;
+      const tileMap = object.getTileMap();
+      if (!tileMap) return;
+      const dimX = tileMap.getDimensionX();
+      const dimY = tileMap.getDimensionY();
+
+      let leftBound = 0;
+      let rightBound = dimX;
+      let topBound = 0;
+      let bottomBound = dimY;
+
+      const instanceContainer = this._object.getInstanceContainer();
+      const scene = instanceContainer.getScene();
+      const layerName = this._object.getLayer();
+      const layer = this._object.getInstanceContainer().getLayer(layerName);
+      if (
+        // Don't cull small maps or chunks.
+        dimX + dimY > 100 &&
+        // TODO Handle culling for TileMapRuntimeObject.
+        isSimpleTileMap(object) &&
+        instanceContainer === scene &&
+        (!gdjs.scene3d ||
+          (gdjs.scene3d.camera.getCameraRotationX(scene, layerName, 0) === 0 &&
+            gdjs.scene3d.camera.getCameraRotationY(scene, layerName, 0) === 0))
+      ) {
+        const cameraX = layer.getCameraX();
+        const cameraY = layer.getCameraY();
+        let cameraHalfWidth = layer.getCameraWidth() / 2;
+        let cameraHalfHeight = layer.getCameraHeight() / 2;
+        if (layer.getCameraRotation() !== 0) {
+          const hypot = cameraHalfWidth + cameraHalfHeight;
+          cameraHalfWidth = hypot;
+          cameraHalfHeight = hypot;
+        }
+        const [cameraLeftTile, cameraTopTile] =
+          object.getGridCoordinatesFromSceneCoordinates(
+            cameraX - cameraHalfWidth,
+            cameraY - cameraHalfHeight
+          );
+        const [cameraRightTile, cameraBottomTile] =
+          object.getGridCoordinatesFromSceneCoordinates(
+            cameraX + cameraHalfWidth,
+            cameraY + cameraHalfHeight
+          );
+        leftBound = Math.min(cameraLeftTile, cameraRightTile);
+        rightBound = Math.max(cameraLeftTile, cameraRightTile) + 1;
+        topBound = Math.min(cameraTopTile, cameraBottomTile);
+        bottomBound = Math.max(cameraTopTile, cameraBottomTile) + 1;
+      }
+
+      if (
+        forceRefresh ||
+        this._lastCullingLeftBound !== leftBound ||
+        this._lastCullingRightBound !== rightBound ||
+        this._lastCullingTopBound !== topBound ||
+        this._lastCullingBottomBound !== bottomBound
+      ) {
+        this._lastCullingLeftBound = leftBound;
+        this._lastCullingRightBound = rightBound;
+        this._lastCullingTopBound = topBound;
+        this._lastCullingBottomBound = bottomBound;
+
+        TileMapHelper.PixiTileMapHelper.updatePixiTileMap(
+          this._pixiObject,
+          tileMap,
+          textureCache,
+          // @ts-ignore
+          this._object.getDisplayMode(),
+          this._object.getDisplayedLayerIndex(),
+          leftBound,
+          rightBound,
+          topBound,
+          bottomBound
+        );
+      }
+    }
+
+    destroy(): void {
+      // Destroy the children too, as each one holds a vertex buffer in the
+      // GPU memory. Keep textures because they are shared by all tile maps.
+      this._pixiObject.destroy({ children: true });
     }
   }
+
+  function isSimpleTileMap(
+    object: gdjs.SimpleTileMapRuntimeObject | gdjs.TileMapRuntimeObject
+  ): object is gdjs.SimpleTileMapRuntimeObject {
+    //@ts-ignore We are checking if the methods are present.
+    return object.getGridCoordinatesFromSceneCoordinates;
+  }
+
+  /**
+   * @category Renderers > Tile Map
+   */
   export const TileMapRuntimeObjectRenderer =
     gdjs.TileMapRuntimeObjectPixiRenderer;
-  export type TileMapRuntimeObjectRenderer = gdjs.TileMapRuntimeObjectPixiRenderer;
+  /**
+   * @category Renderers > Tile Map
+   */
+  export type TileMapRuntimeObjectRenderer =
+    gdjs.TileMapRuntimeObjectPixiRenderer;
 }

@@ -5,7 +5,8 @@
  */
 namespace gdjs {
   /**
-   * Represents a timer, which must be updated manually with {@link gdjs.Timer#updateTime}.
+   * Represents a timer, which must be updated manually with {@link gdjs.Timer.updateTime}.
+   * @category Core Engine > Time
    */
   export class Timer {
     _name: string;
@@ -73,6 +74,19 @@ namespace gdjs {
      */
     isPaused(): boolean {
       return this._paused;
+    }
+
+    getNetworkSyncData(): TimerNetworkSyncData {
+      return {
+        name: this._name,
+        time: this._time,
+        paused: this._paused,
+      };
+    }
+
+    updateFromNetworkSyncData(syncData: TimerNetworkSyncData) {
+      this._time = syncData.time;
+      this._paused = syncData.paused;
     }
   }
 }

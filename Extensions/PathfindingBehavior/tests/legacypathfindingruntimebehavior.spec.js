@@ -1,6 +1,8 @@
 // @ts-check
 describe('gdjs.PathfindingRuntimeBehavior', function () {
   // limit tests cases on the legacy collision methods.
+  // Note that the legacy collision mode is still the only mode that exists
+  // because the new one were never merged.
   let doLegacyPathFindingTests = (
     cellSize,
     objectCenteredOnCells,
@@ -9,39 +11,53 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
     const pathFindingName = 'auto1';
 
     let createScene = () => {
-      const runtimeGame = new gdjs.RuntimeGame({
-        variables: [],
-        // @ts-ignore - missing properties.
-        properties: { windowWidth: 800, windowHeight: 600 },
-        resources: { resources: [] },
-      });
+      const runtimeGame = gdjs.getPixiRuntimeGame();
       const runtimeScene = new gdjs.RuntimeScene(runtimeGame);
       runtimeScene.loadFromScene({
-        layers: [
-          {
-            name: '',
-            visibility: true,
-            effects: [],
-            cameras: [],
+        sceneData: {
+          layers: [
+            {
+              name: '',
+              visibility: true,
+              effects: [],
+              cameras: [],
 
-            ambientLightColorR: 0,
-            ambientLightColorG: 0,
-            ambientLightColorB: 0,
-            isLightingLayer: false,
-            followBaseLayerCamera: true,
+              ambientLightColorR: 0,
+              ambientLightColorG: 0,
+              ambientLightColorB: 0,
+              isLightingLayer: false,
+              followBaseLayerCamera: true,
+            },
+          ],
+          variables: [],
+          r: 0,
+          v: 0,
+          b: 0,
+          mangledName: 'Scene1',
+          name: 'Scene1',
+          stopSoundsOnStartup: false,
+          title: '',
+          renderer3DWorldScale: 100,
+          behaviorsSharedData: [],
+          objects: [],
+          objectsGroups: [],
+          instances: [],
+          usedResources: [],
+          uiSettings: {
+            grid: false,
+            gridType: 'rectangular',
+            gridWidth: 10,
+            gridHeight: 10,
+            gridDepth: 10,
+            gridOffsetX: 0,
+            gridOffsetY: 0,
+            gridOffsetZ: 0,
+            gridColor: 0,
+            gridAlpha: 1,
+            snap: false,
           },
-        ],
-        variables: [],
-        r: 0,
-        v: 0,
-        b: 0,
-        mangledName: 'Scene1',
-        name: 'Scene1',
-        stopSoundsOnStartup: false,
-        title: '',
-        behaviorsSharedData: [],
-        objects: [],
-        instances: [],
+        },
+        usedExtensionsWithVariablesData: [],
       });
       runtimeScene._timeManager.getElapsedTime = function () {
         return (1 / 60) * 1000;
@@ -61,9 +77,14 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
                 sprites: [
                   {
                     originPoint: objectCenteredOnCells
-                      ? { x: 80, y: 80 }
-                      : { x: 87, y: 87 },
-                    centerPoint: { x: 80, y: 80 },
+                      ? { name: 'Origin', x: 80, y: 80 }
+                      : { name: 'Origin', x: 87, y: 87 },
+                    centerPoint: {
+                      name: 'Center',
+                      x: 80,
+                      y: 80,
+                      automatic: false,
+                    },
                     points: [
                       { name: 'Center', x: 80, y: 80 },
                       objectCenteredOnCells
@@ -71,13 +92,17 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
                         : { name: 'Origin', x: 87, y: 87 },
                     ],
                     hasCustomCollisionMask: false,
+                    customCollisionMask: [],
+                    image: '',
                   },
                 ],
+                timeBetweenFrames: 0,
+                looping: false,
               },
             ],
+            useMultipleDirections: false,
           },
         ],
-        effects: [],
         behaviors: [
           {
             type: 'PathfindingBehavior::PathfindingBehavior',
@@ -93,6 +118,9 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
             extraBorder: 0,
           },
         ],
+        variables: [],
+        effects: [],
+        updateIfNotVisible: true,
       });
       player.getWidth = function () {
         return 160;
@@ -116,9 +144,14 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
                 sprites: [
                   {
                     originPoint: objectCenteredOnCells
-                      ? { x: 80, y: 80 }
-                      : { x: 87, y: 87 },
-                    centerPoint: { x: 80, y: 80 },
+                      ? { name: 'Origin', x: 80, y: 80 }
+                      : { name: 'Origin', x: 87, y: 87 },
+                    centerPoint: {
+                      name: 'Center',
+                      x: 80,
+                      y: 80,
+                      automatic: false,
+                    },
                     points: [
                       { name: 'Center', x: 80, y: 80 },
                       objectCenteredOnCells
@@ -126,13 +159,17 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
                         : { name: 'Origin', x: 87, y: 87 },
                     ],
                     hasCustomCollisionMask: false,
+                    customCollisionMask: [],
+                    image: '',
                   },
                 ],
+                timeBetweenFrames: 0,
+                looping: false,
               },
             ],
+            useMultipleDirections: false,
           },
         ],
-        effects: [],
         behaviors: [
           {
             type: 'PathfindingBehavior::PathfindingObstacleBehavior',
@@ -140,6 +177,9 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
             cost: 2,
           },
         ],
+        variables: [],
+        effects: [],
+        updateIfNotVisible: true,
       });
       obstacle.getWidth = function () {
         return 160;
@@ -247,6 +287,8 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
           targetX = playerX;
           targetY = playerY - 2 * cellSize;
           break;
+        default:
+          throw new Error('Invalid direction for the test');
       }
 
       obstacle.setPosition(obstacleX, obstacleY);
@@ -316,6 +358,8 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
           targetX = playerX;
           targetY = playerY - 2 * cellSize;
           break;
+        default:
+          throw new Error('Invalid direction for the test');
       }
 
       obstacle.setPosition(obstacleX, obstacleY);
@@ -449,6 +493,8 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
           obstacleY =
             targetY + playerBottomBorder + obstacleTopBorder + inclusiveMargin;
           break;
+        default:
+          throw new Error('Invalid direction for the test');
       }
 
       obstacle.setPosition(obstacleX, obstacleY);
@@ -606,6 +652,8 @@ describe('gdjs.PathfindingRuntimeBehavior', function () {
           straightLineCellCount = (targetY - playerY) / cellSize + 1;
           break;
         }
+        default:
+          throw new Error('Invalid direction for the test');
       }
 
       obstacleTop.setPosition(topObstacleX, topObstacleY);

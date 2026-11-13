@@ -1,8 +1,5 @@
 // @flow
 import * as React from 'react';
-import { action } from '@storybook/addon-actions';
-
-import muiDecorator from '../ThemeDecorator';
 import paperDecorator from '../PaperDecorator';
 
 import DismissableTutorialMessage from '../../Hints/DismissableTutorialMessage';
@@ -14,23 +11,29 @@ import {
 import PreferencesContext from '../../MainFrame/Preferences/PreferencesContext';
 import { TutorialContext } from '../../Tutorial/TutorialContext';
 
-const defaultTutorials = [
+const defaultTutorials: Array<Tutorial> = [
   {
     id: 'tutorial-1',
-    title: 'Tutorial 1',
-    description: 'Description 1',
-    thumbnailUrl:
-      'https://raw.githubusercontent.com/4ian/GDevelop/master/Core/docs/images/gdlogo.png',
-    link: 'https://example.com/tutorial.html',
+    titleByLocale: { en: 'Tutorial 1' },
+    category: 'official-beginner',
+    descriptionByLocale: { en: 'Description 1' },
+    thumbnailUrlByLocale: {
+      en:
+        'https://raw.githubusercontent.com/4ian/GDevelop/master/Core/docs/images/gdlogo.png',
+    },
+    linkByLocale: { en: 'https://example.com/tutorial.html' },
     type: 'video',
   },
   {
     id: 'tutorial-2',
-    title: 'Tutorial 2',
-    description: 'Description 2',
-    thumbnailUrl:
-      'https://raw.githubusercontent.com/4ian/GDevelop/master/Core/docs/images/gdlogo.png',
-    link: 'https://example.com/tutorial.html',
+    titleByLocale: { en: 'Tutorial 2' },
+    category: 'official-beginner',
+    descriptionByLocale: { en: 'Description 2' },
+    thumbnailUrlByLocale: {
+      en:
+        'https://raw.githubusercontent.com/4ian/GDevelop/master/Core/docs/images/gdlogo.png',
+    },
+    linkByLocale: { en: 'https://example.com/tutorial.html' },
     type: 'text',
   },
 ];
@@ -43,9 +46,10 @@ type Props = {|
 
 const WrappedDismissableTutorialMessage = ({
   tutorials = defaultTutorials,
+  // $FlowFixMe[incompatible-type]
   preferences = initialPreferences,
   tutorialId,
-}: Props) => (
+}: Props): React.Node => (
   <PreferencesContext.Provider value={preferences}>
     <TutorialContext.Provider
       value={{
@@ -62,22 +66,24 @@ const WrappedDismissableTutorialMessage = ({
 export default {
   title: 'Tutorial/DismissableTutorialMessageWidget',
   component: WrappedDismissableTutorialMessage,
-  decorators: [paperDecorator, muiDecorator],
+  decorators: [paperDecorator],
 };
 
-export const NoTutorialsLoaded = () => (
+export const NoTutorialsLoaded = (): React.Node => (
   <WrappedDismissableTutorialMessage tutorials={null} tutorialId="tutorial-1" />
 );
 
-export const NoTutorialsFound = () => (
+export const NoTutorialsFound = (): React.Node => (
   <WrappedDismissableTutorialMessage tutorials={[]} tutorialId="tutorial-1" />
 );
 
-export const HiddenTutorial = () => (
+export const HiddenTutorial = (): React.Node => (
   <WrappedDismissableTutorialMessage
     tutorialId="tutorial-1"
+    // $FlowFixMe[incompatible-type]
     preferences={{
       ...initialPreferences,
+      // $FlowFixMe[incompatible-type]
       values: {
         ...initialPreferences.values,
         hiddenTutorialHints: { 'tutorial-1': true },
@@ -86,14 +92,14 @@ export const HiddenTutorial = () => (
   />
 );
 
-export const TutorialNotInList = () => (
+export const TutorialNotInList = (): React.Node => (
   <WrappedDismissableTutorialMessage tutorialId="tutorial-3" />
 );
 
-export const DefaultVideo = () => (
+export const DefaultVideo = (): React.Node => (
   <WrappedDismissableTutorialMessage tutorialId="tutorial-1" />
 );
 
-export const DefaultText = () => (
+export const DefaultText = (): React.Node => (
   <WrappedDismissableTutorialMessage tutorialId="tutorial-2" />
 );

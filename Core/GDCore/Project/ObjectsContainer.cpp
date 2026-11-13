@@ -4,30 +4,82 @@
  * reserved. This project is released under the MIT License.
  */
 #include "GDCore/Project/ObjectsContainer.h"
+
 #include <algorithm>
+#include <unordered_set>
+
 #include "GDCore/Extensions/Platform.h"
 #include "GDCore/Project/Object.h"
+#include "GDCore/Project/ObjectFolderOrObject.h"
 #include "GDCore/Project/Project.h"
 #include "GDCore/Serialization/SerializerElement.h"
+#include "GDCore/Tools/PolymorphicClone.h"
 
 namespace gd {
 
-ObjectsContainer::ObjectsContainer() {}
+ObjectsContainer::ObjectsContainer(
+    const ObjectsContainer::SourceType sourceType_)
+    : sourceType(sourceType_) {
+  rootFolder = gd::make_unique<gd::ObjectFolderOrObject>("__ROOT");
+}
 
 ObjectsContainer::~ObjectsContainer() {}
 
-#if defined(GD_IDE_ONLY)
+ObjectsContainer::ObjectsContainer(const ObjectsContainer& other) {
+  Init(other);
+}
+
+ObjectsContainer& ObjectsContainer::operator=(const ObjectsContainer& other) {
+  if (this != &other) Init(other);
+
+  return *this;
+}
+
+void ObjectsContainer::Init(const gd::ObjectsContainer& other) {
+  sourceType = other.sourceType;
+  initialObjects = gd::Clone(other.initialObjects);
+  InvalidateObjectsByName();
+  objectGroups = other.objectGroups;
+  // The objects folders are not copied.
+  // It's not an issue because the UI uses the serialization for duplication.
+  rootFolder = gd::make_unique<gd::ObjectFolderOrObject>("__ROOT");
+}
+
 void ObjectsContainer::SerializeObjectsTo(SerializerElement& element) const {
   element.ConsiderAsArrayOf("object");
   for (std::size_t j = 0; j < initialObjects.size(); j++) {
     initialObjects[j]->SerializeTo(element.AddChild("object"));
   }
 }
-#endif
+void ObjectsContainer::SerializeFoldersTo(SerializerElement& element) const {
+  rootFolder->SerializeTo(element);
+}
+
+void ObjectsContainer::UnserializeFoldersFrom(
+    gd::Project& project, const SerializerElement& element) {
+  rootFolder->UnserializeFrom(project, element, *this);
+}
+
+void ObjectsContainer::AddMissingObjectsInRootFolder() {
+  // Get the names of the objects already in the folders once: searching the
+  // folders for each object would be O(number of objects^2).
+  std::unordered_set<gd::String> objectNamesInFolders;
+  rootFolder->AddObjectNamesTo(objectNamesInFolders);
+
+  for (std::size_t i = 0; i < initialObjects.size(); ++i) {
+    const gd::String& objectName = initialObjects[i]->GetName();
+    if (objectNamesInFolders.find(objectName) == objectNamesInFolders.end()) {
+      rootFolder->InsertObject(&(*initialObjects[i]));
+      // The object is now in the folders (unless the root is not a folder,
+      // which only happens with an invalid serialized folder structure).
+      if (rootFolder->IsFolder()) objectNamesInFolders.insert(objectName);
+    }
+  }
+}
 
 void ObjectsContainer::UnserializeObjectsFrom(
     gd::Project& project, const SerializerElement& element) {
-  initialObjects.clear();
+  Clear();
   element.ConsiderAsArrayOf("object", "Objet");
   for (std::size_t i = 0; i < element.GetChildrenCount(); ++i) {
     const SerializerElement& objectElement = element.GetChild(i);
@@ -43,22 +95,34 @@ void ObjectsContainer::UnserializeObjectsFrom(
       std::cout << "WARNING: Unknown object type \"" << type << "\""
                 << std::endl;
   }
+  InvalidateObjectsByName();
+}
+
+gd::Object* ObjectsContainer::FindObject(const gd::String& name) const {
+  const std::size_t nameGeneration = gd::Object::GetNameGeneration();
+  if (!objectsByNameUpToDate || objectsByNameGeneration != nameGeneration) {
+    objectsByName.clear();
+    for (const auto& object : initialObjects) {
+      // If several objects have the same name, the first one wins (as it
+      // would with a linear search).
+      objectsByName.emplace(object->GetName(), object.get());
+    }
+    objectsByNameGeneration = nameGeneration;
+    objectsByNameUpToDate = true;
+  }
+
+  auto it = objectsByName.find(name);
+  return it == objectsByName.end() ? nullptr : it->second;
 }
 
 bool ObjectsContainer::HasObjectNamed(const gd::String& name) const {
-  return (find_if(initialObjects.begin(),
-                  initialObjects.end(),
-                  bind2nd(gd::ObjectHasName(), name)) != initialObjects.end());
+  return FindObject(name) != nullptr;
 }
 gd::Object& ObjectsContainer::GetObject(const gd::String& name) {
-  return *(*find_if(initialObjects.begin(),
-                    initialObjects.end(),
-                    bind2nd(gd::ObjectHasName(), name)));
+  return *FindObject(name);
 }
 const gd::Object& ObjectsContainer::GetObject(const gd::String& name) const {
-  return *(*find_if(initialObjects.begin(),
-                    initialObjects.end(),
-                    bind2nd(gd::ObjectHasName(), name)));
+  return *FindObject(name);
 }
 gd::Object& ObjectsContainer::GetObject(std::size_t index) {
   return *initialObjects[index];
@@ -75,19 +139,35 @@ std::size_t ObjectsContainer::GetObjectPosition(const gd::String& name) const {
 std::size_t ObjectsContainer::GetObjectsCount() const {
   return initialObjects.size();
 }
-#if defined(GD_IDE_ONLY)
-gd::Object& ObjectsContainer::InsertNewObject(gd::Project& project,
+gd::Object& ObjectsContainer::InsertNewObject(const gd::Project& project,
                                               const gd::String& objectType,
                                               const gd::String& name,
                                               std::size_t position) {
   gd::Object& newlyCreatedObject = *(*(initialObjects.insert(
       position < initialObjects.size() ? initialObjects.begin() + position
                                        : initialObjects.end(),
-      project.GetCurrentPlatform().CreateObject(objectType, name))));
+      project.CreateObject(objectType, name))));
+  InvalidateObjectsByName();
+
+  rootFolder->InsertObject(&newlyCreatedObject);
 
   return newlyCreatedObject;
 }
-#endif
+
+gd::Object& ObjectsContainer::InsertNewObjectInFolder(
+    const gd::Project& project,
+    const gd::String& objectType,
+    const gd::String& name,
+    gd::ObjectFolderOrObject& objectFolderOrObject,
+    std::size_t position) {
+  gd::Object& newlyCreatedObject = *(*(initialObjects.insert(
+      initialObjects.end(), project.CreateObject(objectType, name))));
+  InvalidateObjectsByName();
+
+  objectFolderOrObject.InsertObject(&newlyCreatedObject, position);
+
+  return newlyCreatedObject;
+}
 
 gd::Object& ObjectsContainer::InsertObject(const gd::Object& object,
                                            std::size_t position) {
@@ -95,18 +175,9 @@ gd::Object& ObjectsContainer::InsertObject(const gd::Object& object,
       position < initialObjects.size() ? initialObjects.begin() + position
                                        : initialObjects.end(),
       std::unique_ptr<gd::Object>(object.Clone()))));
+  InvalidateObjectsByName();
 
   return newlyCreatedObject;
-}
-
-void ObjectsContainer::SwapObjects(std::size_t firstObjectIndex,
-                                   std::size_t secondObjectIndex) {
-  if (firstObjectIndex >= initialObjects.size() ||
-      secondObjectIndex >= initialObjects.size())
-    return;
-
-  std::iter_swap(initialObjects.begin() + firstObjectIndex,
-                 initialObjects.begin() + secondObjectIndex);
 }
 
 void ObjectsContainer::MoveObject(std::size_t oldIndex, std::size_t newIndex) {
@@ -116,36 +187,83 @@ void ObjectsContainer::MoveObject(std::size_t oldIndex, std::size_t newIndex) {
   std::unique_ptr<gd::Object> object = std::move(initialObjects[oldIndex]);
   initialObjects.erase(initialObjects.begin() + oldIndex);
   initialObjects.insert(initialObjects.begin() + newIndex, std::move(object));
+  InvalidateObjectsByName();
 }
 
 void ObjectsContainer::RemoveObject(const gd::String& name) {
-  std::vector<std::unique_ptr<gd::Object> >::iterator objectIt =
+  std::vector<std::unique_ptr<gd::Object>>::iterator objectIt =
       find_if(initialObjects.begin(),
               initialObjects.end(),
-              bind2nd(ObjectHasName(), name));
+              [&](const std::unique_ptr<gd::Object>& object) {
+                return object->GetName() == name;
+              });
   if (objectIt == initialObjects.end()) return;
 
+  rootFolder->RemoveRecursivelyObjectNamed(name);
+
   initialObjects.erase(objectIt);
+  InvalidateObjectsByName();
 }
 
-void ObjectsContainer::MoveObjectToAnotherContainer(
-    const gd::String& name,
+void ObjectsContainer::Clear() {
+  rootFolder->Clear();
+  initialObjects.clear();
+  InvalidateObjectsByName();
+}
+
+void ObjectsContainer::MoveObjectFolderOrObjectToAnotherContainerInFolder(
+    gd::ObjectFolderOrObject& objectFolderOrObject,
     gd::ObjectsContainer& newContainer,
+    gd::ObjectFolderOrObject& newParentFolder,
     std::size_t newPosition) {
-  std::vector<std::unique_ptr<gd::Object> >::iterator objectIt =
-      find_if(initialObjects.begin(),
-              initialObjects.end(),
-              bind2nd(ObjectHasName(), name));
+  if (objectFolderOrObject.IsFolder() || !newParentFolder.IsFolder()) return;
+
+  std::vector<std::unique_ptr<gd::Object>>::iterator objectIt = find_if(
+      initialObjects.begin(),
+      initialObjects.end(),
+      [&objectFolderOrObject](std::unique_ptr<gd::Object>& object) {
+        return object->GetName() == objectFolderOrObject.GetObject().GetName();
+      });
   if (objectIt == initialObjects.end()) return;
 
   std::unique_ptr<gd::Object> object = std::move(*objectIt);
   initialObjects.erase(objectIt);
+  InvalidateObjectsByName();
 
-  newContainer.initialObjects.insert(
-      newPosition < newContainer.initialObjects.size()
-          ? newContainer.initialObjects.begin() + newPosition
-          : newContainer.initialObjects.end(),
-      std::move(object));
+  newContainer.initialObjects.push_back(std::move(object));
+  newContainer.InvalidateObjectsByName();
+
+  objectFolderOrObject.GetParent().MoveObjectFolderOrObjectToAnotherFolder(
+      objectFolderOrObject, newParentFolder, newPosition);
+}
+
+std::set<gd::String> ObjectsContainer::GetAllObjectNames() const {
+  std::set<gd::String> names;
+  for (const auto& object : initialObjects) {
+    names.insert(object->GetName());
+  }
+  return names;
+}
+
+std::vector<const ObjectFolderOrObject*>
+ObjectsContainer::GetAllObjectFolderOrObjects() const {
+  std::vector<const ObjectFolderOrObject*> results;
+
+  std::function<void(const ObjectFolderOrObject& folder)> addChildrenOfFolder =
+      [&](const ObjectFolderOrObject& folder) {
+        for (size_t i = 0; i < folder.GetChildrenCount(); ++i) {
+          const auto& child = folder.GetChildAt(i);
+          results.push_back(&child);
+
+          if (child.IsFolder()) {
+            addChildrenOfFolder(child);
+          }
+        }
+      };
+
+  addChildrenOfFolder(*rootFolder);
+
+  return results;
 }
 
 }  // namespace gd

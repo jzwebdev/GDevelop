@@ -10,7 +10,6 @@
 #include "GDCore/Events/Tools/EventsCodeNameMangler.h"
 #include "GDCore/Project/Layout.h"
 #include "GDCore/Project/Project.h"
-#include "GDCore/Project/SourceFile.h"
 #include "GDCore/Serialization/SerializerElement.h"
 #include "GDCore/Tools/Localization.h"
 #include "GDCore/Tools/Log.h"
@@ -42,7 +41,7 @@ JsCodeEvent::GetAllExpressionsWithMetadata() const {
 }
 
 void JsCodeEvent::SerializeTo(gd::SerializerElement& element) const {
-  element.AddChild("inlineCode").SetValue(inlineCode);
+  element.AddChild("inlineCode").SetMultilineStringValue(inlineCode);
   element.AddChild("parameterObjects")
       .SetValue(parameterObjects.GetPlainString());
   element.AddChild("useStrict").SetValue(useStrict);
@@ -51,7 +50,7 @@ void JsCodeEvent::SerializeTo(gd::SerializerElement& element) const {
 
 void JsCodeEvent::UnserializeFrom(gd::Project& project,
                                   const gd::SerializerElement& element) {
-  inlineCode = element.GetChild("inlineCode").GetValue().GetString();
+  inlineCode = element.GetChild("inlineCode").GetMultilineStringValue();
   parameterObjects = gd::Expression(
       element.GetChild("parameterObjects").GetValue().GetString());
 
@@ -74,8 +73,13 @@ void JsCodeEvent::UnserializeFrom(gd::Project& project,
 
 JsCodeEvent::JsCodeEvent()
     : BaseEvent(),
-      inlineCode("runtimeScene.setBackgroundColor(100,100,240);\n"),
-      useStrict(true),
-      eventsSheetExpanded(false) {}
+      inlineCode("runtimeScene.setBackgroundColor(100,100,240);\n") {}
+
+JsCodeEvent::JsCodeEvent(const JsCodeEvent &event): BaseEvent(event) {
+  inlineCode = event.inlineCode;
+  parameterObjects = event.parameterObjects;
+  useStrict = event.useStrict;
+  eventsSheetExpanded = event.eventsSheetExpanded;
+}
 
 }  // namespace gdjs

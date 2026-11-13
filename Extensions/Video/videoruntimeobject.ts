@@ -1,5 +1,8 @@
 namespace gdjs {
-  /** The initial properties for {@link gdjs.VideoRuntimeObject} */
+  /**
+   * The initial properties for {@link gdjs.VideoRuntimeObject}
+   * @category Objects > Video
+   */
   export type VideoObjectDataType = {
     /** The base parameters of the video */
     content: {
@@ -14,7 +17,28 @@ namespace gdjs {
     };
   };
 
+  /**
+   * @category Objects > Video
+   */
   export type VideoObjectData = ObjectData & VideoObjectDataType;
+
+  /**
+   * @category Objects > Video
+   */
+  export type VideoObjectNetworkSyncDataType = {
+    op: float;
+    // We don't sync volume, as it's probably a user setting?
+    pla: boolean;
+    loop: boolean;
+    ct: float;
+    ps: number;
+  };
+
+  /**
+   * @category Objects > Video
+   */
+  export type VideoObjectNetworkSyncData = ObjectNetworkSyncData &
+    VideoObjectNetworkSyncDataType;
 
   /**
    * An object displaying a video on screen.
@@ -23,8 +47,12 @@ namespace gdjs {
    * as a HTMLVideoElement). This means that two objects displaying the same
    * video will have the same state for this video (paused/playing, current time,
    * volume, etc...).
+   * @category Objects > Video
    */
-  export class VideoRuntimeObject extends gdjs.RuntimeObject {
+  export class VideoRuntimeObject
+    extends gdjs.RuntimeObject
+    implements gdjs.OpacityHandler
+  {
     _opacity: float;
     _loop: boolean;
     _volume: float;
@@ -37,19 +65,23 @@ namespace gdjs {
     _playbackSpeed: any;
 
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The scene the object belongs to.
      * @param videoObjectData The data defining the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      videoObjectData: VideoObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      videoObjectData: VideoObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, videoObjectData);
+      super(instanceContainer, videoObjectData, instanceData);
       this._opacity = videoObjectData.content.opacity;
       this._loop = videoObjectData.content.loop;
       this._volume = videoObjectData.content.volume;
       this._videoResource = videoObjectData.content.videoResource;
-      this._renderer = new gdjs.VideoRuntimeObjectRenderer(this, runtimeScene);
+      this._renderer = new gdjs.VideoRuntimeObjectRenderer(
+        this,
+        instanceContainer
+      );
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
       this.onCreated();
@@ -81,6 +113,49 @@ namespace gdjs {
       return true;
     }
 
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): VideoObjectNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        op: this._opacity,
+        pla: this.isPlayed(),
+        loop: this.isLooped(),
+        ct: this.getCurrentTime(),
+        ps: this.getPlaybackSpeed(),
+      };
+    }
+
+    updateFromNetworkSyncData(
+      syncData: VideoObjectNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(syncData, options);
+
+      if (this._opacity !== undefined && this._opacity && syncData.op) {
+        this.setOpacity(syncData.op);
+      }
+      if (syncData.pla !== undefined && this.isPlayed() !== syncData.pla) {
+        syncData.pla ? this.play() : this.pause();
+      }
+      if (syncData.loop !== undefined && this.isLooped() !== syncData.loop) {
+        this.setLoop(syncData.loop);
+      }
+      // We don't update the current time too regularly, only if it's off by a lot.
+      if (
+        syncData.ct !== undefined &&
+        Math.abs(this.getCurrentTime() - syncData.ct) > 3 // More than 3 seconds off
+      ) {
+        this.setCurrentTime(syncData.ct);
+      }
+      if (
+        syncData.ps !== undefined &&
+        this.getPlaybackSpeed() !== syncData.ps
+      ) {
+        this.setPlaybackSpeed(syncData.ps);
+      }
+    }
+
     /**
      * Initialize the extra parameters that could be set for an instance.
      * @param initialInstanceData The initial instance data
@@ -90,14 +165,19 @@ namespace gdjs {
         this.setWidth(initialInstanceData.width);
         this.setHeight(initialInstanceData.height);
       }
+      this.setOpacity(
+        initialInstanceData.opacity === undefined
+          ? 255
+          : initialInstanceData.opacity
+      );
     }
 
-    onDestroyFromScene(runtimeScene): void {
-      super.onDestroyFromScene(runtimeScene);
+    onDestroyed(): void {
+      super.onDestroyed();
       this._renderer.onDestroy();
     }
 
-    update(runtimeScene): void {
+    update(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       this._renderer.ensureUpToDate();
     }
 
@@ -153,7 +233,7 @@ namespace gdjs {
       if (this._renderer.getWidth() === width) return;
 
       this._renderer.setWidth(width);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -164,7 +244,7 @@ namespace gdjs {
       if (this._renderer.getHeight() === height) return;
 
       this._renderer.setHeight(height);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -237,7 +317,7 @@ namespace gdjs {
 
     /**
      * Get the volume of the video object.
-     * @returns The current video's volume, betwenn 0 and 100.
+     * @returns The current video's volume, between 0 and 100.
      */
     getVolume(): number {
       return (

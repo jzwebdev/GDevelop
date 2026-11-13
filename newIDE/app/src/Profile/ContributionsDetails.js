@@ -28,7 +28,7 @@ export const ContributionLine = ({
   fullName,
   previewIconUrl,
   shortDescription,
-}: ContributionLineProps) => (
+}: ContributionLineProps): React.Node => (
   <Line>
     {previewIconUrl && (
       <IconContainer alt={fullName} src={previewIconUrl} size={64} />
@@ -50,7 +50,7 @@ type ExamplesAccordionProps = {|
 export const ExamplesAccordion = ({
   examples,
   exampleError,
-}: ExamplesAccordionProps) => {
+}: ExamplesAccordionProps): React.Node => {
   if (exampleError)
     return (
       <Column>
@@ -101,7 +101,7 @@ type ExtensionsAccordionProps = {|
 export const ExtensionsAccordion = ({
   extensions,
   extensionError,
-}: ExtensionsAccordionProps) => {
+}: ExtensionsAccordionProps): React.Node => {
   if (extensionError)
     return (
       <Column>
@@ -161,7 +161,7 @@ type Props = {|
   userId: string,
 |};
 
-export default ({ userId }: Props) => {
+const ContributionDetails = ({ userId }: Props): React.Node => {
   const [
     extensions,
     setExtensions,
@@ -219,14 +219,12 @@ export default ({ userId }: Props) => {
   );
 
   return (
-    <>
-      <Column>
-        <Line alignItems="center">
-          <Text size="title">
-            <Trans>Contributions</Trans>
-          </Text>
-        </Line>
-      </Column>
+    <Column noMargin>
+      <Line alignItems="center">
+        <Text size="block-title">
+          <Trans>Contributions</Trans>
+        </Text>
+      </Line>
       {examples && extensions ? (
         <>
           <ExtensionsAccordion
@@ -247,8 +245,10 @@ export default ({ userId }: Props) => {
           </Column>
         </>
       ) : (
-        <PlaceholderLoader />
+        <PlaceholderLoader style={{ minHeight: 205 }} />
       )}
-    </>
+    </Column>
   );
 };
+
+export default ContributionDetails;

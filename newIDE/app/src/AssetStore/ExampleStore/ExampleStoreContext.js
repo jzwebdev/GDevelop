@@ -3,70 +3,67 @@ import * as React from 'react';
 import { type FiltersState, useFilters } from '../../UI/Search/FiltersChooser';
 import {
   type ExampleShortHeader,
-  type AllExamples,
   listAllExamples,
 } from '../../Utils/GDevelopServices/Example';
 import { type Filters } from '../../Utils/GDevelopServices/Filters';
-import { useSearchItem } from '../../UI/Search/UseSearchItem';
+import {
+  useSearchStructuredItem,
+  type SearchResult,
+} from '../../UI/Search/UseSearchStructuredItem';
+import { EXAMPLES_FETCH_TIMEOUT } from '../../Utils/GlobalFetchTimeouts';
 
 const defaultSearchText = '';
+const excludedTiers = new Set<string>(); // No tiers for examples.
+const firstExampleIds: Array<string> = [];
 
 type ExampleStoreState = {|
-  filters: ?Filters,
-  searchResults: ?Array<ExampleShortHeader>,
+  exampleFilters: ?Filters,
+  exampleShortHeadersSearchResults: ?Array<SearchResult<ExampleShortHeader>>,
   fetchExamplesAndFilters: () => void,
-  allExamples: ?Array<ExampleShortHeader>,
+  exampleShortHeaders: ?Array<ExampleShortHeader>,
   error: ?Error,
   searchText: string,
   setSearchText: string => void,
   filtersState: FiltersState,
 |};
 
-export const ExampleStoreContext = React.createContext<ExampleStoreState>({
-  filters: null,
-  searchResults: null,
-  fetchExamplesAndFilters: () => {},
-  allExamples: null,
-  error: null,
-  searchText: '',
-  setSearchText: () => {},
-  filtersState: {
-    chosenFilters: new Set(),
-    addFilter: () => {},
-    removeFilter: () => {},
-    chosenCategory: null,
-    setChosenCategory: () => {},
-  },
-});
+export const ExampleStoreContext: React.Context<ExampleStoreState> = React.createContext<ExampleStoreState>(
+  {
+    exampleFilters: null,
+    exampleShortHeadersSearchResults: null,
+    fetchExamplesAndFilters: () => {},
+    exampleShortHeaders: null,
+    error: null,
+    searchText: '',
+    setSearchText: () => {},
+    filtersState: {
+      chosenFilters: new Set(),
+      addFilter: () => {},
+      removeFilter: () => {},
+      chosenCategory: null,
+      setChosenCategory: () => {},
+    },
+  }
+);
 
 type ExampleStoreStateProviderProps = {|
   children: React.Node,
 |};
 
-const getExampleSearchTerms = (example: ExampleShortHeader) => {
-  return (
-    example.name +
-    '\n' +
-    example.shortDescription +
-    '\n' +
-    example.tags.join(',')
-  );
-};
-
 export const ExampleStoreStateProvider = ({
   children,
-}: ExampleStoreStateProviderProps) => {
+}: ExampleStoreStateProviderProps): React.MixedElement => {
   const [
     exampleShortHeadersById,
     setExampleShortHeadersById,
   ] = React.useState<?{
     [string]: ExampleShortHeader,
   }>(null);
-  const [filters, setFilters] = React.useState<?Filters>(null);
+  const [exampleFilters, setExampleFilters] = React.useState<?Filters>(null);
   const [error, setError] = React.useState<?Error>(null);
   const [
-    allExamples,
-    setAllExamples,
+    exampleShortHeaders,
+    setExampleShortHeaders,
   ] = React.useState<?Array<ExampleShortHeader>>(null);
 
   const isLoading = React.useRef<boolean>(false);
@@ -85,22 +82,27 @@ export const ExampleStoreStateProvider = ({
         isLoading.current = true;
 
         try {
-          const allExamples: AllExamples = await listAllExamples();
-          const { exampleShortHeaders, filters } = allExamples;
-          setAllExamples(exampleShortHeaders);
-
-          const exampleShortHeadersById = {};
-          exampleShortHeaders.forEach(exampleShortHeader => {
-            exampleShortHeadersById[exampleShortHeader.id] = exampleShortHeader;
-          });
+          const fetchedAllExamples = await listAllExamples();
+          const {
+            exampleShortHeaders: fetchedExampleShortHeaders,
+            filters: fetchedFilters,
+          } = fetchedAllExamples;
 
           console.info(
             `Loaded ${
-              exampleShortHeaders.length
+              fetchedExampleShortHeaders ? fetchedExampleShortHeaders.length : 0
             } examples from the example store.`
           );
+
+          setExampleShortHeaders(fetchedExampleShortHeaders);
+          setExampleFilters(fetchedFilters);
+
+          const exampleShortHeadersById = {};
+          fetchedExampleShortHeaders.forEach(exampleShortHeader => {
+            // $FlowFixMe[prop-missing]
+            exampleShortHeadersById[exampleShortHeader.id] = exampleShortHeader;
+          });
           setExampleShortHeadersById(exampleShortHeadersById);
-          setFilters(filters);
         } catch (error) {
           console.error(
             `Unable to load the examples from the example store:`,
@@ -117,44 +119,47 @@ export const ExampleStoreStateProvider = ({
 
   React.useEffect(
     () => {
-      // Don't attempt to load again extensions and filters if they
+      // Don't attempt to load again examples and filters if they
       // were loaded already.
       if (exampleShortHeadersById || isLoading.current) return;
 
       const timeoutId = setTimeout(() => {
         console.info('Pre-fetching examples from the example store...');
         fetchExamplesAndFilters();
-      }, 5000);
+      }, EXAMPLES_FETCH_TIMEOUT);
       return () => clearTimeout(timeoutId);
     },
     [fetchExamplesAndFilters, exampleShortHeadersById, isLoading]
   );
 
   const { chosenCategory, chosenFilters } = filtersState;
-  const searchResults: ?Array<ExampleShortHeader> = useSearchItem(
-    exampleShortHeadersById,
-    getExampleSearchTerms,
+  const exampleShortHeadersSearchResults: ?Array<
+    SearchResult<ExampleShortHeader>
+  > = useSearchStructuredItem(exampleShortHeadersById, {
     searchText,
     chosenCategory,
-    chosenFilters
-  );
+    chosenFilters,
+    excludedTiers,
+    defaultFirstSearchItemIds: firstExampleIds,
+    shuffleResults: false,
+  });
 
-  const extensionStoreState = React.useMemo(
+  const exampleStoreState = React.useMemo(
     () => ({
-      searchResults,
+      exampleShortHeadersSearchResults,
       fetchExamplesAndFilters,
-      allExamples,
-      filters,
+      exampleShortHeaders,
+      exampleFilters,
       error,
       searchText,
       setSearchText,
       filtersState,
     }),
     [
-      searchResults,
-      allExamples,
+      exampleShortHeadersSearchResults,
+      exampleShortHeaders,
       error,
-      filters,
+      exampleFilters,
       searchText,
       filtersState,
       fetchExamplesAndFilters,
@@ -162,7 +167,8 @@ export const ExampleStoreStateProvider = ({
   );
 
   return (
-    <ExampleStoreContext.Provider value={extensionStoreState}>
+    // $FlowFixMe[incompatible-type]
+    <ExampleStoreContext.Provider value={exampleStoreState}>
       {children}
     </ExampleStoreContext.Provider>
   );

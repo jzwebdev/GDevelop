@@ -1,21 +1,73 @@
 // @flow
-import { serializeToJSObject, serializeToJSON } from '../../Utils/Serializer';
-import { type FileMetadata } from '../index';
-import optionalRequire from '../../Utils/OptionalRequire.js';
+import { t, Trans } from '@lingui/macro';
+import * as React from 'react';
+import {
+  serializeToJSObject,
+  serializeToJSON,
+  addFinalNewline,
+} from '../../Utils/Serializer';
+import { serializeToJSObjectInBackground } from '../../Utils/BackgroundSerializer';
+import {
+  type FileMetadata,
+  type SaveAsLocation,
+  type SaveAsOptions,
+  type SaveProjectOptions,
+} from '../index';
+import optionalRequire from '../../Utils/OptionalRequire';
+import {
+  getLastUsedDialogDirectory,
+  rememberLastUsedDialogDirectory,
+} from '../../Utils/FileSystem';
 import {
   split,
   splitPaths,
   getSlugifiedUniqueNameFromProperty,
 } from '../../Utils/ObjectSplitter';
-import localFileSystem from '../../Export/LocalExporters/LocalFileSystem';
-import assignIn from 'lodash/assignIn';
-
-const gd: libGDevelop = global.gd;
+import type { MessageDescriptor } from '../../Utils/i18n/MessageDescriptor.flow';
+import LocalFolderPicker from '../../UI/LocalFolderPicker';
+import SaveAsOptionsDialog from '../SaveAsOptionsDialog';
+import {
+  type ShowAlertFunction,
+  type ShowConfirmFunction,
+} from '../../UI/Alert/AlertContext';
 
 const fs = optionalRequire('fs-extra');
 const path = optionalRequire('path');
-const electron = optionalRequire('electron');
-const dialog = electron ? electron.remote.dialog : null;
+const remote = optionalRequire('@electron/remote');
+const dialog = remote ? remote.dialog : null;
+
+export const splittedProjectFolderNames = [
+  'layouts',
+  'externalLayouts',
+  'externalEvents',
+  'eventsFunctionsExtensions',
+];
+
+const deleteExistingFilesFromDirs = (
+  project: gdProject,
+  projectPath: string
+) => {
+  //If multiFile is not enabled in settings and directories do not exist.
+  if (!project.isFolderProject()) return;
+
+  const entries = fs.readdirSync(projectPath);
+  entries.forEach(entry => {
+    if (!splittedProjectFolderNames.includes(entry)) return;
+
+    const dirPath = path.join(projectPath, entry);
+    if (!fs.statSync(dirPath).isDirectory()) return;
+
+    const filenames = fs.readdirSync(dirPath);
+    filenames.forEach(file => {
+      const fileToRemovePath = path.join(dirPath, file);
+      try {
+        fs.unlinkSync(fileToRemovePath);
+      } catch (e) {
+        throw new Error(`Unable to remove file ${file}: ${e.message}`);
+      }
+    });
+  });
+};
 
 const checkFileContent = (filePath: string, expectedContent: string) => {
   const time = performance.now();
@@ -42,7 +94,7 @@ const checkFileContent = (filePath: string, expectedContent: string) => {
   });
 };
 
-export const writeAndCheckFile = async (
+const writeAndCheckFile = async (
   content: string,
   filePath: string
 ): Promise<void> => {
@@ -60,28 +112,47 @@ const writeAndCheckFormattedJSONFile = async (
   object: Object,
   filePath: string
 ): Promise<void> => {
-  const content = JSON.stringify(object, null, 2);
+  const content = addFinalNewline(JSON.stringify(object, null, 2));
   await writeAndCheckFile(content, filePath);
 };
 
-const writeProjectFiles = (
+const writeProjectFiles = async ({
+  project,
+  filePath,
+  projectPath,
+  useBackgroundSerializer,
+  canonicalEventSerialization,
+}: {
   project: gdProject,
   filePath: string,
-  projectPath: string
-): Promise<void> => {
-  const serializedProjectObject = serializeToJSObject(project);
+  projectPath: string,
+  useBackgroundSerializer: boolean,
+  canonicalEventSerialization: boolean,
+}): Promise<void> => {
+  const startTime = Date.now();
+
+  let serializedProjectObject;
+  if (useBackgroundSerializer) {
+    // Canonical mode is currently not propagated to the background
+    // serializer worker (which uses its own libGD instance). Background
+    // serialization is hardcoded off in MainFrame so this is not
+    // exercised in production yet.
+    serializedProjectObject = await serializeToJSObjectInBackground(project);
+  } else {
+    serializedProjectObject = serializeToJSObject(project, 'serializeTo', {
+      canonicalEventSerialization,
+    });
+  }
+  const serializeEndTime = Date.now();
+
   if (project.isFolderProject()) {
     const partialObjects = split(serializedProjectObject, {
       pathSeparator: '/',
       getArrayItemReferenceName: getSlugifiedUniqueNameFromProperty('name'),
       shouldSplit: splitPaths(
-        new Set([
-          '/layouts/*',
-          '/externalLayouts/*',
-          '/externalEvents/*',
-          '/layouts/*',
-          '/eventsFunctionsExtensions/*',
-        ])
+        new Set(
+          splittedProjectFolderNames.map(folderName => `/${folderName}/*`)
+        )
       ),
       isReferenceMagicPropertyName: '__REFERENCE_TO_SPLIT_OBJECT',
     });
@@ -106,82 +177,211 @@ const writeProjectFiles = (
       });
     });
   } else {
-    return writeAndCheckFormattedJSONFile(
-      serializedProjectObject,
-      filePath
-    ).catch(err => {
-      console.error('Unable to write the project:', err);
-      throw err;
-    });
+    await writeAndCheckFormattedJSONFile(serializedProjectObject, filePath);
   }
+
+  console.log(
+    `[LocalProjectWriter] Project file(s) written in ${Date.now() -
+      startTime}ms (including ${serializeEndTime - startTime}ms for ${
+      useBackgroundSerializer ? 'background' : 'main'
+    } thread serialization)`
+  );
 };
 
-export const onSaveProject = (
+export const onSaveProject = async (
   project: gdProject,
-  fileMetadata: FileMetadata
+  fileMetadata: FileMetadata,
+  saveOptions?: SaveProjectOptions,
+  actions: {|
+    showAlert: ShowAlertFunction,
+    showConfirmation: ShowConfirmFunction,
+  |}
 ): Promise<{|
   wasSaved: boolean,
   fileMetadata: FileMetadata,
 |}> => {
-  const filePath = fileMetadata.fileIdentifier;
-  if (!filePath) {
-    return Promise.reject(
-      'Project file is empty, "Save as" should have been called?'
-    );
+  const canBeSafelySaved = await canFileMetadataBeSafelySaved(
+    fileMetadata,
+    saveOptions,
+    actions
+  );
+  if (!canBeSafelySaved) {
+    return { wasSaved: false, fileMetadata: fileMetadata };
   }
 
+  const filePath = fileMetadata.fileIdentifier;
+  const now = Date.now();
+  if (!filePath) {
+    throw new Error('Unable to find file path before saving.');
+  }
+  // Ensure we always pick the latest name and gameId.
+  const newFileMetadata = {
+    ...fileMetadata,
+    name: project.getName(),
+    gameId: project.getProjectUuid(),
+    lastModifiedDate: now,
+  };
+
   const projectPath = path.dirname(filePath);
-  return writeProjectFiles(project, filePath, projectPath).then(() => {
-    return { wasSaved: true, fileMetadata }; // Save was properly done
+
+  try {
+    deleteExistingFilesFromDirs(project, projectPath);
+  } catch (e) {
+    console.warn('Unable to clean project folder before saving project: ', e);
+  }
+
+  await writeProjectFiles({
+    project,
+    filePath,
+    projectPath,
+    useBackgroundSerializer:
+      !!saveOptions && !!saveOptions.useBackgroundSerializer,
+    canonicalEventSerialization:
+      !!saveOptions && !!saveOptions.canonicalEventSerialization,
   });
+  return {
+    wasSaved: true,
+    // $FlowFixMe[incompatible-type]
+    fileMetadata: newFileMetadata,
+  };
 };
 
-export const onSaveProjectAs = (
-  project: gdProject,
-  fileMetadata: ?FileMetadata
-): Promise<{|
-  wasSaved: boolean,
+export const generateOnChooseSaveProjectAsLocation = ({
+  setDialog,
+  closeDialog,
+}: {
+  setDialog: (() => React.Node) => void,
+  closeDialog: () => void,
+}): (({
+  displayOptionToGenerateNewProjectUuid: boolean,
   fileMetadata: ?FileMetadata,
+  project: gdProject,
+}) => Promise<{
+  saveAsLocation: ?SaveAsLocation,
+  saveAsOptions: ?SaveAsOptions,
+}>) => async ({
+  project,
+  fileMetadata,
+  displayOptionToGenerateNewProjectUuid,
+}: {|
+  project: gdProject,
+  fileMetadata: ?FileMetadata, // This is the current location.
+  displayOptionToGenerateNewProjectUuid: boolean,
+|}): Promise<{|
+  saveAsLocation: ?SaveAsLocation, // This is the newly chosen location (or null if cancelled).
+  saveAsOptions: ?SaveAsOptions,
 |}> => {
-  const defaultPath = fileMetadata ? fileMetadata.fileIdentifier : '';
-  const fileSystem = assignIn(new gd.AbstractFileSystemJS(), localFileSystem);
-  const browserWindow = electron.remote.getCurrentWindow();
-  const options = {
-    defaultPath,
+  const options = await new Promise(resolve => {
+    setDialog(() => (
+      <SaveAsOptionsDialog
+        onCancel={() => {
+          closeDialog();
+          resolve(null);
+        }}
+        nameSuggestion={
+          fileMetadata ? `${project.getName()} - Copy` : project.getName()
+        }
+        mainActionLabel={<Trans>Continue</Trans>}
+        displayOptionToGenerateNewProjectUuid={
+          displayOptionToGenerateNewProjectUuid
+        }
+        onSave={options => {
+          closeDialog();
+          resolve(options);
+        }}
+      />
+    ));
+  });
+
+  if (!options) return { saveAsLocation: null, saveAsOptions: null }; // Save was cancelled.
+
+  let defaultPath = fileMetadata ? fileMetadata.fileIdentifier : '';
+  // $FlowFixMe[incompatible-use]
+  const { name } = options;
+  if (path && defaultPath && name) {
+    const safeFilename = name.replace(/[<>:"/\\|?*]/g, '_');
+    defaultPath = path.join(path.dirname(defaultPath), `${safeFilename}.json`);
+  }
+
+  const browserWindow = remote.getCurrentWindow();
+  const saveDialogOptions = {
+    defaultPath: defaultPath || getLastUsedDialogDirectory(),
     filters: [{ name: 'GDevelop 5 project', extensions: ['json'] }],
   };
 
   if (!dialog) {
-    return Promise.reject('Unsupported');
+    throw new Error('Unsupported');
   }
-  const filePath = dialog.showSaveDialogSync(browserWindow, options);
+  const filePath = dialog.showSaveDialogSync(browserWindow, saveDialogOptions);
   if (!filePath) {
-    return Promise.resolve({ wasSaved: false, fileMetadata });
+    return { saveAsLocation: null, saveAsOptions: null };
   }
+  rememberLastUsedDialogDirectory(filePath);
+
+  return {
+    saveAsLocation: {
+      // $FlowFixMe[incompatible-use]
+      name: options.name,
+      fileIdentifier: filePath,
+    },
+    saveAsOptions: {
+      // $FlowFixMe[incompatible-use]
+      generateNewProjectUuid: options.generateNewProjectUuid,
+    },
+  };
+};
+
+export const onSaveProjectAs = async (
+  project: gdProject,
+  saveAsLocation: ?SaveAsLocation,
+  options: {|
+    onStartSaving: () => void,
+    onMoveResources: ({|
+      newFileMetadata: FileMetadata,
+    |}) => Promise<void>,
+  |}
+): Promise<{|
+  wasSaved: boolean,
+  fileMetadata: ?FileMetadata,
+|}> => {
+  if (!saveAsLocation)
+    throw new Error('A location was not chosen before saving as.');
+  const filePath = saveAsLocation.fileIdentifier;
+  if (!filePath)
+    throw new Error('A file path was not chosen before saving as.');
+
+  options.onStartSaving();
+
+  // Ensure we always pick the latest name and gameId.
+  const newFileMetadata = {
+    fileIdentifier: filePath,
+    name: project.getName(),
+    gameId: project.getProjectUuid(),
+    lastModifiedDate: Date.now(),
+  };
+
+  // Move (copy or download, etc...) the resources first.
+  // $FlowFixMe[incompatible-type]
+  await options.onMoveResources({ newFileMetadata });
+
+  // Save the project when resources have been copied.
   const projectPath = path.dirname(filePath);
-
-  // TODO: Ideally, errors while copying resources should be reported.
-  gd.ProjectResourcesCopier.copyAllResourcesTo(
-    project,
-    fileSystem,
-    projectPath,
-    true, // Update the project with the new resource paths
-    false, // Don't move absolute files
-    true // Keep relative files folders structure.
-  );
-
-  // Update the project with the new file path (resources have already been updated)
   project.setProjectFile(filePath);
 
-  return writeProjectFiles(project, filePath, projectPath).then(() => {
-    return {
-      wasSaved: true,
-      fileMetadata: {
-        ...fileMetadata,
-        fileIdentifier: filePath,
-      },
-    }; // Save was properly done
+  await writeProjectFiles({
+    project,
+    filePath,
+    projectPath,
+    useBackgroundSerializer: false,
+    // SaveAs is a one-off operation: the user will typically save again
+    // through the normal onSaveProject path, which honors the preference.
+    canonicalEventSerialization: false,
   });
+  return {
+    wasSaved: true,
+    // $FlowFixMe[incompatible-type]
+    fileMetadata: newFileMetadata,
+  };
 };
 
 export const onAutoSaveProject = (
@@ -195,4 +395,132 @@ export const onAutoSaveProject = (
       throw err;
     }
   );
+};
+
+export const getWriteErrorMessage = (error: Error): MessageDescriptor =>
+  t`An error occurred when saving the project. Please try again by choosing another location.`;
+
+// See https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+const forbiddenCharacterRegex = /\\ | \/ | : | \* | \? | " | < | > | \|/g;
+const consecutiveSpacesRegex = /\s+/g;
+const cleanUpProjectFileName = (projectFileName: string) =>
+  (projectFileName.length > 200
+    ? projectFileName.substring(0, 200)
+    : projectFileName
+  )
+    .replace(forbiddenCharacterRegex, ' ')
+    .replace(consecutiveSpacesRegex, ' ')
+    .trim();
+
+export const getProjectLocation = ({
+  projectName,
+  saveAsLocation,
+  newProjectsDefaultFolder,
+}: {
+  projectName: string,
+  saveAsLocation: ?SaveAsLocation,
+  newProjectsDefaultFolder?: string,
+}): SaveAsLocation => {
+  const outputPath = saveAsLocation
+    ? path.dirname(saveAsLocation.fileIdentifier)
+    : newProjectsDefaultFolder
+    ? newProjectsDefaultFolder
+    : '';
+  const projectFileName = projectName
+    ? cleanUpProjectFileName(projectName) + '.json'
+    : 'game.json';
+  return {
+    fileIdentifier: path.join(outputPath, projectFileName),
+  };
+};
+
+export const renderNewProjectSaveAsLocationChooser = ({
+  projectName,
+  saveAsLocation,
+  setSaveAsLocation,
+  newProjectsDefaultFolder,
+}: {|
+  projectName: string,
+  saveAsLocation: ?SaveAsLocation,
+  setSaveAsLocation: (?SaveAsLocation) => void,
+  newProjectsDefaultFolder?: string,
+|}): React.Node => {
+  const projectLocation = getProjectLocation({
+    projectName,
+    saveAsLocation,
+    newProjectsDefaultFolder,
+  });
+  return (
+    <LocalFolderPicker
+      fullWidth
+      value={path.dirname(projectLocation.fileIdentifier)}
+      onChange={newOutputPath => {
+        const newOutputFileIdentifier = path.join(
+          newOutputPath,
+          path.basename(projectLocation.fileIdentifier)
+        );
+        setSaveAsLocation(
+          getProjectLocation({
+            projectName,
+            saveAsLocation: {
+              fileIdentifier: newOutputFileIdentifier,
+            },
+            newProjectsDefaultFolder,
+          })
+        );
+      }}
+      type="create-game"
+    />
+  );
+};
+
+const isTryingToSaveInForbiddenPath = (filePath: string): boolean => {
+  if (!remote) return false; // This should not happen, but let's be safe.
+  // If the user is saving locally and chose the same location as where the
+  // executable is running, prevent this, as it will be deleted when the app is updated.
+  const exePath = remote.app.getPath('exe');
+  if (!exePath) return false; // This should not happen, but let's be safe.
+  const gdevelopDirectory = path.dirname(exePath);
+  return filePath.startsWith(gdevelopDirectory);
+};
+
+export const canFileMetadataBeSafelySaved = async (
+  fileMetadata: FileMetadata,
+  saveOptions: ?SaveProjectOptions,
+  actions: {|
+    showAlert: ShowAlertFunction,
+    showConfirmation: ShowConfirmFunction,
+  |}
+): Promise<boolean> => {
+  const path = fileMetadata.fileIdentifier;
+  if (isTryingToSaveInForbiddenPath(path)) {
+    await actions.showAlert({
+      title: t`Choose another location`,
+      message: t`Your project is saved in the same folder as the application. This folder will be deleted when the application is updated. Please choose another location if you don't want to lose your project.`,
+    });
+  }
+
+  // We don't block the save, in case the user wants to save anyway.
+  return true;
+};
+
+export const canFileMetadataBeSafelySavedAs = async (
+  fileMetadata: FileMetadata,
+  actions: {|
+    showAlert: ShowAlertFunction,
+    showConfirmation: ShowConfirmFunction,
+  |}
+): Promise<boolean> => {
+  const path = fileMetadata.fileIdentifier;
+  if (isTryingToSaveInForbiddenPath(path)) {
+    await actions.showAlert({
+      title: t`Choose another location`,
+      message: t`Your project is saved in the same folder as the application. This folder will be deleted when the application is updated. Please choose another location if you don't want to lose your project.`,
+    });
+
+    // We block the save as we don't want new projects to be saved there.
+    return false;
+  }
+
+  return true;
 };

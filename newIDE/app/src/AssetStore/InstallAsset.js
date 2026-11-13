@@ -1,51 +1,28 @@
 // @flow
 import {
   type Asset,
-  type AssetShortHeader,
-  getAsset,
+  isPixelArt,
+  isPublicAssetResourceUrl,
+  extractDecodedFilenameWithExtensionFromPublicAssetResourceUrl,
 } from '../Utils/GDevelopServices/Asset';
-import newNameGenerator from '../Utils/NewNameGenerator';
-import { unserializeFromJSObject } from '../Utils/Serializer';
-import flatten from 'lodash/flatten';
-import uniqBy from 'lodash/uniqBy';
-import uniq from 'lodash/uniq';
 import {
-  getExtensionsRegistry,
-  getExtension,
-  type SerializedExtension,
+  type ExtensionShortHeader,
+  type ExtensionDependency,
 } from '../Utils/GDevelopServices/Extension';
-import { type EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
-import { mapVector } from '../Utils/MapFor';
+import newNameGenerator from '../Utils/NewNameGenerator';
+import { markEffectIfLegacySkybox } from '../Utils/LegacySkyboxOrientation';
+import { unserializeFromJSObject } from '../Utils/Serializer';
 import { toNewGdMapStringString } from '../Utils/MapStringString';
+import { getInsertionParentAndPositionFromSelection } from '../Utils/ObjectFolders';
+import { allResourceKindsAndMetadata } from '../ResourcesList/ResourceSource';
+import {
+  getRequiredExtensions,
+  checkRequiredExtensionsUpdate,
+  type RequiredExtensionInstallation,
+} from './ExtensionStore/InstallExtension.js';
+import { mapVector } from '../Utils/MapFor';
+
 const gd: libGDevelop = global.gd;
-
-const toPascalCase = (str: string) => {
-  if (!str) return '';
-  return str
-    .replace(/^[^A-Za-z0-9]*|[^A-Za-z0-9]*$/g, '$')
-    .replace(/[^A-Za-z0-9]+/g, '$')
-    .replace(/([a-z])([A-Z])/g, function(m, a, b) {
-      return a + '$' + b;
-    })
-    .toLowerCase()
-    .replace(/(\$)(\w?)/g, function(m, a, b) {
-      return b.toUpperCase();
-    });
-};
-
-export const sanitizeObjectName = (objectName: string) => {
-  const trimmedObjectName = objectName.trim();
-  if (!trimmedObjectName) return 'UnnamedObject';
-
-  const pascalCaseName = toPascalCase(trimmedObjectName);
-
-  let prefixedObjectName = pascalCaseName;
-  if (prefixedObjectName[0] >= '0' && prefixedObjectName[0] <= '9') {
-    prefixedObjectName = '_' + prefixedObjectName;
-  }
-
-  return prefixedObjectName;
-};
 
 /**
  * Adds the specified resource to the resources manager, avoiding to duplicate
@@ -53,6 +30,7 @@ export const sanitizeObjectName = (objectName: string) => {
  */
 export const installResource = (
   project: gdProject,
+  asset: Asset,
   serializedResource: any,
   resourceNewNames: { [string]: string }
 ) => {
@@ -64,27 +42,36 @@ export const installResource = (
     return;
   }
 
-  const resourcesManager: gdResourcesManager = project.getResourcesManager();
+  const resourcesManager: gdResourcesContainer = project.getResourcesManager();
 
   // Check if the resource that must be installed is already present. Use the "origin"
   // of the resource (if present), otherwise for compatibility we use the URL.
   const resourceFileUrl: string = serializedResource.file;
-  const resourceOriginName: string = serializedResource.origin
+  const resourceOriginRawName: string = serializedResource.origin
     ? serializedResource.origin.name
     : '';
+  // We clean up the name of the resource, to avoid having a resource with a name
+  // too long (for instance, a resource with a SHA for public assets).
+  const resourceOriginCleanedName: string = isPublicAssetResourceUrl(
+    resourceFileUrl
+  )
+    ? extractDecodedFilenameWithExtensionFromPublicAssetResourceUrl(
+        resourceFileUrl
+      )
+    : resourceOriginRawName;
   const resourceOriginIdentifier: string = serializedResource.origin
     ? serializedResource.origin.identifier
     : '';
   const existingResourceNameFromSameOrigin =
-    resourceOriginName && resourceOriginIdentifier
+    resourceOriginCleanedName && resourceOriginIdentifier
       ? resourcesManager.getResourceNameWithOrigin(
-          resourceOriginName,
+          resourceOriginCleanedName,
           resourceOriginIdentifier
         )
       : '';
-  const existingResourceNameWithSameFile = resourcesManager.getResourceNameWithFile(
-    resourceFileUrl
-  );
+  const existingResourceNameWithSameFile =
+    resourcesManager.getResourceNamesWithFile(resourceFileUrl).toJSArray()[0] ||
+    null;
 
   if (existingResourceNameFromSameOrigin) {
     // There is a resource with the same origin, use it.
@@ -96,65 +83,251 @@ export const installResource = (
     return;
   }
 
-  // The resource does not exist yet, add it. Note that the "origin" will be preserved.
-  let newResource = null;
-  if (serializedResource.kind === 'image') {
-    newResource = new gd.ImageResource();
-  } else {
+  const resourceKindMetadata = allResourceKindsAndMetadata.find(
+    resourceKind => resourceKind.kind === serializedResource.kind
+  );
+  if (!resourceKindMetadata) {
     throw new Error(
       `Resource of kind "${serializedResource.kind}" is not supported.`
     );
   }
 
+  // The resource does not exist yet, add it. Note that the "origin" will be preserved.
+  const newResource = resourceKindMetadata.createNewResource();
   unserializeFromJSObject(newResource, serializedResource);
+
+  if (newResource.getKind() === 'image') {
+    // $FlowFixMe[prop-missing] - We know the resource is an ImageResource and has the setSmooth method.
+    newResource.setSmooth(
+      project.getScaleMode() !== 'nearest' && !isPixelArt(asset)
+    );
+  }
 
   const newName = newNameGenerator(originalResourceName, name =>
     resourcesManager.hasResource(name)
   );
   newResource.setName(newName);
-  newResource.setSmooth(project.getScaleMode() !== 'nearest');
-  newResource.setOrigin(resourceOriginName, resourceOriginIdentifier);
+  newResource.setOrigin(resourceOriginCleanedName, resourceOriginIdentifier);
   resourcesManager.addResource(newResource);
   newResource.delete();
 
   resourceNewNames[originalResourceName] = newName;
 };
 
-export const addAssetToProject = async ({
+export type AddAssetOutput = {|
+  createdObjects: Array<gdObject>,
+|};
+
+/**
+ * Install an asset that is an effect on the given effects container:
+ * its images become resources, and the effect named `effectName` (created if
+ * it does not exist) shows them.
+ */
+export const installEffectAsset = ({
   asset,
   project,
-  events,
-  objectsContainer,
+  effectsContainer,
+  effectName,
 }: {|
   asset: Asset,
   project: gdProject,
-  events: gdEventsList,
+  effectsContainer: gdEffectsContainer,
+  effectName: string,
+|}): gdEffect => {
+  const effectAsset = asset.effectAssets ? asset.effectAssets[0] : null;
+  if (!effectAsset) throw new Error('The asset is not an effect.');
+
+  const resourceNewNames: { [string]: string } = {};
+  effectAsset.resources.forEach(serializedResource => {
+    installResource(project, asset, serializedResource, resourceNewNames);
+  });
+
+  const effect = effectsContainer.hasEffectNamed(effectName)
+    ? effectsContainer.getEffect(effectName)
+    : effectsContainer.insertNewEffect(
+        effectName,
+        effectsContainer.getEffectsCount()
+      );
+  effect.setEffectType(effectAsset.effect.effectType);
+  effect.clearParameters();
+  const {
+    doubleParameters,
+    stringParameters,
+    booleanParameters,
+  } = effectAsset.effect;
+  Object.keys(doubleParameters).forEach(name => {
+    effect.setDoubleParameter(name, doubleParameters[name]);
+  });
+  Object.keys(booleanParameters).forEach(name => {
+    effect.setBooleanParameter(name, booleanParameters[name]);
+  });
+  Object.keys(stringParameters).forEach(name => {
+    const value = stringParameters[name];
+    effect.setStringParameter(name, resourceNewNames[value] || value);
+  });
+  markEffectIfLegacySkybox(effect);
+  return effect;
+};
+
+export type InstallAssetOutput = {|
+  createdObjects: Array<gdObject>,
+  isTheFirstOfItsTypeInProject: boolean,
+|};
+
+export type InstallAssetArgs = {|
+  asset: Asset,
+  project: gdProject,
   objectsContainer: gdObjectsContainer,
-|}) => {
+  targetObjectFolderOrObject?: ?gdObjectFolderOrObject,
+  requestedObjectName?: string,
+|};
+
+const findVariant = (
+  container: gdEventsBasedObjectVariantsContainer,
+  assetStoreAssetId: string,
+  assetStoreOriginalName: string
+): gdEventsBasedObjectVariant | null => {
+  for (let index = 0; index < container.getVariantsCount(); index++) {
+    const variant = container.getVariantAt(index);
+    if (
+      variant.getAssetStoreAssetId() === assetStoreAssetId &&
+      variant.getAssetStoreOriginalName() === assetStoreOriginalName
+    ) {
+      return variant;
+    }
+  }
+  return null;
+};
+
+export const addAssetToProject = async ({
+  asset,
+  project,
+  objectsContainer,
+  targetObjectFolderOrObject,
+  requestedObjectName,
+}: InstallAssetArgs): Promise<AddAssetOutput> => {
   const objectNewNames = {};
   const resourceNewNames = {};
   const createdObjects: Array<gdObject> = [];
-
-  asset.objectAssets.forEach(objectAsset => {
-    objectAsset.resources.forEach(serializedResource => {});
-  });
 
   // Create objects (and their behaviors)
   asset.objectAssets.forEach(objectAsset => {
     const type: ?string = objectAsset.object.type;
     if (!type) throw new Error('An object has no type specified');
 
-    // Insert the object
-    const originalName = sanitizeObjectName(objectAsset.object.name);
+    const variantRenamings: Array<{
+      objectType: string,
+      oldVariantName: string,
+      newVariantName: string,
+    }> = [];
+    const serializedVariants = objectAsset.variants;
+    if (serializedVariants) {
+      // Install variants
+      for (const {
+        objectType,
+        variant: serializedVariant,
+      } of serializedVariants) {
+        if (project.hasEventsBasedObject(objectType)) {
+          const eventsBasedObject = project.getEventsBasedObject(objectType);
+          const variants = eventsBasedObject.getVariants();
+          let variant = findVariant(variants, asset.id, serializedVariant.name);
+          if (!variant) {
+            // TODO Forbid name with `::`
+            const uniqueNewName = newNameGenerator(
+              serializedVariant.name || asset.name,
+              tentativeNewName => variants.hasVariantNamed(tentativeNewName)
+            );
+            variant = variants.insertNewVariant(
+              uniqueNewName,
+              variants.getVariantsCount()
+            );
+            const variantName = variant.getName();
+            unserializeFromJSObject(
+              variant,
+              serializedVariant,
+              'unserializeFrom',
+              project
+            );
+            variant.setName(variantName);
+            variant.setAssetStoreAssetId(asset.id);
+            variant.setAssetStoreOriginalName(serializedVariant.name);
+          }
+          if (variant.getName() !== serializedVariant.name) {
+            variantRenamings.push({
+              objectType,
+              oldVariantName: serializedVariant.name,
+              newVariantName: variant.getName(),
+            });
+          }
+        }
+      }
+      // Update variant names into variants object configurations.
+      for (const {
+        objectType,
+        variant: serializedVariant,
+      } of serializedVariants) {
+        if (project.hasEventsBasedObject(objectType)) {
+          const eventsBasedObject = project.getEventsBasedObject(objectType);
+          const variants = eventsBasedObject.getVariants();
+          let variant = findVariant(variants, asset.id, serializedVariant.name);
+          if (variant) {
+            for (
+              let index = 0;
+              index < variant.getObjects().getObjectsCount();
+              index++
+            ) {
+              const object = variant.getObjects().getObjectAt(index);
+
+              if (project.hasEventsBasedObject(object.getType())) {
+                const customObjectConfiguration = gd.asCustomObjectConfiguration(
+                  object.getConfiguration()
+                );
+                const customObjectVariantRenaming = variantRenamings.find(
+                  renaming => renaming.objectType === object.getType()
+                );
+                if (customObjectVariantRenaming) {
+                  customObjectConfiguration.setVariantName(
+                    customObjectVariantRenaming.newVariantName
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Insert the object.
+    const originalName = gd.Project.getSafeName(
+      requestedObjectName || objectAsset.object.name
+    );
     const newName = newNameGenerator(originalName, name =>
       objectsContainer.hasObjectNamed(name)
     );
-    const object = objectsContainer.insertNewObject(
-      project,
-      type,
-      newName,
-      objectsContainer.getObjectsCount()
-    );
+
+    // Editor hot-reload is already triggered by onFetchNewlyAddedResources at the
+    // end of asset installation. There is no need to trigger it here too.
+    let object: gdObject;
+    if (targetObjectFolderOrObject) {
+      const { folder, position } = getInsertionParentAndPositionFromSelection(
+        targetObjectFolderOrObject
+      );
+      object = objectsContainer.insertNewObjectInFolder(
+        project,
+        type,
+        newName,
+        folder,
+        position
+      );
+    } else {
+      object = objectsContainer.insertNewObject(
+        project,
+        type,
+        newName,
+        objectsContainer.getObjectsCount()
+      );
+    }
+    // $FlowFixMe[prop-missing]
     objectNewNames[originalName] = newName;
 
     unserializeFromJSObject(
@@ -163,13 +336,32 @@ export const addAssetToProject = async ({
       'unserializeFrom',
       project
     );
-
     // The name was overwritten after unserialization.
     object.setName(newName);
+    object.resetPersistentUuid();
+    object.setAssetStoreId(asset.id);
+    if (project.hasEventsBasedObject(object.getType())) {
+      const customObjectConfiguration = gd.asCustomObjectConfiguration(
+        object.getConfiguration()
+      );
+      if (customObjectConfiguration.getVariantName()) {
+        customObjectConfiguration.setMarkedAsOverridingEventsBasedObjectChildrenConfiguration(
+          false
+        );
+      }
+      const customObjectVariantRenaming = variantRenamings.find(
+        renaming => renaming.objectType === object.getType()
+      );
+      if (customObjectVariantRenaming) {
+        customObjectConfiguration.setVariantName(
+          customObjectVariantRenaming.newVariantName
+        );
+      }
+    }
 
     // Add resources used by the object
     objectAsset.resources.forEach(serializedResource => {
-      installResource(project, serializedResource, resourceNewNames);
+      installResource(project, asset, serializedResource, resourceNewNames);
     });
 
     // TODO: Check how multiple objects are handled
@@ -177,99 +369,15 @@ export const addAssetToProject = async ({
     // Resources may have been renamed to be added to the project.
     // In this case, rename them in the object.
     const renamedResourcesMap = toNewGdMapStringString(resourceNewNames);
-    const resourcesRenamer = new gd.ResourcesRenamer(renamedResourcesMap);
+    const resourcesRenamer = new gd.ResourcesRenamer(
+      project.getResourcesManager(),
+      renamedResourcesMap
+    );
     renamedResourcesMap.delete();
-    object.exposeResources(resourcesRenamer);
+    object.getConfiguration().exposeResources(resourcesRenamer);
     resourcesRenamer.delete();
 
-    objectAsset.customization.forEach(customization => {
-      if (customization.behaviorName) {
-        const { behaviorName, behaviorType } = customization;
-
-        const behaviorMetadata = gd.MetadataProvider.getBehaviorMetadata(
-          gd.JsPlatform.get(),
-          behaviorType
-        );
-        if (gd.MetadataProvider.isBadBehaviorMetadata(behaviorMetadata)) {
-          throw new Error(
-            'Behavior with type ' + behaviorType + ' could not be found.'
-          );
-        }
-
-        const behavior = behaviorMetadata.get();
-        // TODO: When this feature is exposed to users, we might want to use
-        // gd.WholeProjectRefactorer.addBehaviorAndRequiredBehaviors instead.
-        const behaviorContent = object.addNewBehavior(
-          project,
-          behaviorType,
-          behaviorName
-        );
-        customization.properties.forEach(property => {
-          behavior.updateProperty(
-            behaviorContent.getContent(),
-            property.name,
-            property.defaultValue
-          );
-        });
-      }
-    });
-
     createdObjects.push(object);
-  });
-
-  // Add the events after adding all objects, as we need to potentially
-  // rename the objects in the inserted events.
-  asset.objectAssets.forEach(objectAsset => {
-    const originalName = objectAsset.object.name;
-    const newName = objectNewNames[originalName];
-
-    objectAsset.customization.forEach(customization => {
-      if (customization.events) {
-        const groupEvent = new gd.GroupEvent();
-        groupEvent.setName(newName);
-
-        unserializeFromJSObject(
-          groupEvent.getSubEvents(),
-          customization.events,
-          'unserializeFrom',
-          project
-        );
-
-        // Find/replace the customization parameters in the events.
-        customization.parameters.forEach(parameter => {
-          gd.EventsRefactorer.replaceStringInEvents(
-            project,
-            objectsContainer,
-            groupEvent.getSubEvents(),
-            parameter.name,
-            parameter.defaultValue,
-            true,
-            true,
-            true
-          );
-        });
-
-        // Rename any object that was renamed when inserted.
-        // Do this **after** replacing the customization parameters,
-        // as some expressions can be invalid before customization
-        // parameters replacements.
-        for (const originalName in objectNewNames) {
-          const newName = objectNewNames[originalName];
-          if (originalName !== newName) {
-            gd.EventsRefactorer.renameObjectInEvents(
-              project.getCurrentPlatform(),
-              project,
-              objectsContainer,
-              groupEvent.getSubEvents(),
-              originalName,
-              newName
-            );
-          }
-        }
-
-        events.insertEvent(groupEvent, events.getEventsCount());
-      }
-    });
   });
 
   return {
@@ -277,223 +385,89 @@ export const addAssetToProject = async ({
   };
 };
 
-type RequiredBehavior = {|
-  extensionName: string,
-  extensionVersion: string,
-  behaviorType: string,
-|};
+export const installPublicAsset = addAssetToProject;
 
-export const getRequiredBehaviorsFromAsset = (
+export const getRequiredExtensionsFromAsset = (
   asset: Asset
-): Array<RequiredBehavior> => {
-  return uniqBy(
-    flatten(
-      asset.objectAssets.map(objectAsset => {
-        return objectAsset.customization
-          .map(customization => {
-            if (customization.behaviorName) {
-              const {
-                behaviorType,
-                extensionName,
-                extensionVersion,
-              } = customization;
-              return { behaviorType, extensionName, extensionVersion };
-            }
-
-            return null;
-          })
-          .filter(Boolean);
-      })
-    ),
-    ({ behaviorType }) => behaviorType // TODO: Verify if we could use the extension name instead?
-  );
+): Array<ExtensionDependency> => {
+  return getRequiredExtensions(asset.objectAssets);
 };
 
-type RequiredExtension = {|
-  extensionName: string,
-  extensionVersion: string,
-|};
-
-export const filterMissingExtensions = (
-  gd: libGDevelop,
-  requiredExtensions: Array<RequiredExtension>
-): Array<RequiredExtension> => {
-  const loadedExtensionNames = mapVector(
-    gd.asPlatform(gd.JsPlatform.get()).getAllPlatformExtensions(),
-    extension => {
-      return extension.getName();
-    }
-  );
-
-  return requiredExtensions.filter(({ extensionName }) => {
-    return !loadedExtensionNames.includes(extensionName);
-  });
-};
-
-export const getRequiredExtensionsForEventsFromAsset = (
-  asset: Asset
-): Array<RequiredExtension> => {
-  return uniqBy(
-    flatten(
-      asset.objectAssets.map(objectAsset => {
-        return flatten(
-          objectAsset.customization
-            .map(customization => {
-              if (customization.events) {
-                return customization.extensions;
-              }
-
-              return null;
-            })
-            .filter(Boolean)
-        );
-      })
-    ),
-    ({ extensionName }) => extensionName
-  );
-};
-
-export const filterMissingBehaviors = (
-  gd: libGDevelop,
-  requiredBehaviors: Array<RequiredBehavior>
-): Array<RequiredBehavior> => {
-  return requiredBehaviors.filter(({ behaviorType }) => {
-    const behaviorMetadata = gd.MetadataProvider.getBehaviorMetadata(
-      gd.JsPlatform.get(),
-      behaviorType
-    );
-    return gd.MetadataProvider.isBadBehaviorMetadata(behaviorMetadata);
-  });
-};
-
-export const downloadExtensions = async (
-  extensionNames: Array<string>
-): Promise<Array<SerializedExtension>> => {
-  if (!extensionNames.length) return Promise.resolve([]);
-
-  const extensionsRegistry = await getExtensionsRegistry();
-
-  const serializedExtensions = await Promise.all(
-    uniq(extensionNames).map(extensionName => {
-      const extensionShortHeader = extensionsRegistry.extensionShortHeaders.find(
-        extensionShortHeader => {
-          return extensionShortHeader.name === extensionName;
-        }
-      );
-      if (!extensionShortHeader) {
-        throw new Error(
-          'Unable to find extension ' + extensionName + ' in the registry.'
-        );
+export const getRequiredExtensionsFromAssets = (
+  assets: Array<Asset>
+): Array<ExtensionDependency> => {
+  const requiredExtensions: Array<ExtensionDependency> = [];
+  for (const asset of assets) {
+    for (const requiredExtensionForAsset of getRequiredExtensionsFromAsset(
+      asset
+    )) {
+      if (
+        !requiredExtensions.some(
+          requiredExtension =>
+            requiredExtension.extensionName ===
+            requiredExtensionForAsset.extensionName
+        )
+      ) {
+        requiredExtensions.push(requiredExtensionForAsset);
       }
-
-      return getExtension(extensionShortHeader);
-    })
-  );
-
-  return serializedExtensions;
-};
-
-/**
- * Add a serialized (JS object) events function extension to the project,
- * triggering reload of extensions.
- */
-export const addSerializedExtensionsToProject = (
-  eventsFunctionsExtensionsState: EventsFunctionsExtensionsState,
-  project: gdProject,
-  serializedExtensions: Array<SerializedExtension>,
-  fromExtensionStore: boolean = true
-): Promise<void> => {
-  serializedExtensions.forEach(serializedExtension => {
-    const { name } = serializedExtension;
-    if (!name)
-      return Promise.reject(new Error('Malformed extension (missing name).'));
-
-    const newEventsFunctionsExtension = project.hasEventsFunctionsExtensionNamed(
-      name
-    )
-      ? project.getEventsFunctionsExtension(name)
-      : project.insertNewEventsFunctionsExtension(name, 0);
-
-    unserializeFromJSObject(
-      newEventsFunctionsExtension,
-      serializedExtension,
-      'unserializeFrom',
-      project
-    );
-
-    if (fromExtensionStore) {
-      newEventsFunctionsExtension.setOrigin('gdevelop-extension-store', name);
     }
-  });
-
-  return eventsFunctionsExtensionsState.loadProjectEventsFunctionsExtensions(
-    project
-  );
+  }
+  return requiredExtensions;
 };
 
-type InstallAssetArgs = {|
-  assetShortHeader: AssetShortHeader,
-  eventsFunctionsExtensionsState: EventsFunctionsExtensionsState,
+type CheckRequiredExtensionsForAssetsArgs = {|
+  assets: Array<Asset>,
   project: gdProject,
-  events: gdEventsList,
-  objectsContainer: gdObjectsContainer,
+  extensionShortHeadersByName: {
+    [name: string]: ExtensionShortHeader,
+  },
 |};
 
-type InstallAssetOutput = {|
-  createdObjects: Array<gdObject>,
-|};
-
-export const installAsset = async ({
-  assetShortHeader,
-  eventsFunctionsExtensionsState,
+export const checkRequiredExtensionsUpdateForAssets = async ({
+  assets,
   project,
-  events,
-  objectsContainer,
-}: InstallAssetArgs): Promise<InstallAssetOutput> => {
-  const asset = await getAsset(assetShortHeader);
-  const requiredBehaviors = getRequiredBehaviorsFromAsset(asset);
-  const requiredExtensions = getRequiredExtensionsForEventsFromAsset(asset);
-  const missingBehaviors = filterMissingBehaviors(gd, requiredBehaviors);
-  const missingExtensions = filterMissingExtensions(gd, requiredExtensions);
-  const serializedExtensions = await downloadExtensions([
-    ...missingBehaviors.map(({ extensionName }) => extensionName),
-    ...missingExtensions.map(({ extensionName }) => extensionName),
-  ]);
-  await addSerializedExtensionsToProject(
-    eventsFunctionsExtensionsState,
+  extensionShortHeadersByName,
+}: CheckRequiredExtensionsForAssetsArgs): Promise<RequiredExtensionInstallation> => {
+  const requiredExtensions = getRequiredExtensionsFromAssets(assets);
+
+  const requiredExtensionsUpdate = await checkRequiredExtensionsUpdate({
+    requiredExtensions,
     project,
-    serializedExtensions
-  );
-
-  const stillMissingBehaviors = filterMissingBehaviors(gd, requiredBehaviors);
-  if (stillMissingBehaviors.length) {
-    throw new Error(
-      'These behaviors could not be installed: ' +
-        missingBehaviors
-          .map(
-            ({ extensionName, behaviorType }) =>
-              `${behaviorType} (${extensionName})`
-          )
-          .join(', ')
-    );
-  }
-
-  const stillMissingExtensions = filterMissingExtensions(
-    gd,
-    requiredExtensions
-  );
-  if (stillMissingExtensions.length) {
-    throw new Error(
-      'These extensions could not be installed: ' +
-        missingExtensions.map(({ extensionName }) => extensionName).join(', ')
-    );
-  }
-
-  const output = await addAssetToProject({
-    project,
-    asset,
-    events,
-    objectsContainer,
+    extensionShortHeadersByName,
   });
-  return output;
+  // Even if the asset may work with already installed extensions,
+  // we don't risk it since the asset may use the new features of the extension.
+  requiredExtensionsUpdate.isGDevelopUpdateNeeded =
+    requiredExtensionsUpdate.isGDevelopUpdateNeeded ||
+    requiredExtensionsUpdate.incompatibleWithIdeExtensionShortHeaders.length >
+      0;
+  return requiredExtensionsUpdate;
+};
+
+export const complyVariantsToEventsBasedObjectOf = (
+  project: gdProject,
+  createdObjectTypes: Array<string>
+) => {
+  const installedVariantObjectTypes = new Set<string>();
+  for (const createdObjectType of createdObjectTypes) {
+    if (
+      project.hasEventsBasedObject(createdObjectType) &&
+      !installedVariantObjectTypes.has(createdObjectType)
+    ) {
+      installedVariantObjectTypes.add(createdObjectType);
+      mapVector(
+        gd.EventsBasedObjectVariantHelper.findAllChildrenCustomObjectType(
+          project,
+          project.getEventsBasedObject(createdObjectType)
+        ),
+        objectType => installedVariantObjectTypes.add(objectType)
+      );
+    }
+  }
+  for (const installedVariantObjectType of installedVariantObjectTypes) {
+    gd.EventsBasedObjectVariantHelper.complyVariantsToEventsBasedObject(
+      project,
+      project.getEventsBasedObject(installedVariantObjectType)
+    );
+  }
 };

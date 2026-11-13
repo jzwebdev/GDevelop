@@ -1,14 +1,16 @@
 // @flow
-import { Trans } from '@lingui/macro';
+import { Trans, t } from '@lingui/macro';
 import { I18n } from '@lingui/react';
 import * as React from 'react';
 import Dialog from '../UI/Dialog';
 import FlatButton from '../UI/FlatButton';
 import { type StorageProvider } from '.';
-import { List, ListItem } from '../UI/List';
+import { List } from '../UI/List';
+import StorageProviderListItem from './StorageProviderListItem';
+import AlertMessage from '../UI/AlertMessage';
+import Computer from '../UI/CustomSvgIcons/Computer';
+import { isNativeMobileApp } from '../Utils/Platform';
 import optionalRequire from '../Utils/OptionalRequire';
-import BackgroundText from '../UI/BackgroundText';
-import { Column, Line } from '../UI/Grid';
 const electron = optionalRequire('electron');
 
 type Props = {|
@@ -17,17 +19,27 @@ type Props = {|
   onClose: () => void,
 |};
 
+const fakeLocalFileStorageProvider: StorageProvider = {
+  internalName: 'LocalFile',
+  name: t`Open from computer with GDevelop desktop app`,
+  disabled: true,
+  renderIcon: props => <Computer fontSize={props.size} />,
+  createOperations: () => ({}),
+};
+
 const OpenFromStorageProviderDialog = ({
   onClose,
   storageProviders,
   onChooseProvider,
-}: Props) => {
+}: Props): React.Node => {
+  const isCloudStorageProviderEnabled = storageProviders.some(
+    provider => provider.internalName === 'Cloud'
+  );
   return (
     <I18n>
       {({ i18n }) => (
         <Dialog
           title={<Trans>Choose where to load the project from</Trans>}
-          onRequestClose={onClose}
           actions={[
             <FlatButton
               label={<Trans>Cancel</Trans>}
@@ -36,40 +48,36 @@ const OpenFromStorageProviderDialog = ({
               onClick={onClose}
             />,
           ]}
-          cannotBeDismissed={false}
+          onRequestClose={onClose}
           open
-          noMargin
           maxWidth="sm"
         >
-          <List>
+          {isCloudStorageProviderEnabled && (
+            <AlertMessage kind="info">
+              <Trans>
+                You can find your cloud projects in the Create section of the
+                homepage.
+              </Trans>
+            </AlertMessage>
+          )}
+          <List useGap>
             {storageProviders
               .filter(storageProvider => !storageProvider.hiddenInOpenDialog)
               .map(storageProvider => (
-                <ListItem
-                  key={storageProvider.internalName}
-                  disabled={!!storageProvider.disabled}
-                  primaryText={i18n._(storageProvider.name)}
-                  leftIcon={
-                    storageProvider.renderIcon
-                      ? storageProvider.renderIcon()
-                      : undefined
-                  }
-                  onClick={() => onChooseProvider(storageProvider)}
-                />
+                <React.Fragment key={storageProvider.internalName}>
+                  <StorageProviderListItem
+                    onChooseProvider={onChooseProvider}
+                    storageProvider={storageProvider}
+                  />
+                </React.Fragment>
               ))}
+            {!electron && !isNativeMobileApp() && (
+              <StorageProviderListItem
+                onChooseProvider={onChooseProvider}
+                storageProvider={fakeLocalFileStorageProvider}
+              />
+            )}
           </List>
-          {!electron && (
-            <Line>
-              <Column>
-                <BackgroundText>
-                  <Trans>
-                    If you have a popup blocker interrupting the opening, allow
-                    the popups and try a second time to open the project.
-                  </Trans>
-                </BackgroundText>
-              </Column>
-            </Line>
-          )}
         </Dialog>
       )}
     </I18n>

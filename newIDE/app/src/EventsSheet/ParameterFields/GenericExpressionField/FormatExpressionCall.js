@@ -1,7 +1,7 @@
 //@flow
-import { type EnumeratedInstructionOrExpressionMetadata } from '../../../InstructionOrExpression/EnumeratedInstructionOrExpressionMetadata.js';
+import { type EnumeratedInstructionOrExpressionMetadata } from '../../../InstructionOrExpression/EnumeratedInstructionOrExpressionMetadata';
 import { type ParameterValues } from './ExpressionParametersEditorDialog';
-import { mapVector } from '../../../Utils/MapFor';
+import { mapFor } from '../../../Utils/MapFor';
 
 const filterOutCodeOnlyParameters = (
   array: Array<string>,
@@ -57,9 +57,11 @@ const filterVisibleParameters = (
 export const getVisibleParameterTypes = (
   expressionMetadata: EnumeratedInstructionOrExpressionMetadata
 ): Array<string> => {
-  const parameterTypes: Array<string> = mapVector(
-    expressionMetadata.metadata.getParameters(),
-    parameterMetadata => parameterMetadata.getType()
+  const parameters = expressionMetadata.metadata.getParameters();
+  const parameterTypes: Array<string> = mapFor(
+    0,
+    parameters.getParametersCount(),
+    i => parameters.getParameterAt(i).getType()
   );
 
   if (expressionMetadata.scope.objectMetadata) {
@@ -85,9 +87,11 @@ export const getVisibleParameterTypes = (
 
 export const formatExpressionCall = (
   expressionInfo: EnumeratedInstructionOrExpressionMetadata,
-  parameterValues: ParameterValues
+  parameterValues: ParameterValues,
+  options: {| shouldConvertToString: boolean |}
 ): string => {
   const functionName = expressionInfo.name || '';
+  let functionCall = '';
 
   if (expressionInfo.scope.objectMetadata) {
     const objectName = parameterValues[0];
@@ -97,7 +101,7 @@ export const formatExpressionCall = (
       expressionInfo.metadata,
       1
     ).join(', ');
-    return `${objectName}.${functionName}(${functionArgs})`;
+    functionCall = `${objectName}.${functionName}(${functionArgs})`;
   } else if (expressionInfo.scope.behaviorMetadata) {
     const objectName = parameterValues[0];
     const behaviorName = parameterValues[1];
@@ -107,13 +111,16 @@ export const formatExpressionCall = (
       expressionInfo.metadata,
       2
     ).join(', ');
-    return `${objectName}.${behaviorName}::${functionName}(${functionArgs})`;
+    functionCall = `${objectName}.${behaviorName}::${functionName}(${functionArgs})`;
   } else {
     const functionArgs = filterVisibleParameters(
       parameterValues,
       expressionInfo.metadata,
       0
     ).join(', ');
-    return `${functionName}(${functionArgs})`;
+    functionCall = `${functionName}(${functionArgs})`;
   }
+  return options.shouldConvertToString
+    ? `ToString(${functionCall})`
+    : functionCall;
 };

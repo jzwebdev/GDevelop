@@ -1,7 +1,7 @@
 // @flow
 import { type ExpressionAutocompletion } from '../ExpressionAutocompletion';
-import { type EnumeratedExpressionMetadata } from '../InstructionOrExpression/EnumeratedInstructionOrExpressionMetadata.js';
-import { mapVector } from '../Utils/MapFor';
+import { type EnumeratedExpressionMetadata } from '../InstructionOrExpression/EnumeratedInstructionOrExpressionMetadata';
+import { mapFor } from '../Utils/MapFor';
 
 const makeNewFakeExtension = (gd: libGDevelop) => {
   const extension = new gd.PlatformExtension();
@@ -23,18 +23,36 @@ const makeFakeEnumeratedExpressionMetadata = (
   type: name,
   name: name,
   displayedName: expressionMetadata.getFullName(),
+  description: expressionMetadata.getDescription(),
   fullGroupName: expressionMetadata.getGroup(),
   iconFilename: expressionMetadata.getSmallIconFilename(),
   metadata: expressionMetadata,
-  parameters: mapVector(
-    expressionMetadata.getParameters(),
-    parameterMetadata => parameterMetadata
+  parameters: mapFor(
+    0,
+    expressionMetadata.getParameters().getParametersCount(),
+    parameterIndex =>
+      expressionMetadata.getParameters().getParameterAt(parameterIndex)
   ),
-  scope: { extension },
+  scope: {
+    extension: {
+      name: extension.getName(),
+    },
+  },
   isPrivate: false,
+  isRelevantForLayoutEvents: true,
+  isRelevantForFunctionEvents: true,
+  isRelevantForAsynchronousFunctionEvents: true,
+  isRelevantForCustomObjectEvents: true,
 });
 
-export const makeFakeExactExpressionAutocompletion = () => {
+export const makeFakeExactExpressionAutocompletion = (): Array<{
+  addParenthesis: boolean,
+  completion: string,
+  enumeratedExpressionMetadata: EnumeratedExpressionMetadata,
+  isExact: boolean,
+  kind: string,
+  shouldConvertToString: boolean,
+}> => {
   const gd: libGDevelop = global.gd;
   const expressionMetadata = new gd.ExpressionMetadata(
     'number',
@@ -63,6 +81,7 @@ export const makeFakeExactExpressionAutocompletion = () => {
         extension,
         expressionMetadata
       ),
+      shouldConvertToString: false,
     },
   ];
 };
@@ -100,32 +119,37 @@ export const makeFakeExpressionAutocompletions = (): Array<ExpressionAutocomplet
     {
       kind: 'Object',
       completion: 'SomeObject',
+      objectConfiguration: null,
       addDot: true,
       isExact: false,
     },
     {
       kind: 'Object',
       completion: 'SomeOtherObject',
+      objectConfiguration: null,
       addDot: true,
       isExact: false,
     },
     {
       kind: 'Object',
       completion: 'SomeOtherObjectWithALoooooooooooongLoooooooooooongName',
+      objectConfiguration: null,
       addDot: true,
       isExact: false,
     },
     {
       kind: 'Behavior',
-      completion: 'PlatformerObject',
+      completion: 'PlatformBehavior::PlatformerObjectBehavior',
       addNamespaceSeparator: true,
       isExact: false,
+      behaviorType: '',
     },
     {
       kind: 'Behavior',
       completion: 'Physics2',
       addNamespaceSeparator: true,
       isExact: false,
+      behaviorType: 'Physics2::Physics2Behavior',
     },
     {
       kind: 'Expression',
@@ -137,6 +161,7 @@ export const makeFakeExpressionAutocompletions = (): Array<ExpressionAutocomplet
         extension,
         expressionWithoutParamsMetadata
       ),
+      shouldConvertToString: false,
     },
     {
       kind: 'Expression',
@@ -148,11 +173,37 @@ export const makeFakeExpressionAutocompletions = (): Array<ExpressionAutocomplet
         extension,
         expressionMetadata
       ),
+      shouldConvertToString: false,
+    },
+    {
+      kind: 'Expression',
+      completion: 'MyFunctionThatShouldBeConvertedToString',
+      addParenthesis: true,
+      isExact: false,
+      enumeratedExpressionMetadata: makeFakeEnumeratedExpressionMetadata(
+        'MyFunction',
+        extension,
+        expressionMetadata
+      ),
+      shouldConvertToString: true,
     },
   ];
 };
 
-export const getFakePopperJsAnchorElement = () => ({
+export const getFakePopperJsAnchorElement = (): {
+  clientHeight: number,
+  clientWidth: number,
+  getBoundingClientRect: () => {
+    bottom: number,
+    height: number,
+    left: number,
+    right: number,
+    top: number,
+    width: number,
+    x: number,
+    y: number,
+  },
+} => ({
   clientWidth: 100,
   clientHeight: 100,
   getBoundingClientRect: () => ({

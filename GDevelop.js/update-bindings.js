@@ -64,11 +64,14 @@ function patchGlueCppFile(cb) {
     'BehaviorJsImplementation',
     'ObjectJsImplementation',
     'BehaviorSharedDataJsImplementation',
+    'ReadOnlyArbitraryEventsWorkerWithContextJS',
   ];
   var functionsToErase = [
     'emscripten_bind_ArbitraryResourceWorkerJS_ExposeImage_1',
     'emscripten_bind_ArbitraryResourceWorkerJS_ExposeShader_1',
     'emscripten_bind_ArbitraryResourceWorkerJS_ExposeFile_1',
+    'emscripten_bind_ReadOnlyArbitraryEventsWorkerWithContextJS_DoVisitEvent_1',
+    'emscripten_bind_ReadOnlyArbitraryEventsWorkerWithContextJS_DoVisitInstruction_3',
   ];
   fs.readFile(file, function(err, data) {
     if (err) cb(err);
@@ -116,13 +119,13 @@ function patchGlueCppFile(cb) {
           var name = line.substring(freeCallPos + 11, nameEndPos);
           var startOfLine = line.substring(0, freeCallPos);
           var endOfLine = line.substring(nameEndPos + 1, line.length);
-          var hasOtherParamers = endOfLine[0] !== ')';
+          var hasOtherParameters = endOfLine[0] !== ')';
 
           line =
             startOfLine +
             name +
             '(*self' +
-            (hasOtherParamers ? ', ' : '') +
+            (hasOtherParameters ? ', ' : '') +
             endOfLine;
         }
 

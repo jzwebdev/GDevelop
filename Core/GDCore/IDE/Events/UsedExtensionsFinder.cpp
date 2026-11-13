@@ -1,40 +1,118 @@
 #include "UsedExtensionsFinder.h"
 
 #include "GDCore/Events/Instruction.h"
-#include "GDCore/Events/Parsers/ExpressionParser2.h"
 #include "GDCore/Extensions/Metadata/MetadataProvider.h"
+#include "GDCore/Extensions/Metadata/ParameterMetadataTools.h"
 #include "GDCore/Extensions/PlatformExtension.h"
+#include "GDCore/Extensions/Platform.h"
+#include "GDCore/IDE/ProjectBrowserHelper.h"
 #include "GDCore/IDE/WholeProjectRefactorer.h"
-#include "GDCore/Project/BehaviorContent.h"
+#include "GDCore/IDE/Events/ExpressionTypeFinder.h"
+#include "GDCore/Project/Behavior.h"
+#include "GDCore/Project/EventsFunctionsExtension.h"
 #include "GDCore/Project/Object.h"
 #include "GDCore/Project/Project.h"
 
 namespace gd {
 
-std::set<gd::String> UsedExtensionsFinder::ScanProject(gd::Project& project) {
+void UsedExtensionsResult::AddUsedExtension(const gd::PlatformExtension& extension) {
+  if (extension.GetName().empty()) {
+    // The extension was not found and `extension` is
+    // `gd::MetadataProvider::badExtension`.
+    return;
+  }
+  usedExtensions.insert(extension.GetName());
+
+  usedSourceFiles.insert(usedSourceFiles.end(),
+                         extension.GetAllSourceFiles().begin(),
+                         extension.GetAllSourceFiles().end());
+
+  for (auto &&inGameEditorResource : extension.GetInGameEditorResources()) {
+    AddUsedInGameEditorResource(inGameEditorResource);
+  }
+}
+
+void UsedExtensionsResult::AddUsedBuiltinExtension(const gd::Project& project, const gd::String& extensionName) {
+  if (project.GetCurrentPlatform().IsExtensionLoaded(extensionName)) {
+    auto extension = project.GetCurrentPlatform().GetExtension(extensionName);
+    if (extension) {
+      AddUsedExtension(*extension);
+    }
+  }
+}
+
+const UsedExtensionsResult UsedExtensionsFinder::ScanProject(gd::Project& project) {
   UsedExtensionsFinder worker(project);
-  gd::WholeProjectRefactorer::ExposeProjectObjects(project, worker);
-  gd::WholeProjectRefactorer::ExposeProjectEvents(project, worker);
-  return worker.usedExtensions;
+  worker.result.AddUsedBuiltinExtension(project, "BuiltinObject");
+  gd::ProjectBrowserHelper::ExposeProjectObjects(project, worker);
+  gd::ProjectBrowserHelper::ExposeProjectEvents(project, worker);
+  return worker.result;
 };
+
+const UsedExtensionsResult UsedExtensionsFinder::ScanEventsFunctionsExtension(
+    gd::Project &project,
+    const gd::EventsFunctionsExtension &eventsFunctionsExtension) {
+  UsedExtensionsFinder worker(project);
+  gd::ProjectBrowserHelper::ExposeEventsFunctionsExtensionObjects(
+      eventsFunctionsExtension, worker);
+  gd::ProjectBrowserHelper::ExposeEventsFunctionsExtensionEvents(
+      project, eventsFunctionsExtension, worker);
+  return worker.result;
+}
+
+const std::vector<gd::String> UsedExtensionsFinder::FindExtensionsDependentOn(
+    gd::Project &project,
+    const gd::EventsFunctionsExtension &eventsFunctionsExtension) {
+  std::vector<gd::String> dependentExtensions;
+  for (std::size_t s = 0; s < project.GetEventsFunctionsExtensionsCount();
+       s++) {
+    auto &otherEventsFunctionsExtension =
+        project.GetEventsFunctionsExtension(s);
+    if (otherEventsFunctionsExtension.GetName() ==
+        eventsFunctionsExtension.GetName()) {
+      continue;
+    }
+    auto usedExtensionsResult =
+        gd::UsedExtensionsFinder::ScanEventsFunctionsExtension(
+            project, otherEventsFunctionsExtension);
+    const auto &usedExtensions = usedExtensionsResult.GetUsedExtensions();
+    if (usedExtensions.find(eventsFunctionsExtension.GetName()) !=
+        usedExtensions.end()) {
+      dependentExtensions.push_back(otherEventsFunctionsExtension.GetName());
+    }
+  }
+  return dependentExtensions;
+}
 
 // Objects scanner
 
-void UsedExtensionsFinder::DoVisitObject(gd::Object& object) {
-  usedExtensions.insert(gd::MetadataProvider::GetExtensionAndObjectMetadata(
-                            project.GetCurrentPlatform(), object.GetType())
-                            .GetExtension()
-                            .GetName());
+void UsedExtensionsFinder::DoVisitObject(gd::Object &object) {
+  auto metadata = gd::MetadataProvider::GetExtensionAndObjectMetadata(
+      project.GetCurrentPlatform(), object.GetType());
+  if (metadata.GetMetadata().IsRenderedIn3D()) {
+    result.MarkAsHaving3DObjects();
+  }
+  result.AddUsedExtension(metadata.GetExtension());
+  for (auto &&includeFile : metadata.GetMetadata().includeFiles) {
+    result.AddUsedIncludeFiles(includeFile);
+  }
+  for (auto &&inGameEditorResource : metadata.GetMetadata().GetInGameEditorResources()) {
+    result.AddUsedInGameEditorResource(inGameEditorResource);
+  }
 };
 
 // Behaviors scanner
 
-void UsedExtensionsFinder::DoVisitBehavior(gd::BehaviorContent& behavior) {
-  usedExtensions.insert(
-      gd::MetadataProvider::GetExtensionAndBehaviorMetadata(
-          project.GetCurrentPlatform(), behavior.GetTypeName())
-          .GetExtension()
-          .GetName());
+void UsedExtensionsFinder::DoVisitBehavior(gd::Behavior &behavior) {
+  auto metadata = gd::MetadataProvider::GetExtensionAndBehaviorMetadata(
+      project.GetCurrentPlatform(), behavior.GetTypeName());
+  result.AddUsedExtension(metadata.GetExtension());
+  for (auto &&includeFile : metadata.GetMetadata().includeFiles) {
+    result.AddUsedIncludeFiles(includeFile);
+  }
+  for (auto &&includeFile : metadata.GetMetadata().requiredFiles) {
+    result.AddUsedRequiredFiles(includeFile);
+  }
 };
 
 // Instructions scanner
@@ -46,30 +124,35 @@ bool UsedExtensionsFinder::DoVisitInstruction(gd::Instruction& instruction,
                         project.GetCurrentPlatform(), instruction.GetType())
                   : gd::MetadataProvider::GetExtensionAndActionMetadata(
                         project.GetCurrentPlatform(), instruction.GetType());
-  usedExtensions.insert(metadata.GetExtension().GetName());
-
-  size_t i = 0;
-  for (auto expression : instruction.GetParameters()) {
-    const gd::String& parameterType =
-        metadata.GetMetadata().GetParameter(i).GetType();
-    i++;
-
-    if (gd::ParameterMetadata::IsExpression("string", parameterType) ||
-        gd::ParameterMetadata::IsExpression("number", parameterType)) {
-      gd::ExpressionParser2 parser(project.GetCurrentPlatform(),
-                                   GetGlobalObjectsContainer(),
-                                   GetObjectsContainer());
-      parser.ParseExpression(parameterType, expression.GetPlainString())
-          ->Visit(*this);
-    } else if (gd::ParameterMetadata::IsExpression("variable", parameterType))
-      usedExtensions.insert("BuiltinVariables");
+  result.AddUsedExtension(metadata.GetExtension());
+  for (auto&& includeFile : metadata.GetMetadata().GetIncludeFiles()) {
+    result.AddUsedIncludeFiles(includeFile);
   }
+
+  gd::ParameterMetadataTools::IterateOverParameters(
+      instruction.GetParameters(),
+      metadata.GetMetadata().GetParameters(),
+      [this](const gd::ParameterMetadata& parameterMetadata,
+          const gd::Expression& parameterValue,
+          const gd::String& lastObjectName) {
+    const gd::String& parameterType = parameterMetadata.GetType();
+
+    if (gd::ParameterMetadata::IsExpression("string", parameterType)) {
+      rootType = "string";
+      parameterValue.GetRootNode()->Visit(*this);
+    } else if (gd::ParameterMetadata::IsExpression("number", parameterType)) {
+      rootType = "number";
+      parameterValue.GetRootNode()->Visit(*this);
+    } else if (gd::ParameterMetadata::IsExpression("variable", parameterType))
+      result.AddUsedBuiltinExtension(project, "BuiltinVariables");
+  });
+
   return false;
 }
 
 // Expressions scanner
 
-// Ignore litterals nodes
+// Ignore literals nodes
 void UsedExtensionsFinder::OnVisitNumberNode(NumberNode& node){};
 void UsedExtensionsFinder::OnVisitTextNode(TextNode& node){};
 
@@ -94,31 +177,52 @@ void UsedExtensionsFinder::OnVisitUnaryOperatorNode(UnaryOperatorNode& node) {
 
 // Add variable extension and visit sub-expressions on variable nodes
 void UsedExtensionsFinder::OnVisitVariableNode(VariableNode& node) {
-  usedExtensions.insert("BuiltinVariables");
+  result.AddUsedBuiltinExtension(project, "BuiltinVariables");
+
+  auto type = gd::ExpressionTypeFinder::GetType(
+      project.GetCurrentPlatform(), GetProjectScopedContainers(), rootType, node);
+
+  if (gd::ParameterMetadata::IsExpression("variable", type)) {
+    // Nothing to do (this can't reference an object)
+  } else {
+    GetProjectScopedContainers().MatchIdentifierWithName<void>(node.name,
+      [&]() {
+        // This represents an object.
+        auto metadata = gd::MetadataProvider::GetExtensionAndObjectMetadata(
+          project.GetCurrentPlatform(), node.name);
+        result.AddUsedExtension(metadata.GetExtension());
+        for (auto &&includeFile : metadata.GetMetadata().includeFiles) {
+          result.AddUsedIncludeFiles(includeFile);
+        }
+      }, [&]() {
+        // This is a variable.
+      }, [&]() {
+        // This is a property.
+      }, [&]() {
+        // This is a parameter.
+      }, [&]() {
+        // This is something else.
+      });
+  }
+
   if (node.child) node.child->Visit(*this);
 };
 
 void UsedExtensionsFinder::OnVisitVariableAccessorNode(
     VariableAccessorNode& node) {
-  usedExtensions.insert("BuiltinVariables");
+  result.AddUsedBuiltinExtension(project, "BuiltinVariables");
   if (node.child) node.child->Visit(*this);
 };
 
 void UsedExtensionsFinder::OnVisitVariableBracketAccessorNode(
     VariableBracketAccessorNode& node) {
-  usedExtensions.insert("BuiltinVariables");
+  result.AddUsedBuiltinExtension(project, "BuiltinVariables");
   node.expression->Visit(*this);
   if (node.child) node.child->Visit(*this);
 };
 
-// Add extensions bound to Objects/Behaviors/Functions
-void UsedExtensionsFinder::OnVisitIdentifierNode(IdentifierNode& node) {
-  if (gd::ParameterMetadata::IsObject(node.type)) {
-    usedExtensions.insert(gd::MetadataProvider::GetExtensionAndObjectMetadata(
-                              project.GetCurrentPlatform(), node.identifierName)
-                              .GetExtension()
-                              .GetName());
-  }
+void UsedExtensionsFinder::OnVisitIdentifierNode(IdentifierNode &node) {
+  // Object parameters or object variables won't help detect extension usages.
 };
 
 void UsedExtensionsFinder::OnVisitFunctionCallNode(FunctionCallNode& node) {
@@ -138,7 +242,10 @@ void UsedExtensionsFinder::OnVisitFunctionCallNode(FunctionCallNode& node) {
       return;
   }
 
-  usedExtensions.insert(metadata.GetExtension().GetName());
+  result.AddUsedExtension(metadata.GetExtension());
+  for (auto&& includeFile : metadata.GetMetadata().GetIncludeFiles()) {
+    result.AddUsedIncludeFiles(includeFile);
+  }
 };
 
 }  // namespace gd

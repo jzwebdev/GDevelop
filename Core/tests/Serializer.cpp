@@ -81,6 +81,30 @@ TEST_CASE("SerializerElement", "[common]") {
     REQUIRE(element.GetChild(2).GetDoubleValue() == 45.6);
   }
 
+  SECTION("Multiline strings") {
+    SerializerElement element;
+
+    // A single line is saved as a string.
+    element.SetMultilineStringValue("test");
+    REQUIRE(element.GetMultilineStringValue() == "test");
+    REQUIRE(element.GetStringValue() == "test");
+
+    // A string can be read.
+    element.SetStringValue("test of\nsomething\nsaved as a string");
+    REQUIRE(element.GetMultilineStringValue() == "test of\nsomething\nsaved as a string");
+
+    // A multi lines string is saved as an array.
+    element.SetMultilineStringValue("test\nwith\nmultiple lines.");
+    REQUIRE(element.ConsideredAsArray() == true);
+    REQUIRE(element.GetChildrenCount() == 3);
+    REQUIRE(element.GetMultilineStringValue() == "test\nwith\nmultiple lines.");
+
+    element.SetMultilineStringValue("test\n\nwith\n\nmultiple lines.\n");
+    REQUIRE(element.ConsideredAsArray() == true);
+    REQUIRE(element.GetChildrenCount() == 6);
+    REQUIRE(element.GetMultilineStringValue() == "test\n\nwith\n\nmultiple lines.\n");
+  }
+
   SECTION("(Deprecated) attributes") {
     SerializerElement element;
     element.AddChild("child1").SetStringValue("value123");
@@ -98,6 +122,60 @@ TEST_CASE("SerializerElement", "[common]") {
     REQUIRE(element.HasChild("child2") == true);
     REQUIRE(element.GetStringAttribute("attr1") == "attr123");
     REQUIRE(element.GetStringAttribute("child1") == "value456");
+  }
+
+  SECTION("Accessing children by index after the children changed") {
+    // Children are accessed from their index without iterating on them when
+    // they all have the same name: check that the right children are found
+    // when the names are mixed, and after each change of the children.
+    SerializerElement element;
+    element.AddChild("item").SetIntValue(1);
+    element.AddChild("other").SetIntValue(2);
+    element.AddChild("oldItem").SetIntValue(3);
+    element.AddChild("").SetIntValue(4);
+    element.ConsiderAsArrayOf("item", "oldItem");
+
+    // The items are the children with the name of the array, its deprecated
+    // name, or no name.
+    REQUIRE(element.GetChildrenCount() == 3);
+    REQUIRE(element.GetChild(0).GetIntValue() == 1);
+    REQUIRE(element.GetChild(1).GetIntValue() == 3);
+    REQUIRE(element.GetChild(2).GetIntValue() == 4);
+
+    element.RemoveChild("oldItem");
+    REQUIRE(element.GetChildrenCount() == 2);
+    REQUIRE(element.GetChild(1).GetIntValue() == 4);
+
+    // Setting an attribute removes the children with the same name.
+    element.SetStringAttribute("item", "value");
+    REQUIRE(element.GetChildrenCount() == 1);
+    REQUIRE(element.GetChild(0).GetIntValue() == 4);
+
+    SerializerElement copy = element;
+    copy.AddChild("item").SetIntValue(5);
+    REQUIRE(copy.GetChildrenCount() == 2);
+    REQUIRE(copy.GetChild(1).GetIntValue() == 5);
+    REQUIRE(element.GetChildrenCount() == 1);
+
+    element.Clear();
+    REQUIRE(element.GetChildrenCount() == 0);
+    element.AddChild("item").SetIntValue(6);
+    element.AddChild("item").SetIntValue(7);
+    REQUIRE(element.GetChildrenCount() == 2);
+    REQUIRE(element.GetChild(1).GetIntValue() == 7);
+  }
+
+  SECTION("Copying an element into one of its children") {
+    SerializerElement element;
+    element.AddChild("x").SetIntValue(1);
+    element.AddChild("y").SetIntValue(2);
+
+    // The child is copied while it's being replaced: it has no value and no
+    // children anymore when it is itself copied.
+    element.GetChild("x") = element;
+
+    REQUIRE(gd::Serializer::ToJSON(element) ==
+            "{\"x\":{\"x\":{},\"y\":2},\"y\":2}");
   }
 }
 

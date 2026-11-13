@@ -7,23 +7,34 @@ import RenderedTextInstance from './Renderers/RenderedTextInstance';
 import RenderedShapePainterInstance from './Renderers/RenderedShapePainterInstance';
 import RenderedTextEntryInstance from './Renderers/RenderedTextEntryInstance';
 import RenderedParticleEmitterInstance from './Renderers/RenderedParticleEmitterInstance';
+import RenderedCustomObjectInstance from './Renderers/RenderedCustomObjectInstance';
+import LegacyRenderedCustomObjectInstance from './Renderers/LegacyRenderedCustomObjectInstance';
+import RenderedSprite3DInstance from './Renderers/RenderedSprite3DInstance';
 import PixiResourcesLoader from './PixiResourcesLoader';
 import ResourcesLoader from '../ResourcesLoader';
 import RenderedInstance from './Renderers/RenderedInstance';
+import Rendered3DInstance from './Renderers/Rendered3DInstance';
 import * as PIXI from 'pixi.js-legacy';
+import * as THREE from 'three';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils';
 import optionalRequire from '../Utils/OptionalRequire';
-import { rgbOrHexToHexNumber } from '../Utils/ColorTransformer';
+import {
+  rgbOrHexToHexNumber,
+  hexNumberToRGBArray,
+} from '../Utils/ColorTransformer';
+
 const path = optionalRequire('path');
 const electron = optionalRequire('electron');
 const gd: libGDevelop = global.gd;
-
 // Some PixiJS plugins like pixi-tilemap are not distributed as UMD modules,
 // or still require a global PIXI object to be accessible, so we expose PIXI here.
 // This can be removed if no more extension PixiJS plugin requires this.
+// Note: the spine runtime (@esotericsoftware/spine-pixi-v7) is intentionally NOT
+// merged in here. It is consumed through direct imports in PixiResourcesLoader,
+// and merging it would shadow PixiJS's `Texture`/`Color` (spine's `Texture` has
+// no `.from`, which breaks `PIXI.Texture.from(...)` calls made by extensions like
+// Lighting).
 global.PIXI = PIXI;
-// We also export it as GlobalPIXIModule, which is normally used in GDJS runtime and extensions
-// to allow TypeScript typings of PIXI to work.
-global.GlobalPIXIModule = { PIXI };
 
 const requirableModules = {};
 
@@ -31,7 +42,7 @@ const requirableModules = {};
  * A service containing functions that are called to render instances
  * of objects in a PIXI.Container.
  */
-export default {
+const ObjectsRenderingService = {
   renderers: {
     unknownObjectType: RenderedUnknownInstance,
     Sprite: RenderedSpriteInstance,
@@ -42,52 +53,129 @@ export default {
     'TextEntryObject::TextEntry': RenderedTextEntryInstance,
     'ParticleSystem::ParticleEmitter': RenderedParticleEmitterInstance,
   },
-  getThumbnail: function(project: gdProject, object: gdObject) {
-    var objectType = object.getType();
+  renderers3D: {},
+  // $FlowFixMe[missing-this-annot]
+  getThumbnail: function(
+    project: gdProject,
+    objectConfiguration: gdObjectConfiguration
+  ): any {
+    const objectType = objectConfiguration.getType();
     if (this.renderers.hasOwnProperty(objectType))
       return this.renderers[objectType].getThumbnail(
         project,
         ResourcesLoader,
-        object
+        objectConfiguration
       );
-    else
+    else if (project.hasEventsBasedObject(objectType)) {
+      return RenderedCustomObjectInstance.getThumbnail(
+        project,
+        ResourcesLoader,
+        objectConfiguration
+      );
+    } else {
       return this.renderers['unknownObjectType'].getThumbnail(
         project,
         ResourcesLoader,
-        object
+        objectConfiguration
       );
+    }
   },
+  // $FlowFixMe[missing-this-annot]
+  createNewUnknownInstanceRenderer: function(
+    project: gdProject,
+    instance: gdInitialInstance,
+    // $FlowFixMe[value-as-type]
+    pixiContainer: PIXI.Container
+  ): RenderedInstance | Rendered3DInstance {
+    return new this.renderers['unknownObjectType'](
+      project,
+      instance,
+      null,
+      pixiContainer,
+      PixiResourcesLoader
+    );
+  },
+  // $FlowFixMe[missing-this-annot]
   createNewInstanceRenderer: function(
     project: gdProject,
-    layout: gdLayout,
     instance: gdInitialInstance,
-    associatedObject: gdObject,
-    pixiContainer: any
-  ) {
-    var objectType = associatedObject.getType();
-    if (this.renderers.hasOwnProperty(objectType))
-      return new this.renderers[objectType](
+    associatedObjectConfiguration: gdObjectConfiguration,
+    // $FlowFixMe[value-as-type]
+    pixiContainer: PIXI.Container,
+    // $FlowFixMe[value-as-type]
+    threeGroup: THREE.Group | null,
+    getPropertyOverridings: (() => Map<string, string>) | null = null
+  ): RenderedInstance | Rendered3DInstance {
+    const objectType = associatedObjectConfiguration.getType();
+    if (threeGroup && this.renderers3D.hasOwnProperty(objectType)) {
+      return new this.renderers3D[objectType](
         project,
-        layout,
         instance,
-        associatedObject,
+        associatedObjectConfiguration,
         pixiContainer,
+        threeGroup,
         PixiResourcesLoader
       );
+    } else if (this.renderers.hasOwnProperty(objectType))
+      return new this.renderers[objectType](
+        project,
+        instance,
+        associatedObjectConfiguration,
+        pixiContainer,
+        PixiResourcesLoader,
+        getPropertyOverridings
+      );
     else {
+      if (project.hasEventsBasedObject(objectType)) {
+        const eventsBasedObject = project.getEventsBasedObject(objectType);
+        if (
+          eventsBasedObject.isRenderedIn3D() &&
+          eventsBasedObject.isAnimatable() &&
+          eventsBasedObject.getObjects().getObjectsCount() === 0
+        ) {
+          return new RenderedSprite3DInstance(
+            project,
+            instance,
+            associatedObjectConfiguration,
+            pixiContainer,
+            threeGroup,
+            PixiResourcesLoader
+          );
+        } else if (eventsBasedObject.isUsingLegacyInstancesRenderer()) {
+          return new LegacyRenderedCustomObjectInstance(
+            project,
+            instance,
+            associatedObjectConfiguration,
+            pixiContainer,
+            threeGroup,
+            PixiResourcesLoader
+          );
+        } else {
+          return new RenderedCustomObjectInstance(
+            project,
+            instance,
+            associatedObjectConfiguration,
+            pixiContainer,
+            threeGroup,
+            PixiResourcesLoader,
+            getPropertyOverridings
+          );
+        }
+      }
+
       console.warn(
         `Object with type ${objectType} has no instance renderer registered. Please use registerInstanceRenderer to register your renderer.`
       );
       return new this.renderers['unknownObjectType'](
         project,
-        layout,
         instance,
-        associatedObject,
+        associatedObjectConfiguration,
         pixiContainer,
         PixiResourcesLoader
       );
     }
   },
+  // $FlowFixMe[missing-this-annot]
   registerInstanceRenderer: function(objectType: string, renderer: any) {
     if (!renderer.getThumbnail) {
       console.warn(
@@ -107,14 +195,33 @@ export default {
       return;
     }
 
-    console.info(`Properly registered renderer for object "${objectType}".`);
     this.renderers[objectType] = renderer;
+  },
+  // $FlowFixMe[missing-this-annot]
+  registerInstance3DRenderer: function(objectType: string, renderer: any) {
+    if (this.renderers3D.hasOwnProperty(objectType)) {
+      console.warn(
+        `Tried to register 3D renderer for object "${objectType}", but a renderer already exists.`
+      );
+
+      // If you want to update a 3D renderer, this is currently unsupported.
+      // See comment in registerInstanceRenderer.
+      return;
+    }
+
+    this.renderers3D[objectType] = renderer;
+  },
+  renderersCacheClearingMethods: ([]: Array<empty>),
+  // $FlowFixMe[missing-this-annot]
+  registerClearCache: function(clearCache: (project: gdProject) => void) {
+    this.renderersCacheClearingMethods.push(clearCache);
   },
   /**
    * Register a module that can be then required using `requireModule`.
    * This is necessary for the web-app, as all files must be bundled.
    */
   registerModule: function(requirePath: string, module: any) {
+    // $FlowFixMe[prop-missing]
     requirableModules[requirePath] = module;
   },
   /**
@@ -191,6 +298,7 @@ export default {
       return requiredModule;
     } else {
       // On the web-app, modules need to be registered manually.
+      // $FlowFixMe[invalid-computed-prop]
       if (requirableModules[requirePath]) return requirableModules[requirePath];
 
       console.error(
@@ -201,7 +309,15 @@ export default {
     }
   },
   rgbOrHexToHexNumber, // Expose a ColorTransformer function, useful to manage different color types for the extensions
+  hexNumberToRGBArray, // Expose a ColorTransformer function, useful to manage different color types for the extensions
   gd, // Expose gd so that it can be used by renderers
   PIXI, // Expose PIXI so that it can be used by renderers
+  THREE, // Expose THREE so that it can be used by renderers
+  THREE_ADDONS: {
+    SkeletonUtils,
+  }, // Expose THREE so that it can be used by renderers
   RenderedInstance, // Expose the base class for renderers so that it can be used by renderers
+  Rendered3DInstance, // Expose the base class for 3D renderers so that it can be used by renderers
 };
+
+export default ObjectsRenderingService;

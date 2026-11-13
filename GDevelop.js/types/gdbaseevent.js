@@ -8,12 +8,18 @@ declare class gdBaseEvent extends gdBaseEvent {
   canHaveSubEvents(): boolean;
   hasSubEvents(): boolean;
   getSubEvents(): gdEventsList;
+  canHaveVariables(): boolean;
+  hasVariables(): boolean;
+  getVariables(): gdVariablesContainer;
   isDisabled(): boolean;
   setDisabled(disable: boolean): void;
   isFolded(): boolean;
   setFolded(folded: boolean): void;
+  getInstructionList(label: string): gdInstructionsList;
   serializeTo(element: gdSerializerElement): void;
   unserializeFrom(project: gdProject, element: gdSerializerElement): void;
+  getAiGeneratedEventId(): string;
+  setAiGeneratedEventId(aiGeneratedEventId: string): void;
   delete(): void;
   ptr: number;
 };

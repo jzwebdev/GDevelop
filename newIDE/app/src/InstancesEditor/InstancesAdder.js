@@ -1,47 +1,103 @@
 // @flow
-import { roundPosition } from '../Utils/GridHelpers';
+import { roundPositionsToGrid } from '../Utils/GridHelpers';
+import { unserializeFromJSObject } from '../Utils/Serializer';
 import { type InstancesEditorSettings } from './InstancesEditorSettings';
+
 const gd: libGDevelop = global.gd;
 
+export const addSerializedInstances = ({
+  project,
+  instancesContainer,
+  copyReferential,
+  serializedInstances,
+  addInstancesInTheForeground = false,
+  doesObjectExistInContext,
+  doesLayerExistInContext,
+}: {|
+  project: gdProject,
+  instancesContainer: gdInitialInstancesContainer,
+  copyReferential: [number, number],
+  serializedInstances: Array<Object>,
+  addInstancesInTheForeground?: boolean,
+  doesObjectExistInContext: string => boolean,
+  doesLayerExistInContext?: string => boolean,
+|}): Array<gdInitialInstance> => {
+  const zOrderFinder = new gd.HighestZOrderFinder();
+  zOrderFinder.reset();
+  instancesContainer.iterateOverInstances(zOrderFinder);
+  const sceneForegroundZOrder = zOrderFinder.getHighestZOrder() + 1;
+  zOrderFinder.delete();
+
+  let addedInstancesLowestZOrder = null;
+
+  const newInstances = serializedInstances
+    .map(serializedInstance => {
+      const instance = new gd.InitialInstance();
+      unserializeFromJSObject(
+        instance,
+        serializedInstance,
+        'unserializeFrom',
+        project
+      );
+      if (!doesObjectExistInContext(instance.getObjectName())) return null;
+      if (
+        doesLayerExistInContext &&
+        !doesLayerExistInContext(instance.getLayer())
+      ) {
+        instance.setLayer('');
+      }
+      instance.setX(instance.getX() - copyReferential[0]);
+      instance.setY(instance.getY() - copyReferential[1]);
+      if (addInstancesInTheForeground) {
+        if (
+          addedInstancesLowestZOrder === null ||
+          addedInstancesLowestZOrder > instance.getZOrder()
+        ) {
+          addedInstancesLowestZOrder = instance.getZOrder();
+        }
+      }
+      const newInstance = instancesContainer
+        .insertInitialInstance(instance)
+        .resetPersistentUuid();
+      instance.delete();
+      return newInstance;
+    })
+    .filter(Boolean);
+
+  if (addInstancesInTheForeground && addedInstancesLowestZOrder !== null) {
+    newInstances.forEach(instance => {
+      instance.setZOrder(
+        instance.getZOrder() -
+          // Flow is not happy with addedInstancesLowestZOrder possible null value
+          // so 0 is used as a fallback.
+          (addedInstancesLowestZOrder || 0) +
+          sceneForegroundZOrder
+      );
+    });
+  }
+
+  return newInstances;
+};
+
 type Props = {|
+  project: gdProject,
   instances: gdInitialInstancesContainer,
   instancesEditorSettings: InstancesEditorSettings,
 |};
-
-const roundPositionsToGrid = (
-  pos: [number, number],
-  instancesEditorSettings: InstancesEditorSettings
-): [number, number] => {
-  const newPos = pos;
-
-  if (instancesEditorSettings.grid && instancesEditorSettings.snap) {
-    roundPosition(
-      newPos,
-      instancesEditorSettings.gridWidth,
-      instancesEditorSettings.gridHeight,
-      instancesEditorSettings.gridOffsetX,
-      instancesEditorSettings.gridOffsetY,
-      instancesEditorSettings.gridType
-    );
-  } else {
-    newPos[0] = Math.round(newPos[0]);
-    newPos[1] = Math.round(newPos[1]);
-  }
-
-  return newPos;
-};
 
 /**
  * Allow to add instances on the scene. Supports "temporary" instances,
  * which are real instances but can be deleted as long as they are not "committed".
  */
 export default class InstancesAdder {
+  _project: gdProject;
   _instances: gdInitialInstancesContainer;
   _temporaryInstances: Array<gdInitialInstance>;
   _instancesEditorSettings: InstancesEditorSettings;
-  _zOrderFinder = new gd.HighestZOrderFinder();
+  _zOrderFinder: gdHighestZOrderFinder = new gd.HighestZOrderFinder();
 
-  constructor({ instances, instancesEditorSettings }: Props) {
+  constructor({ project, instances, instancesEditorSettings }: Props) {
+    this._project = project;
     this._instances = instances;
     this._instancesEditorSettings = instancesEditorSettings;
     this._temporaryInstances = [];
@@ -51,14 +107,44 @@ export default class InstancesAdder {
     this._instancesEditorSettings = instancesEditorSettings;
   }
 
+  addSerializedInstances = ({
+    position,
+    copyReferential,
+    serializedInstances,
+    addInstancesInTheForeground = false,
+    doesObjectExistInContext,
+  }: {|
+    position: [number, number],
+    copyReferential: [number, number],
+    serializedInstances: Array<Object>,
+    addInstancesInTheForeground?: boolean,
+    doesObjectExistInContext: string => boolean,
+  |}): Array<gdInitialInstance> => {
+    const instances = addSerializedInstances({
+      project: this._project,
+      instancesContainer: this._instances,
+      copyReferential,
+      serializedInstances,
+      addInstancesInTheForeground: false,
+      doesObjectExistInContext,
+    });
+    for (const instance of instances) {
+      instance.setX(instance.getX() + position[0]);
+      instance.setY(instance.getY() + position[1]);
+    }
+    return instances;
+  };
+
   /**
    * Immediately create new instance at the specified position
    * (specified in scene coordinates).
    */
   addInstances = (
     pos: [number, number],
-    objectNames: Array<string>
+    objectNames: Array<string>,
+    layer: string
   ): Array<gdInitialInstance> => {
+    this._zOrderFinder.reset();
     this._instances.iterateOverInstances(this._zOrderFinder);
     const zOrder = this._zOrderFinder.getHighestZOrder() + 1;
 
@@ -68,6 +154,7 @@ export default class InstancesAdder {
       instance.setObjectName(objectName);
       instance.setX(newPos[0]);
       instance.setY(newPos[1]);
+      instance.setLayer(layer);
       instance.setZOrder(zOrder);
 
       return instance;
@@ -82,12 +169,13 @@ export default class InstancesAdder {
    */
   createOrUpdateTemporaryInstancesFromObjectNames = (
     pos: [number, number],
-    objectNames: Array<string>
+    objectNames: Array<string>,
+    layer: string
   ) => {
     if (!objectNames.length) return;
 
     if (!this._temporaryInstances.length) {
-      this._createTemporaryInstancesFromObjectNames(pos, objectNames);
+      this._createTemporaryInstancesFromObjectNames(pos, objectNames, layer);
     } else {
       this.updateTemporaryInstancePositions(pos);
     }
@@ -95,10 +183,12 @@ export default class InstancesAdder {
 
   _createTemporaryInstancesFromObjectNames = (
     pos: [number, number],
-    objectNames: Array<string>
+    objectNames: Array<string>,
+    layer: string
   ) => {
     this.deleteTemporaryInstances();
 
+    this._zOrderFinder.reset();
     this._instances.iterateOverInstances(this._zOrderFinder);
     const zOrder = this._zOrderFinder.getHighestZOrder() + 1;
 
@@ -108,6 +198,7 @@ export default class InstancesAdder {
       instance.setObjectName(objectName);
       instance.setX(newPos[0]);
       instance.setY(newPos[1]);
+      instance.setLayer(layer);
       instance.setZOrder(zOrder);
 
       return instance;
@@ -129,6 +220,17 @@ export default class InstancesAdder {
 
     return this._temporaryInstances;
   };
+
+  /**
+   * Check if the given instance is one of the temporary instances added while
+   * an object is being dragged over the scene.
+   */
+  isTemporaryInstance(instance: ?gdInitialInstance): boolean {
+    if (!instance) return false;
+    return this._temporaryInstances.some(
+      temporaryInstance => temporaryInstance.ptr === instance.ptr
+    );
+  }
 
   /**
    * Delete the temporary instances.

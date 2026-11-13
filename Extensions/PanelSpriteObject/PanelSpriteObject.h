@@ -8,52 +8,58 @@ This project is released under the MIT License.
 #ifndef PANELSPRITEOBJECT_H
 #define PANELSPRITEOBJECT_H
 #include <memory>
+
 #include "GDCore/Project/Object.h"
 namespace gd {
-class Object;
+class ObjectConfiguration;
 class InitialInstance;
 class Project;
-}
+}  // namespace gd
 
 /**
  * PanelSprite Object
  */
-class GD_EXTENSION_API PanelSpriteObject : public gd::Object {
+class GD_EXTENSION_API PanelSpriteObject : public gd::ObjectConfiguration {
  public:
-  PanelSpriteObject(gd::String name_);
+  PanelSpriteObject();
   virtual ~PanelSpriteObject();
-  virtual std::unique_ptr<gd::Object> Clone() const {
-    return std::unique_ptr<gd::Object>(new PanelSpriteObject(*this));
+  virtual std::unique_ptr<gd::ObjectConfiguration> Clone() const override {
+    return std::unique_ptr<gd::ObjectConfiguration>(
+        new PanelSpriteObject(*this));
   }
 
-#if defined(GD_IDE_ONLY)
-  virtual void ExposeResources(gd::ArbitraryResourceWorker &worker);
-#endif
+  virtual void ExposeResources(gd::ArbitraryResourceWorker &worker) override;
 
-  float GetWidth() const { return width; };
-  float GetHeight() const { return height; };
+  virtual std::map<gd::String, gd::PropertyDescriptor> GetProperties()
+      const override;
 
-  void SetWidth(float newWidth) {
+  virtual bool UpdateProperty(const gd::String& name,
+                              const gd::String& value) override;
+
+  double GetWidth() const { return width; };
+  double GetHeight() const { return height; };
+
+  void SetWidth(double newWidth) {
     width = newWidth >= (leftMargin + rightMargin) ? newWidth
                                                    : (leftMargin + rightMargin);
   };
-  void SetHeight(float newHeight) {
+  void SetHeight(double newHeight) {
     height = newHeight >= (topMargin + bottomMargin)
                  ? newHeight
                  : (topMargin + bottomMargin);
   };
 
-  float GetLeftMargin() const { return leftMargin; };
-  void SetLeftMargin(float newMargin) { leftMargin = newMargin; };
+  double GetLeftMargin() const { return leftMargin; };
+  void SetLeftMargin(double newMargin) { leftMargin = newMargin; };
 
-  float GetTopMargin() const { return topMargin; };
-  void SetTopMargin(float newMargin) { topMargin = newMargin; };
+  double GetTopMargin() const { return topMargin; };
+  void SetTopMargin(double newMargin) { topMargin = newMargin; };
 
-  float GetRightMargin() const { return rightMargin; };
-  void SetRightMargin(float newMargin) { rightMargin = newMargin; };
+  double GetRightMargin() const { return rightMargin; };
+  void SetRightMargin(double newMargin) { rightMargin = newMargin; };
 
-  float GetBottomMargin() const { return bottomMargin; };
-  void SetBottomMargin(float newMargin) { bottomMargin = newMargin; };
+  double GetBottomMargin() const { return bottomMargin; };
+  void SetBottomMargin(double newMargin) { bottomMargin = newMargin; };
 
   bool IsTiled() const { return tiled; };
   void SetTiled(bool enable = true) { tiled = enable; };
@@ -63,22 +69,22 @@ class GD_EXTENSION_API PanelSpriteObject : public gd::Object {
   };
   const gd::String &GetTexture() const { return textureName; };
 
-  gd::String textureName;  ///< deprecated. Use Get/SetTexture instead.
-
  private:
   virtual void DoUnserializeFrom(gd::Project &project,
-                                 const gd::SerializerElement &element);
+                                 const gd::SerializerElement &element) override;
 #if defined(GD_IDE_ONLY)
-  virtual void DoSerializeTo(gd::SerializerElement &element) const;
+  virtual void DoSerializeTo(gd::SerializerElement &element) const override;
 #endif
 
-  float width;
-  float height;
+  gd::String textureName;
 
-  float leftMargin;
-  float topMargin;
-  float rightMargin;
-  float bottomMargin;
+  double width;
+  double height;
+
+  double leftMargin;
+  double topMargin;
+  double rightMargin;
+  double bottomMargin;
 
   bool tiled;
 };

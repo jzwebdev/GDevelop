@@ -7,6 +7,20 @@ namespace gdjs {
   /**
    * Manage the timers and times elapsed during last
    * frame, since the beginning of the scene and other time related values.
+   * All durations are expressed in milliseconds.
+   * @category Core Engine > Time
+   */
+
+  declare interface TimeManagerSyncData {
+    elapsedTime: float;
+    timeScale: float;
+    timeFromStart: float;
+    firstFrame: boolean;
+    timers: Hashtable<TimerNetworkSyncData>;
+    firstUpdateDone: boolean;
+  }
+  /**
+   * @category Core Engine > Time
    */
   export class TimeManager {
     _elapsedTime: float = 0;
@@ -58,6 +72,48 @@ namespace gdjs {
       }
     }
 
+    getNetworkSyncData(): TimeManagerSyncData {
+      const timerNetworkSyncDatas = new Hashtable<TimerNetworkSyncData>();
+      Object.entries(this._timers.items).forEach(([key, timer]) => {
+        timerNetworkSyncDatas.put(key, timer.getNetworkSyncData());
+      });
+
+      return {
+        elapsedTime: this._elapsedTime,
+        timeScale: this._timeScale,
+        timeFromStart: this._timeFromStart,
+        firstFrame: this._firstFrame,
+        timers: timerNetworkSyncDatas,
+        firstUpdateDone: this._firstUpdateDone,
+      };
+    }
+
+    updateFromNetworkSyncData(syncData: TimeManagerSyncData): void {
+      if (syncData.elapsedTime !== undefined) {
+        this._elapsedTime = syncData.elapsedTime;
+      }
+      if (syncData.timeScale !== undefined) {
+        this._timeScale = syncData.timeScale;
+      }
+      if (syncData.timeFromStart !== undefined) {
+        this._timeFromStart = syncData.timeFromStart;
+      }
+      if (syncData.firstFrame !== undefined) {
+        this._firstFrame = syncData.firstFrame;
+      }
+      if (syncData.timers !== undefined) {
+        this._timers.clear();
+        Object.entries(syncData.timers.items).forEach(([key, timerData]) => {
+          const newTimer = new gdjs.Timer(timerData.name);
+          newTimer.updateFromNetworkSyncData(timerData);
+          this._timers.put(key, newTimer);
+        });
+      }
+
+      if (syncData.firstUpdateDone !== undefined) {
+        this._firstUpdateDone = syncData.firstUpdateDone;
+      }
+    }
     /**
      * Get the time scale.
      * @return The time scale (positive, 1 is normal speed).
@@ -67,7 +123,7 @@ namespace gdjs {
     }
 
     /**
-     * Get the time since the instanciation of the manager (i.e: since
+     * Get the time since the instantiation of the manager (i.e: since
      * the beginning of the scene most of the time), in milliseconds.
      */
     getTimeFromStart(): float {

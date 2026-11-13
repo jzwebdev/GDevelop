@@ -1,10 +1,14 @@
 // @flow
 import { Trans } from '@lingui/macro';
 import { t } from '@lingui/macro';
-import React, { Component } from 'react';
+import * as React from 'react';
 import { type ParameterInlineRendererProps } from './ParameterInlineRenderer.flow';
-import { type ParameterFieldProps } from './ParameterFieldCommons';
-import SelectField from '../../UI/SelectField';
+import {
+  type ParameterFieldProps,
+  type ParameterFieldInterface,
+  type FieldFocusFunction,
+} from './ParameterFieldCommons';
+import SelectField, { type SelectFieldInterface } from '../../UI/SelectField';
 import SelectOption from '../../UI/SelectOption';
 
 const operatorLabels = {
@@ -14,23 +18,31 @@ const operatorLabels = {
   '<=': t`≤ (less or equal to)`,
   '>=': t`≥ (greater or equal to)`,
   '!=': t`≠ (not equal to)`,
+  startsWith: t`starts with`,
+  endsWith: t`ends with`,
+  contains: t`contains`,
 };
 
-const mapTypeToOperators: { [string]: Array<string> } = {
+export const mapTypeToRelationalOperators: { [string]: Array<string> } = {
+  // $FlowFixMe[incompatible-type]
   unknown: Object.keys(operatorLabels),
   number: ['=', '<', '>', '<=', '>=', '!='],
-  string: ['=', '!='],
+  time: ['<', '>', '<=', '>='],
+  string: ['=', '!=', 'startsWith', 'endsWith', 'contains'],
   color: ['=', '!='],
 };
 
-export default class RelationalOperatorField extends Component<ParameterFieldProps> {
-  _field: ?SelectField;
-  focus() {
-    if (this._field && this._field.focus) this._field.focus();
-  }
+export default (React.forwardRef<ParameterFieldProps, ParameterFieldInterface>(
+  function RelationalOperatorField(props: ParameterFieldProps, ref) {
+    const field = React.useRef<?SelectFieldInterface>(null);
+    const focus: FieldFocusFunction = options => {
+      if (field.current) field.current.focus(options);
+    };
+    React.useImperativeHandle(ref, () => ({
+      focus,
+    }));
 
-  render() {
-    const { parameterMetadata } = this.props;
+    const { parameterMetadata, value, onChange } = props;
     const description = parameterMetadata
       ? parameterMetadata.getDescription()
       : undefined;
@@ -39,38 +51,66 @@ export default class RelationalOperatorField extends Component<ParameterFieldPro
       ? parameterMetadata.getExtraInfo()
       : 'unknown';
     const operators =
-      mapTypeToOperators[comparedValueType] || mapTypeToOperators.unknown;
+      mapTypeToRelationalOperators[comparedValueType] ||
+      mapTypeToRelationalOperators.unknown;
+
+    React.useEffect(
+      () => {
+        if (!value) {
+          onChange(operators[0]);
+        }
+      },
+      [value, onChange, operators]
+    );
 
     return (
       <SelectField
-        margin={this.props.isInline ? 'none' : 'dense'}
+        margin={props.isInline ? 'none' : 'dense'}
         fullWidth
         floatingLabelText={description}
         helperMarkdownText={
           parameterMetadata ? parameterMetadata.getLongDescription() : undefined
         }
-        value={this.props.value}
-        onChange={(e, i, value: string) => this.props.onChange(value)}
-        ref={field => (this._field = field)}
-        hintText={t`Choose an operator`}
+        value={value}
+        onChange={(e, i, value: string) => onChange(value)}
+        ref={field}
+        translatableHintText={t`Choose an operator`}
       >
         {operators.map(operator => (
           <SelectOption
             key={operator}
             value={operator}
-            primaryText={operatorLabels[operator]}
+            // $FlowFixMe[invalid-computed-prop]
+            label={operatorLabels[operator]}
           />
         ))}
       </SelectField>
     );
   }
-}
+): React.ComponentType<{
+  ...ParameterFieldProps,
+  +ref?: React.RefSetter<ParameterFieldInterface>,
+}>);
 
 export const renderInlineRelationalOperator = ({
   value,
   InvalidParameterValue,
-}: ParameterInlineRendererProps) => {
-  if (!value) {
+  parameterMetadata,
+}: ParameterInlineRendererProps):
+  | '<'
+  | '='
+  | '>'
+  | string
+  | React.MixedElement
+  | React.Node => {
+  const comparedValueType = parameterMetadata
+    ? parameterMetadata.getExtraInfo()
+    : 'unknown';
+  const operators =
+    mapTypeToRelationalOperators[comparedValueType] ||
+    mapTypeToRelationalOperators.unknown;
+
+  if (!operators.includes(value)) {
     return (
       <InvalidParameterValue isEmpty>
         <Trans>Choose an operator</Trans>
@@ -84,14 +124,20 @@ export const renderInlineRelationalOperator = ({
     value !== '>' &&
     value !== '<=' &&
     value !== '>=' &&
-    value !== '!='
+    value !== '!=' &&
+    value !== 'startsWith' &&
+    value !== 'endsWith' &&
+    value !== 'contains'
   ) {
     return <InvalidParameterValue>{value}</InvalidParameterValue>;
   }
 
   if (value === '<=') return '\u2264';
   if (value === '>=') return '\u2265';
-  else if (value === '!=') return '\u2260';
+  if (value === '!=') return '\u2260';
+  if (value === 'startsWith') return <Trans>starts with</Trans>;
+  if (value === 'endsWith') return <Trans>ends with</Trans>;
+  if (value === 'contains') return <Trans>contains</Trans>;
 
   return value;
 };

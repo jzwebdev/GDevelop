@@ -1,44 +1,112 @@
+/// <reference path="helper/TileMapHelper.d.ts" />
 namespace gdjs {
   /**
-   * Displays a Tilemap object (mapeditor.org supported).
-   * @memberof gdjs
-   * @class TileMapRuntimeObject
-   * @extends gdjs.RuntimeObject
+   * @category Objects > Tile Map
    */
-  export class TileMapRuntimeObject extends gdjs.RuntimeObject {
+  export type TilemapObjectDataType = {
+    content: {
+      tilemapJsonFile: string;
+      tilesetJsonFile: string;
+      tilemapAtlasImage: string;
+      displayMode: 'visible' | 'all' | 'index';
+      layerIndex: integer;
+      levelIndex: integer;
+      animationSpeedScale: number;
+      animationFps: number;
+      collisionMaskTag: string;
+      isCollisionMaskEnabled: boolean;
+    };
+  };
+
+  /**
+   * @category Objects > Tile Map
+   */
+  export type TilemapObjectData = ObjectData & TilemapObjectDataType;
+
+  /**
+   * @category Objects > Tile Map
+   */
+  export type TilemapNetworkSyncDataType = {
+    op: number;
+    tmjf: string;
+    tsjf: string;
+    tmai: string;
+    dm: string;
+    lai: number;
+    lei: number;
+    asps: number;
+  };
+
+  /**
+   * @category Objects > Tile Map
+   */
+  export type TilemapNetworkSyncData = ObjectNetworkSyncData &
+    TilemapNetworkSyncDataType;
+
+  /**
+   * Displays a Tilemap object (LDtk and Tiled).
+   * @category Objects > Tile Map
+   */
+  export class TileMapRuntimeObject
+    extends gdjs.AbstractTileMapRuntimeObject
+    implements gdjs.Resizable, gdjs.Scalable, gdjs.OpacityHandler
+  {
     _frameElapsedTime: float = 0;
-    _opacity: float;
+    _opacity: float = 255;
     _tilemapJsonFile: string;
     _tilesetJsonFile: string;
     _tilemapAtlasImage: string;
     _displayMode: string;
     _layerIndex: integer;
+    editedLayerIndex: integer;
+    _levelIndex: integer;
     _animationSpeedScale: number;
     _animationFps: number;
-    _renderer: any;
+    _tileMapManager: gdjs.TileMap.TileMapRuntimeManager;
+    /** The unique tile map for a given resource. */
+    _originalTileMap: TileMapHelper.EditableTileMap | null = null;
+    /**
+     * Either the same as `_originalTileMap` when no edition happened
+     * or a cloned instance with some changes.
+     */
+    _tileMap: TileMapHelper.EditableTileMap | null = null;
+    _renderer: gdjs.TileMapRuntimeObjectPixiRenderer;
+    _isTileMapDirty: boolean = false;
+    _collisionTileMap: gdjs.TileMap.TransformedCollisionTileMap | null = null;
+    /**
+     * The tiles are filtered according to this tag.
+     *
+     * This allows have multiple objects with different usage
+     * for the same tile map.
+     * For instance, platforms, jumpthru, ladder, spike, water...
+     */
+    private _collisionMaskTag: string;
+    private isCollisionMaskEnabled = true;
 
-    constructor(runtimeScene, objectData) {
-      super(runtimeScene, objectData);
-      this._opacity = objectData.content.opacity;
+    constructor(
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      objectData: TilemapObjectData,
+      instanceData?: InstanceData
+    ) {
+      super(instanceContainer, objectData, instanceData);
       this._tilemapJsonFile = objectData.content.tilemapJsonFile;
       this._tilesetJsonFile = objectData.content.tilesetJsonFile;
       this._tilemapAtlasImage = objectData.content.tilemapAtlasImage;
       this._displayMode = objectData.content.displayMode;
       this._layerIndex = objectData.content.layerIndex;
+      this.editedLayerIndex = objectData.content.layerIndex;
+      this._levelIndex = objectData.content.levelIndex;
       this._animationSpeedScale = objectData.content.animationSpeedScale;
       this._animationFps = objectData.content.animationFps;
-      if (this._renderer) {
-        gdjs.TileMapRuntimeObjectRenderer.call(
-          this._renderer,
-          this,
-          runtimeScene
-        );
-      } else {
-        this._renderer = new gdjs.TileMapRuntimeObjectRenderer(
-          this,
-          runtimeScene
-        );
-      }
+      this._collisionMaskTag = objectData.content.collisionMaskTag;
+      this.isCollisionMaskEnabled = objectData.content.isCollisionMaskEnabled;
+      this._tileMapManager =
+        gdjs.TileMap.TileMapRuntimeManager.getManager(instanceContainer);
+      this._renderer = new gdjs.TileMapRuntimeObjectRenderer(
+        this,
+        instanceContainer
+      );
+      this.reloadTileMap();
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
       this.onCreated();
@@ -48,22 +116,29 @@ namespace gdjs {
       return this._renderer.getRendererObject();
     }
 
-    update(runtimeScene): void {
+    updatePreRender(instanceContainer: gdjs.RuntimeInstanceContainer): void {
+      if (!this.isHidden()) {
+        this.updateTileMap(this._isTileMapDirty);
+        this._isTileMapDirty = false;
+      }
+    }
+
+    update(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       if (this._animationSpeedScale <= 0 || this._animationFps === 0) {
         return;
       }
-      const elapsedTime = this.getElapsedTime(runtimeScene) / 1000;
+      const elapsedTime = this.getElapsedTime() / 1000;
       this._frameElapsedTime += elapsedTime * this._animationSpeedScale;
       while (this._frameElapsedTime > 1 / this._animationFps) {
-        this._renderer.incrementAnimationFrameX();
+        this._renderer.incrementAnimationFrameX(instanceContainer);
         this._frameElapsedTime -= 1 / this._animationFps;
       }
     }
 
-    updateFromObjectData(oldObjectData: any, newObjectData: any): boolean {
-      if (oldObjectData.content.opacity !== newObjectData.content.opacity) {
-        this.setOpacity(newObjectData.content.opacity);
-      }
+    updateFromObjectData(
+      oldObjectData: TilemapObjectData,
+      newObjectData: TilemapObjectData
+    ): boolean {
       if (
         oldObjectData.content.tilemapJsonFile !==
         newObjectData.content.tilemapJsonFile
@@ -84,7 +159,12 @@ namespace gdjs {
       if (
         oldObjectData.content.layerIndex !== newObjectData.content.layerIndex
       ) {
-        this.setLayerIndex(newObjectData.content.layerIndex);
+        this.setDisplayedLayerIndex(newObjectData.content.layerIndex);
+      }
+      if (
+        oldObjectData.content.levelIndex !== newObjectData.content.levelIndex
+      ) {
+        this.setLevelIndex(newObjectData.content.levelIndex);
       }
       if (
         oldObjectData.content.animationSpeedScale !==
@@ -108,155 +188,420 @@ namespace gdjs {
       return true;
     }
 
-    /**
-     * Initialize the extra parameters that could be set for an instance.
-     */
-    extraInitializationFromInitialInstance(initialInstanceData) {
-      if (initialInstanceData.customSize) {
-        this.setWidth(initialInstanceData.width);
-        this.setHeight(initialInstanceData.height);
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): TilemapNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        op: this._opacity,
+        tmjf: this._tilemapJsonFile,
+        tsjf: this._tilesetJsonFile,
+        tmai: this._tilemapAtlasImage,
+        dm: this._displayMode,
+        lai: this._layerIndex,
+        lei: this._levelIndex,
+        asps: this._animationSpeedScale,
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: TilemapNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      if (networkSyncData.op !== undefined) {
+        this.setOpacity(networkSyncData.op);
+      }
+      if (networkSyncData.tmjf !== undefined) {
+        this.setTilemapJsonFile(networkSyncData.tmjf);
+      }
+      if (networkSyncData.tsjf !== undefined) {
+        this.setTilesetJsonFile(networkSyncData.tsjf);
+      }
+      if (networkSyncData.tmai !== undefined) {
+        this._tilemapAtlasImage = networkSyncData.tmai;
+      }
+      if (networkSyncData.dm !== undefined) {
+        this.setDisplayMode(networkSyncData.dm);
+      }
+      if (networkSyncData.lai !== undefined) {
+        this.setDisplayedLayerIndex(networkSyncData.lai);
+      }
+      if (networkSyncData.lei !== undefined) {
+        this.setLevelIndex(networkSyncData.lei);
+      }
+      if (networkSyncData.asps !== undefined) {
+        this.setAnimationSpeedScale(networkSyncData.asps);
       }
     }
 
-    /**
-     * Set the Tilemap json file to display.
-     */
-    setTilemapJsonFile(tilemapJsonFile): void {
-      this._tilemapJsonFile = tilemapJsonFile;
-      this._renderer.updateTileMap();
+    extraInitializationFromInitialInstance(initialInstanceData): void {
+      if (initialInstanceData.customSize) {
+        this.setWidth(initialInstanceData.width);
+        this.setHeight(initialInstanceData.height);
+        this.invalidateTransformation();
+      }
+      this.setOpacity(
+        initialInstanceData.opacity === undefined
+          ? 255
+          : initialInstanceData.opacity
+      );
     }
 
-    getTilemapJsonFile() {
+    reloadTileMap(): void {
+      this._tileMapManager.getOrLoadTileMap(
+        this._tilemapJsonFile,
+        this._tilesetJsonFile,
+        this._levelIndex,
+        (tileMap: TileMapHelper.EditableTileMap | null) => {
+          if (!tileMap) {
+            // getOrLoadTileMap already warn.
+            return;
+          }
+          this._tileMapManager.getOrLoadTextureCache(
+            (textureName) => {
+              const game = this.getInstanceContainer().getGame();
+              const mappedName = game.resolveEmbeddedResource(
+                this._tilemapJsonFile,
+                textureName
+              );
+              return game
+                .getImageManager()
+                .getPIXITexture(
+                  mappedName
+                ) as unknown as PIXI.BaseTexture<PIXI.Resource>;
+            },
+            this._tilemapAtlasImage,
+            this._tilemapJsonFile,
+            this._tilesetJsonFile,
+            this._levelIndex,
+            (textureCache: TileMapHelper.TileTextureCache | null) => {
+              if (!textureCache) {
+                // getOrLoadTextureCache already log warns and errors.
+                return;
+              }
+              this._originalTileMap = tileMap;
+              this._tileMap = tileMap;
+              if (this.isCollisionMaskEnabled) {
+                this._collisionTileMap =
+                  new gdjs.TileMap.TransformedCollisionTileMap(
+                    tileMap,
+                    this._collisionMaskTag,
+                    this._layerIndex
+                  );
+              }
+              this._renderer.refreshPixiTileMap(textureCache, true);
+              this.invalidateHitboxes();
+              if (!this._tileMap.getTileLayer(this.editedLayerIndex)) {
+                for (const layer of this._tileMap.getLayers()) {
+                  if (this._tileMap.getTileLayer(layer.id)) {
+                    this.editedLayerIndex = layer.id;
+                    break;
+                  }
+                }
+              }
+            }
+          );
+        }
+      );
+    }
+
+    updateTileMap(forceUpdate: boolean): void {
+      this._tileMapManager.getOrLoadTextureCache(
+        (textureName) => {
+          const game = this.getInstanceContainer().getGame();
+          const mappedName = game.resolveEmbeddedResource(
+            this._tilemapJsonFile,
+            textureName
+          );
+          return game
+            .getImageManager()
+            .getPIXITexture(
+              mappedName
+            ) as unknown as PIXI.BaseTexture<PIXI.Resource>;
+        },
+        this._tilemapAtlasImage,
+        this._tilemapJsonFile,
+        this._tilesetJsonFile,
+        this._levelIndex,
+        (textureCache: TileMapHelper.TileTextureCache | null) => {
+          if (!textureCache) {
+            // getOrLoadTextureCache already log warns and errors.
+            return;
+          }
+          this._renderer.refreshPixiTileMap(textureCache, true);
+        }
+      );
+    }
+
+    onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
+    }
+
+    /**
+     * Set the Tilemap file to display.
+     */
+    setTilemapJsonFile(tilemapJsonFile: string): void {
+      this._tilemapJsonFile = tilemapJsonFile;
+      this.reloadTileMap();
+    }
+
+    getTilemapJsonFile(): string {
       return this._tilemapJsonFile;
     }
 
-    isTilemapJsonFile(selectedTilemapJsonFile): boolean {
+    isTilemapJsonFile(selectedTilemapJsonFile: string): boolean {
       return this._tilemapJsonFile === selectedTilemapJsonFile;
     }
 
-    setTilesetJsonFile(tilesetJsonFile) {
+    setTilesetJsonFile(tilesetJsonFile: string): void {
       this._tilesetJsonFile = tilesetJsonFile;
-      this._renderer.updateTileMap();
+      this.reloadTileMap();
     }
-    getTilesetJsonFile() {
+
+    getTilesetJsonFile(): string {
       return this._tilesetJsonFile;
     }
-    setAnimationFps(animationFps) {
+
+    setAnimationFps(animationFps: float) {
       this._animationFps = animationFps;
     }
-    getAnimationFps() {
+
+    getAnimationFps(): float {
       return this._animationFps;
     }
-    isTilesetJsonFile(selectedTilesetJsonFile) {
+
+    isTilesetJsonFile(selectedTilesetJsonFile: string): boolean {
       return this._tilesetJsonFile === selectedTilesetJsonFile;
     }
-    isDisplayMode(selectedDisplayMode) {
+
+    isDisplayMode(selectedDisplayMode: string): boolean {
       return this._displayMode === selectedDisplayMode;
     }
 
-    setDisplayMode(displayMode): void {
+    setDisplayMode(displayMode: string): void {
       this._displayMode = displayMode;
-      this._renderer.updateTileMap();
+      this.reloadTileMap();
     }
 
-    getDisplayMode() {
+    getDisplayMode(): string {
       return this._displayMode;
     }
 
-    setLayerIndex(layerIndex): void {
+    setDisplayedLayerIndex(layerIndex: integer): void {
       this._layerIndex = layerIndex;
-      this._renderer.updateTileMap();
+      this.reloadTileMap();
     }
 
-    getLayerIndex() {
+    getDisplayedLayerIndex(): integer {
       return this._layerIndex;
     }
 
-    setAnimationSpeedScale(animationSpeedScale): void {
+    /**
+     * Change which layer is used to edit and read tiles.
+     * @param layerIndex The index of the layer to edit
+     */
+    setEditedLayerIndex(layerIndex: integer): void {
+      this.editedLayerIndex = layerIndex;
+    }
+
+    getEditedLayerIndex(): integer {
+      return this.editedLayerIndex;
+    }
+
+    setLevelIndex(levelIndex: integer): void {
+      this._levelIndex = levelIndex;
+      this.reloadTileMap();
+    }
+
+    getLevelIndex() {
+      return this._levelIndex;
+    }
+
+    setAnimationSpeedScale(animationSpeedScale: float): void {
       this._animationSpeedScale = animationSpeedScale;
     }
 
-    getAnimationSpeedScale() {
+    getAnimationSpeedScale(): float {
       return this._animationSpeedScale;
     }
 
-    /**
-     * Set the width of the object.
-     * @param width The new width.
-     */
     setWidth(width: float): void {
-      if (this._renderer.getWidth() === width) return;
+      if (this.getWidth() === width) return;
 
       this._renderer.setWidth(width);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
+      this.invalidateTransformation();
     }
 
-    /**
-     * Set the height of the object.
-     * @param height The new height.
-     */
     setHeight(height: float): void {
-      if (this._renderer.getHeight() === height) return;
+      if (this.getHeight() === height) return;
 
       this._renderer.setHeight(height);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
+      this.invalidateTransformation();
+    }
+
+    setSize(newWidth: float, newHeight: float): void {
+      this.setWidth(newWidth);
+      this.setHeight(newHeight);
+    }
+
+    override getOriginalWidth(): float {
+      const tileMap = this._tileMap;
+      return tileMap ? tileMap.getWidth() : 20;
+    }
+
+    override getOriginalHeight(): float {
+      const tileMap = this._tileMap;
+      return tileMap ? tileMap.getHeight() : 20;
     }
 
     /**
-     * Set object position on X axis.
-     * @param x The new position X of the object.
+     * Get the scale of the object (or the geometric mean of the X and Y scale in case they are different).
+     *
+     * @return the scale of the object (or the geometric mean of the X and Y scale in case they are different).
      */
+    getScale(): float {
+      const scaleX = this.getScaleX();
+      const scaleY = this.getScaleY();
+      return scaleX === scaleY ? scaleX : Math.sqrt(scaleX * scaleY);
+    }
+
+    /**
+     * Change the scale on X and Y axis of the object.
+     *
+     * @param scale The new scale (must be greater than 0).
+     */
+    setScale(scale: float): void {
+      this.setScaleX(scale);
+      this.setScaleY(scale);
+    }
+
+    /**
+     * Change the scale on X axis of the object (changing its width).
+     *
+     * @param scaleX The new scale (must be greater than 0).
+     */
+    setScaleX(scaleX: float): void {
+      if (scaleX < 0) {
+        scaleX = 0;
+      }
+      if (this.getScaleX() === scaleX) return;
+
+      this._renderer.setScaleX(scaleX);
+      this.invalidateHitboxes();
+      this.invalidateTransformation();
+    }
+
+    /**
+     * Change the scale on Y axis of the object (changing its width).
+     *
+     * @param scaleY The new scale (must be greater than 0).
+     */
+    setScaleY(scaleY: float): void {
+      if (scaleY < 0) {
+        scaleY = 0;
+      }
+      if (this.getScaleY() === scaleY) return;
+
+      this._renderer.setScaleY(scaleY);
+      this.invalidateHitboxes();
+      this.invalidateTransformation();
+    }
+
     setX(x: float): void {
       super.setX(x);
       this._renderer.updatePosition();
+      this.invalidateTransformation();
     }
 
-    /**
-     * Set object position on Y axis.
-     * @param y The new position Y of the object.
-     */
     setY(y: float): void {
       super.setY(y);
       this._renderer.updatePosition();
+      this.invalidateTransformation();
     }
 
-    /**
-     * Set the angle of the object.
-     * @param angle The new angle of the object.
-     */
     setAngle(angle: float): void {
       super.setAngle(angle);
       this._renderer.updateAngle();
+      this.invalidateTransformation();
     }
 
-    /**
-     * Set object opacity.
-     * @param opacity The new opacity of the object (0-255).
-     */
     setOpacity(opacity: float): void {
       this._opacity = opacity;
       this._renderer.updateOpacity();
     }
 
-    /**
-     * Get object opacity.
-     */
-    getOpacity() {
+    getOpacity(): float {
       return this._opacity;
     }
 
-    /**
-     * Get the width of the object.
-     */
     getWidth(): float {
       return this._renderer.getWidth();
     }
 
-    /**
-     * Get the height of the object.
-     */
     getHeight(): float {
       return this._renderer.getHeight();
+    }
+
+    getScaleX(): float {
+      return this._renderer.getScaleX();
+    }
+
+    getScaleY(): float {
+      return this._renderer.getScaleY();
+    }
+
+    getTileMap(): TileMapHelper.EditableTileMap | null {
+      return this._tileMap;
+    }
+
+    /**
+     * Return a tile map that is safe to modify.
+     */
+    getTileMapForEdition(): TileMapHelper.EditableTileMap | null {
+      if (!this._tileMap || !this._originalTileMap) {
+        return null;
+      }
+      if (this._tileMap === this._originalTileMap) {
+        this._tileMap = this._originalTileMap.clone();
+        this._collisionTileMap = new gdjs.TileMap.TransformedCollisionTileMap(
+          this._tileMap,
+          this._collisionMaskTag,
+          this._layerIndex
+        );
+        this.invalidateTransformation();
+      }
+      return this._tileMap;
+    }
+
+    getCollisionTileMap(): gdjs.TileMap.TransformedCollisionTileMap | null {
+      return this._collisionTileMap;
+    }
+
+    getCollisionMaskTag(): string {
+      return this._collisionMaskTag;
+    }
+
+    invalidateTileMap(): void {
+      this._isTileMapDirty = true;
+    }
+
+    getTileSetColumnCount(): integer {
+      if (!this._tileMap) {
+        return 0;
+      }
+      return this._tileMap.getTileSetColumnCount();
+    }
+
+    getTileSetRowCount(): integer {
+      if (!this._tileMap) {
+        return 0;
+      }
+      return this._tileMap.getTileSetRowCount();
     }
   }
   gdjs.registerObject('TileMap::TileMap', gdjs.TileMapRuntimeObject);

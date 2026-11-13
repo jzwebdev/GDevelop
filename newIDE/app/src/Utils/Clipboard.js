@@ -1,11 +1,14 @@
 // @flow
-import optionalRequire from './OptionalRequire.js';
+import optionalRequire from './OptionalRequire';
 const electron = optionalRequire('electron');
-const electronClipboard = electron ? electron.clipboard : null;
+const ipcRenderer = electron ? electron.ipcRenderer : null;
 
 export type ClipboardKind = string;
 
 let internalClipboard = '';
+
+export const copyTextToClipboard = (text: string): Promise<void> =>
+  navigator.clipboard.writeText(text);
 
 const mangleClipboardKind = (kind: ClipboardKind): string => {
   // Mangle the name with GDevelop specific strings and random
@@ -14,92 +17,6 @@ const mangleClipboardKind = (kind: ClipboardKind): string => {
   return 'GDEVELOP_' + kind + '_CLIPBOARD_KIND-jsBdHbLy912y8Rc';
 };
 
-/**
- * Access to properties and type objects safely (ensuring no crash and no exception
- * in case the expected type is not the one found or totally different than assumed).
- *
- * Each method returns null if the expected type is not found.
- *
- * Useful to deal with arbitrary content coming from the Clipboard.
- */
-export class SafeExtractor {
-  static extractNumberProperty(
-    anything: any,
-    propertyName: string
-  ): number | null {
-    const object = this.extractObject(anything);
-    if (!object) return null;
-
-    const property = anything[propertyName];
-
-    if (typeof property !== 'number') return null;
-
-    return property;
-  }
-
-  static extractStringProperty(
-    anything: any,
-    propertyName: string
-  ): string | null {
-    const object = this.extractObject(anything);
-    if (!object) return null;
-
-    const property = anything[propertyName];
-
-    if (typeof property !== 'string') return null;
-
-    return property;
-  }
-
-  static extractObjectProperty(
-    anything: any,
-    propertyName: string
-  ): Object | null {
-    const object = this.extractObject(anything);
-    if (!object) return null;
-
-    const property = anything[propertyName];
-
-    return this.extractObject(property);
-  }
-
-  static extractArrayProperty(
-    anything: any,
-    propertyName: string
-  ): Array<any> | null {
-    const object = this.extractObject(anything);
-    if (!object) return null;
-
-    const property = anything[propertyName];
-
-    return this.extractArray(property);
-  }
-
-  static extractObject(anything: any): Object | null {
-    if (
-      anything === null ||
-      anything === undefined ||
-      typeof anything !== 'object' ||
-      Array.isArray(anything)
-    )
-      return null;
-
-    return anything;
-  }
-
-  static extractArray(anything: any): Array<any> | null {
-    if (
-      anything === null ||
-      anything === undefined ||
-      typeof anything !== 'object' ||
-      !Array.isArray(anything)
-    )
-      return null;
-
-    return anything;
-  }
-}
-
 export default class Clipboard {
   static set(kind: ClipboardKind, object: any) {
     const text = JSON.stringify({
@@ -107,8 +24,8 @@ export default class Clipboard {
       content: object,
     });
 
-    if (electronClipboard) {
-      electronClipboard.writeText(text);
+    if (ipcRenderer) {
+      ipcRenderer.sendSync('clipboard-write-text', text);
     } else {
       internalClipboard = text;
     }
@@ -122,8 +39,8 @@ export default class Clipboard {
    */
   static has(kind: ClipboardKind): boolean {
     let text = '';
-    if (electronClipboard) {
-      text = electronClipboard.readText();
+    if (ipcRenderer) {
+      text = ipcRenderer.sendSync('clipboard-read-text');
     } else {
       text = internalClipboard;
     }
@@ -142,8 +59,8 @@ export default class Clipboard {
     if (!Clipboard.has(kind)) return null;
 
     let text = '';
-    if (electronClipboard) {
-      text = electronClipboard.readText();
+    if (ipcRenderer) {
+      text = ipcRenderer.sendSync('clipboard-read-text');
     } else {
       text = internalClipboard;
     }

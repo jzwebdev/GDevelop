@@ -1,17 +1,14 @@
 // @flow
-import { Trans } from '@lingui/macro';
 import * as React from 'react';
 import { Column } from '../UI/Grid';
 import Text from '../UI/Text';
 import AlertMessage from '../UI/AlertMessage';
 
-export default function Welcome() {
+export default function Welcome(): React.Node {
   return (
     <Column>
       <Text size="title">Welcome to GDevelop Storybook</Text>
-      <Text>
-        <Trans>This is a UI component dev environment for GDevelop.</Trans>
-      </Text>
+      <Text>This is a UI component dev environment for GDevelop.</Text>
       <Text>
         Stories are inside the "newIDE/app/src/stories" directory.
         <br />A story is a single state of one or more UI components. You can

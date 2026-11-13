@@ -1,22 +1,41 @@
 // @flow
 import {
-  enumerateAllInstructions,
-  getObjectParameterIndex,
   enumerateObjectAndBehaviorsInstructions,
   enumerateFreeInstructions,
 } from './EnumerateInstructions';
 import { setupInstructionParameters } from './SetupInstructionParameters';
+import { ProjectScopedContainersAccessor } from '../InstructionOrExpression/EventsScope';
+
 const gd: libGDevelop = global.gd;
+
+// $FlowFixMe[incompatible-type]
+// $FlowFixMe[missing-local-annot]
+// $FlowFixMe[cannot-resolve-name]
+const makeFakeI18n = (fakeI18n): I18nType => ({
+  ...fakeI18n,
+  _: message => message.id,
+});
 
 describe('setupInstructionParameters', () => {
   it('sets the proper number of parameters', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    layout.insertNewObject(project, 'Sprite', objectName, 0);
+    layout.getObjects().insertNewObject(project, 'Sprite', objectName, 0);
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction
-    const enumeratedInstructions = enumerateFreeInstructions(false);
+    const enumeratedInstructions = enumerateFreeInstructions(
+      false,
+      project,
+      makeFakeI18n()
+    );
     const playMusicInstruction = enumeratedInstructions.find(
       enumeratedInstruction => enumeratedInstruction.type === 'PlayMusic'
     );
@@ -28,35 +47,47 @@ describe('setupInstructionParameters', () => {
     const instruction = new gd.Instruction();
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       playMusicInstruction.metadata
     );
 
     // Check that parameters were created
     expect(instruction.getParametersCount()).toBe(5);
-    expect(instruction.getParameter(0)).toBe('');
-    expect(instruction.getParameter(1)).toBe('');
-    expect(instruction.getParameter(2)).toBe('');
-    expect(instruction.getParameter(3)).toBe('');
-    expect(instruction.getParameter(4)).toBe('');
+    expect(instruction.getParameter(0).getPlainString()).toBe('');
+    expect(instruction.getParameter(1).getPlainString()).toBe('');
+    expect(instruction.getParameter(2).getPlainString()).toBe('');
+    expect(instruction.getParameter(3).getPlainString()).toBe('');
+    expect(instruction.getParameter(4).getPlainString()).toBe('');
   });
 
   it('sets the proper number of parameters and the object name', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    layout.insertNewObject(project, 'Sprite', objectName, 0);
+    const behaviorName = 'Animation';
+    layout.getObjects().insertNewObject(project, 'Sprite', objectName, 0);
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction for the object
     const enumeratedInstructions = enumerateObjectAndBehaviorsInstructions(
       false,
+      project.getObjects(),
+      layout.getObjects(),
+      objectName,
       project,
-      layout,
-      objectName
+      makeFakeI18n()
     );
     const setAnimationNameInstruction = enumeratedInstructions.find(
-      enumeratedInstruction => enumeratedInstruction.type === 'SetAnimationName'
+      enumeratedInstruction =>
+        enumeratedInstruction.type ===
+        'AnimatableCapability::AnimatableBehavior::SetName'
     );
 
     if (!setAnimationNameInstruction) {
@@ -66,35 +97,50 @@ describe('setupInstructionParameters', () => {
     const instruction = new gd.Instruction();
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       setAnimationNameInstruction.metadata,
       objectName
     );
 
     // Check that parameters were created and the object name set
-    expect(instruction.getParametersCount()).toBe(2);
-    expect(instruction.getParameter(0)).toBe(objectName);
-    expect(instruction.getParameter(1)).toBe('');
+    expect(instruction.getParametersCount()).toBe(4);
+    expect(instruction.getParameter(0).getPlainString()).toBe(objectName);
+    expect(instruction.getParameter(1).getPlainString()).toBe(behaviorName);
+    // Operator - defaults to '=' when not set
+    expect(instruction.getParameter(2).getPlainString()).toBe('=');
+    // Operand
+    expect(instruction.getParameter(3).getPlainString()).toBe('');
   });
 
   it('sets the proper parameters for a behavior', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    const object = layout.insertNewObject(project, 'Sprite', objectName, 0);
+    const object = layout
+      .getObjects()
+      .insertNewObject(project, 'Sprite', objectName, 0);
     object.addNewBehavior(
       project,
       'PlatformBehavior::PlatformerObjectBehavior',
       'PlatformerObject'
     );
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction of the object behavior
     const enumeratedInstructions = enumerateObjectAndBehaviorsInstructions(
       false,
+      project.getObjects(),
+      layout.getObjects(),
+      objectName,
       project,
-      layout,
-      objectName
+      makeFakeI18n()
     );
     const jumpSpeedInstruction = enumeratedInstructions.find(
       enumeratedInstruction =>
@@ -108,7 +154,7 @@ describe('setupInstructionParameters', () => {
     const instruction = new gd.Instruction();
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       jumpSpeedInstruction.metadata,
       objectName
@@ -116,17 +162,22 @@ describe('setupInstructionParameters', () => {
 
     // Check that parameters were created, the object name and behavior set
     expect(instruction.getParametersCount()).toBe(4);
-    expect(instruction.getParameter(0)).toBe(objectName);
-    expect(instruction.getParameter(1)).toBe('PlatformerObject');
-    expect(instruction.getParameter(2)).toBe(''); // In the future, this could be set to a default value.
-    expect(instruction.getParameter(3)).toBe('');
+    expect(instruction.getParameter(0).getPlainString()).toBe(objectName);
+    expect(instruction.getParameter(1).getPlainString()).toBe(
+      'PlatformerObject'
+    );
+    expect(instruction.getParameter(2).getPlainString()).toBe('='); // Operator defaults to '='
+    expect(instruction.getParameter(3).getPlainString()).toBe('');
   });
 
   it('sets the proper parameters for a behavior, selecting the first behavior if multiple', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    const object = layout.insertNewObject(project, 'Sprite', objectName, 0);
+    const object = layout
+      .getObjects()
+      .insertNewObject(project, 'Sprite', objectName, 0);
     object.addNewBehavior(
       project,
       'PlatformBehavior::PlatformerObjectBehavior',
@@ -137,13 +188,21 @@ describe('setupInstructionParameters', () => {
       'PlatformBehavior::PlatformerObjectBehavior',
       'OtherPlatformerObject'
     );
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction of the object behavior
     const enumeratedInstructions = enumerateObjectAndBehaviorsInstructions(
       false,
+      project.getObjects(),
+      layout.getObjects(),
+      objectName,
       project,
-      layout,
-      objectName
+      makeFakeI18n()
     );
     const jumpSpeedInstruction = enumeratedInstructions.find(
       enumeratedInstruction =>
@@ -157,7 +216,7 @@ describe('setupInstructionParameters', () => {
     const instruction = new gd.Instruction();
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       jumpSpeedInstruction.metadata,
       objectName
@@ -165,15 +224,20 @@ describe('setupInstructionParameters', () => {
 
     // Check that parameters were created, the object name and behavior set
     expect(instruction.getParametersCount()).toBe(4);
-    expect(instruction.getParameter(0)).toBe(objectName);
-    expect(instruction.getParameter(1)).toBe('FirstPlatformerObject');
+    expect(instruction.getParameter(0).getPlainString()).toBe(objectName);
+    expect(instruction.getParameter(1).getPlainString()).toBe(
+      'FirstPlatformerObject'
+    );
   });
 
   it('sets the proper parameters for a behavior, changing it if a wrong behavior name is entered', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    const object = layout.insertNewObject(project, 'Sprite', objectName, 0);
+    const object = layout
+      .getObjects()
+      .insertNewObject(project, 'Sprite', objectName, 0);
     object.addNewBehavior(
       project,
       'PlatformBehavior::PlatformerObjectBehavior',
@@ -184,13 +248,21 @@ describe('setupInstructionParameters', () => {
       'PlatformBehavior::PlatformerObjectBehavior',
       'OtherPlatformerObject'
     );
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction of the object behavior
     const enumeratedInstructions = enumerateObjectAndBehaviorsInstructions(
       false,
+      project.getObjects(),
+      layout.getObjects(),
+      objectName,
       project,
-      layout,
-      objectName
+      makeFakeI18n()
     );
     const jumpSpeedInstruction = enumeratedInstructions.find(
       enumeratedInstruction =>
@@ -207,7 +279,7 @@ describe('setupInstructionParameters', () => {
     instruction.setParameter(1, 'WrongName');
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       jumpSpeedInstruction.metadata,
       objectName
@@ -215,15 +287,20 @@ describe('setupInstructionParameters', () => {
 
     // Check that parameters were created, the object name and behavior set
     expect(instruction.getParametersCount()).toBe(4);
-    expect(instruction.getParameter(0)).toBe(objectName);
-    expect(instruction.getParameter(1)).toBe('FirstPlatformerObject');
+    expect(instruction.getParameter(0).getPlainString()).toBe(objectName);
+    expect(instruction.getParameter(1).getPlainString()).toBe(
+      'FirstPlatformerObject'
+    );
   });
 
   it('sets the proper parameters for a behavior, letting an existing behavior name if it is valid', () => {
+    // $FlowFixMe[invalid-constructor]
     const project = new gd.ProjectHelper.createNewGDJSProject();
     const layout = project.insertNewLayout('Scene', 0);
     const objectName = 'MySpriteObject';
-    const object = layout.insertNewObject(project, 'Sprite', objectName, 0);
+    const object = layout
+      .getObjects()
+      .insertNewObject(project, 'Sprite', objectName, 0);
     object.addNewBehavior(
       project,
       'PlatformBehavior::PlatformerObjectBehavior',
@@ -234,13 +311,21 @@ describe('setupInstructionParameters', () => {
       'PlatformBehavior::PlatformerObjectBehavior',
       'OtherPlatformerObject'
     );
+    const projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+      {
+        project,
+        layout,
+      }
+    );
 
     // Simulate that we select an instruction of the object behavior
     const enumeratedInstructions = enumerateObjectAndBehaviorsInstructions(
       false,
+      project.getObjects(),
+      layout.getObjects(),
+      objectName,
       project,
-      layout,
-      objectName
+      makeFakeI18n()
     );
     const jumpSpeedInstruction = enumeratedInstructions.find(
       enumeratedInstruction =>
@@ -257,7 +342,7 @@ describe('setupInstructionParameters', () => {
     instruction.setParameter(1, 'OtherPlatformerObject');
     setupInstructionParameters(
       project,
-      layout,
+      projectScopedContainersAccessor,
       instruction,
       jumpSpeedInstruction.metadata,
       objectName
@@ -265,7 +350,9 @@ describe('setupInstructionParameters', () => {
 
     // Check that parameters were created, the object name and behavior set
     expect(instruction.getParametersCount()).toBe(4);
-    expect(instruction.getParameter(0)).toBe(objectName);
-    expect(instruction.getParameter(1)).toBe('OtherPlatformerObject');
+    expect(instruction.getParameter(0).getPlainString()).toBe(objectName);
+    expect(instruction.getParameter(1).getPlainString()).toBe(
+      'OtherPlatformerObject'
+    );
   });
 });

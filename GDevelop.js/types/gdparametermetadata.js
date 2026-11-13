@@ -13,12 +13,17 @@ declare class gdParameterMetadata {
   setDescription(description_: string): gdParameterMetadata;
   getLongDescription(): string;
   setLongDescription(longDescription_: string): gdParameterMetadata;
+  getHint(): string;
+  setHint(hint_: string): gdParameterMetadata;
   isCodeOnly(): boolean;
   setCodeOnly(codeOnly_: boolean): gdParameterMetadata;
   getDefaultValue(): string;
   setDefaultValue(defaultValue_: string): gdParameterMetadata;
+  setValueTypeMetadata(type: gdValueTypeMetadata): gdParameterMetadata;
+  getValueTypeMetadata(): gdValueTypeMetadata;
   static isObject(param: string): boolean;
   static isBehavior(param: string): boolean;
+  static isExpression(type_: string, parameterType: string): boolean;
   serializeTo(element: gdSerializerElement): void;
   unserializeFrom(element: gdSerializerElement): void;
   delete(): void;

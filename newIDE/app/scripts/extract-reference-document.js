@@ -9,12 +9,12 @@ const fs = require('fs').promises;
 const path = require('path');
 const shell = require('shelljs');
 const {
-  gdevelopWikiUrlRoot,
-  getHelpLink,
   generateReadMoreLink,
   improperlyFormattedHelpPaths,
   getExtensionFolderName,
 } = require('./lib/WikiHelpLink');
+const { groupBy, sortKeys } = require('./lib/ArrayHelpers');
+const { generateAllExtensionsSections } = require('./lib/WikiExtensionTable');
 
 shell.exec('node import-GDJS-Runtime.js');
 
@@ -22,110 +22,48 @@ const ignoredExtensionNames = ['BuiltinJoystick'];
 const gdRootPath = path.join(__dirname, '..', '..', '..');
 const outputRootPath = path.join(gdRootPath, 'docs-wiki');
 const allFeaturesRootPath = path.join(outputRootPath, 'all-features');
-const allFeaturesFilePath = path.join(outputRootPath, 'all-features.txt');
+const allFeaturesFilePath = path.join(allFeaturesRootPath, 'index.md');
 const expressionsFilePath = path.join(
   allFeaturesRootPath,
-  'expressions-reference.txt'
+  'expressions-reference.md'
 );
 
-// Types definitions used in this script:
+const {
+  generateExtensionReference,
+  generateExtensionRawText,
+  rawTextsToString,
+  generateExpressionsTableHeader,
+  generateObjectHeaderText,
+  generateObjectNoExpressionsText,
+  generateBehaviorHeaderText,
+  generateBehaviorNoExpressionsText,
+  generateHeader,
+} = require('./lib/ExtensionReferenceGenerator');
 
-/**
- * @typedef {Object} RawText A text to be shown on a page
- * @prop {string} text The text to render (in Markdown/Dokuwiki syntax)
- */
+/** @typedef {import("./lib/ExtensionReferenceGenerator.js").RawText} RawText */
+/** @typedef {import("./lib/ExtensionReferenceGenerator.js").ExtensionReference} ExtensionReference */
+/** @typedef {import("./lib/WikiExtensionTable.js").ExtensionItem} ExtensionItem */
+/** @typedef {import('../../../GDevelop.js/types').PlatformExtension} PlatformExtension */
 
-/**
- * @typedef {Object} ReferenceText A text with metadata to format/manipulate/order it.
- * @prop {string} orderKey The type of the expression, instruction, or anything that help to uniquely order this text.
- * @prop {string} text The text to render (in Markdown/Dokuwiki syntax)
- */
-
-/**
- * @typedef {Object} ObjectReference
- * @prop {any} objectMetadata The object.
- * @prop {Array<ReferenceText>} actionsReferenceTexts Reference texts for the object actions.
- * @prop {Array<ReferenceText>} conditionsReferenceTexts Reference texts for the object conditions.
- * @prop {Array<ReferenceText>} expressionsReferenceTexts Reference texts for the object expressions.
- */
-
-/**
- * @typedef {Object} BehaviorReference
- * @prop {any} behaviorMetadata The behavior.
- * @prop {Array<ReferenceText>} actionsReferenceTexts Reference texts for the behavior actions.
- * @prop {Array<ReferenceText>} conditionsReferenceTexts Reference texts for the behavior conditions.
- * @prop {Array<ReferenceText>} expressionsReferenceTexts Reference texts for the behavior expressions.
- */
-
-/**
- * @typedef {Object} ExtensionReference
- * @prop {any} extension The extension.
- * @prop {Array<ReferenceText>} freeExpressionsReferenceTexts Reference texts for free expressions.
- * @prop {Array<ReferenceText>} freeActionsReferenceTexts Reference texts for free actions.
- * @prop {Array<ReferenceText>} freeConditionsReferenceTexts Reference texts for free conditions.
- * @prop {Array<ObjectReference>} objectReferences Reference of all extension objects.
- * @prop {Array<BehaviorReference>} behaviorReferences Reference of all extension behaviors.
- */
-
-const sanitizeExpressionDescription = str => {
-  return (
-    str
-      // Disallow new lines in descriptions:
-      .replace(/\n/g, '')
-      // Replace a few description parts that can conflict with DokuWiki/Markdown:
-      .replace(/\)\*x/, ') * x')
-      .replace(/x\^n/, '"x to the power n"')
-  );
-};
-
-const translateTypeToHumanReadableType = type => {
-  if (type === 'expression') return 'number';
-  if (type === 'objectList') return 'object';
-  if (type === 'objectPtr') return 'object';
-  if (type === 'stringWithSelector') return 'string';
-
-  return type;
-};
-
+/** @returns {RawText} */
 const generateFileHeaderText = () => {
   return {
     text: `# Expressions reference
 
 Expressions can be entered when you see a field with one of these buttons:
 
-{{ :gdevelop5:field_expressions.png?nolink |}}
+![](/gdevelop5/field_expressions.png)
 
-  * The left button indicates a "string expression" (a text)
-  * The right button indicates a "numerical expression" (a number)
+* The left button indicates a "string expression" (a text)
+* The right button indicates a "numerical expression" (a number)
 
 This page is a reference of all expressions that can be used in GDevelop, grouped by the extension,
-object or behavior they belong too. When \`Object\` is written, you should enter an object name. **[[gdevelop5:all-features:expressions|Learn more here about how to write expressions.]]**
+object or behavior they belong too. When \`Object\` is written, you should enter an object name. **[Learn more here about how to write expressions](/gdevelop5/all-features/expressions)**
 
-<note>Expressions are sometime also called functions, like in mathematics.</note>
+!!! tip
+
+    Expressions are sometime also called functions, like in mathematics.
 `,
-  };
-};
-
-/** @returns {RawText} */
-const generateExtensionHeaderText = ({ extension, depth }) => {
-  return {
-    text:
-      generateHeader({ headerName: extension.getFullName(), depth }).text +
-      `
-${extension.getDescription()} ${generateReadMoreLink(extension.getHelpPath())}
-`,
-  };
-};
-
-/** @returns {RawText} */
-const generateExtensionFooterText = ({ extension }) => {
-  return {
-    text:
-      `
----
-*This page is an auto-generated reference page about the **${extension.getFullName()}** feature of [[https://gdevelop-app.com/|GDevelop, the open-source, cross-platform game engine designed for everyone]].*` +
-      ' ' +
-      'Learn more about [[gdevelop5:all-features|all GDevelop features here]].',
   };
 };
 
@@ -134,257 +72,6 @@ const generateExtensionSeparatorText = () => {
   return {
     text: '\n---\n\n',
   };
-};
-
-/** @returns {RawText} */
-const generateObjectHeaderText = ({
-  extension,
-  objectMetadata,
-  showExtensionName,
-  showHelpLink,
-}) => {
-  // Skip the header for the base object. The "Base object" extension
-  // will already have an header and explanation.
-  if (objectMetadata.getName() === '') {
-    return { text: '' };
-  }
-
-  const additionalText =
-    showExtensionName &&
-    extension.getFullName() !== objectMetadata.getFullName()
-      ? `(from extension ${extension.getFullName()})`
-      : '';
-
-  const helpPath = showHelpLink
-    ? objectMetadata.getHelpPath() || extension.getHelpPath()
-    : '';
-
-  return {
-    text: `
-## ${objectMetadata.getFullName()} ${additionalText}
-
-${objectMetadata.getDescription()} ${generateReadMoreLink(helpPath)}
-`,
-  };
-};
-
-/** @returns {RawText} */
-const generateBehaviorHeaderText = ({
-  extension,
-  behaviorMetadata,
-  showExtensionName,
-  showHelpLink,
-}) => {
-  const additionalText =
-    showExtensionName &&
-    extension.getFullName() !== behaviorMetadata.getFullName()
-      ? `(from extension ${extension.getFullName()})`
-      : '';
-
-  const helpPath = showHelpLink
-    ? behaviorMetadata.getHelpPath() || extension.getHelpPath()
-    : '';
-
-  return {
-    text: `
-## ${behaviorMetadata.getFullName()} ${additionalText}
-
-${behaviorMetadata.getDescription()} ${generateReadMoreLink(helpPath)}
-`,
-  };
-};
-
-/** @returns {RawText} */
-const generateObjectNoExpressionsText = () => {
-  return {
-    text: `_No expressions for this object._\n`,
-  };
-};
-
-/** @returns {RawText} */
-const generateBehaviorNoExpressionsText = () => {
-  return {
-    text: `_No expressions for this behavior._\n`,
-  };
-};
-
-/**
- * @param {?{ headerName: string, depth: number }} headerOptions
- * @returns {RawText}
- */
-const generateExpressionsTableHeader = headerOptions => {
-  // We don't put a header for the last column
-  const text =
-    (headerOptions ? generateHeader(headerOptions).text + '\n' : '') +
-    `^ Expression ^ Description ^  ^`;
-  return {
-    text,
-  };
-};
-
-/**
- * @param {{ headerName: string, depth: number }} headerOptions
- * @returns {RawText}
- */
-const generateHeader = ({ headerName, depth }) => {
-  const markdownHeaderMark = Array(depth)
-    .fill('#')
-    .join('');
-  return {
-    text: `${markdownHeaderMark} ${headerName}\n`,
-  };
-};
-
-/** @returns {ReferenceText} */
-const generateInstructionReferenceRowsText = ({
-  instructionType,
-  instructionMetadata,
-  isCondition,
-  objectMetadata,
-  behaviorMetadata,
-}) => {
-  return {
-    orderKey: instructionType,
-    text:
-      '**' +
-      instructionMetadata.getFullName() +
-      '**\\\\' +
-      '\n' +
-      instructionMetadata.getDescription().replace(/\n/, '\\\\\n') +
-      '\n',
-  };
-};
-
-/** @returns {ReferenceText} */
-const generateExpressionReferenceRowsText = ({
-  expressionType,
-  expressionMetadata,
-  objectMetadata,
-  behaviorMetadata,
-}) => {
-  let parameterRows = [];
-  let parameterStrings = [];
-  mapVector(expressionMetadata.getParameters(), (parameterMetadata, index) => {
-    if ((!!objectMetadata && index < 1) || (!!behaviorMetadata && index < 2)) {
-      return; // Skip the first (or first twos) parameters by convention.
-    }
-    if (parameterMetadata.isCodeOnly()) return;
-
-    const sanitizedDescription = sanitizeExpressionDescription(
-      [
-        parameterMetadata.getDescription(),
-        parameterMetadata.getLongDescription(),
-        parameterMetadata.isOptional() ? '_Optional_.' : '',
-      ]
-        .filter(Boolean)
-        .join(' ')
-    );
-
-    const humanReadableType = translateTypeToHumanReadableType(
-      parameterMetadata.getType()
-    );
-
-    parameterRows.push(
-      `|:::| _${humanReadableType}_ | ${sanitizedDescription} |`
-    );
-    parameterStrings.push(humanReadableType);
-  });
-
-  let expressionUsage = '';
-  if (objectMetadata) {
-    expressionUsage = 'Object.' + expressionType;
-  } else if (behaviorMetadata) {
-    expressionUsage =
-      'Object.' + behaviorMetadata.getDefaultName() + '::' + expressionType;
-  } else {
-    expressionUsage = expressionType;
-  }
-  expressionUsage += '(' + parameterStrings.join(', ') + ')';
-
-  const sanitizedExpression = sanitizeExpressionDescription(
-    expressionMetadata.getDescription()
-  );
-
-  let text = `| \`${expressionUsage}\` | ${sanitizedExpression} ||`;
-  if (parameterRows.length) {
-    text += '\n' + parameterRows.join('\n');
-  }
-
-  return {
-    orderKey: expressionType,
-    text,
-  };
-};
-
-/**
- * @param {{ instructionsMetadata?: any, areConditions: boolean, objectMetadata?: any, behaviorMetadata?: any }} metadata
- * @returns {Array<ReferenceText>}
- */
-const generateInstructionsReferenceRowsTexts = ({
-  instructionsMetadata,
-  areConditions,
-  objectMetadata,
-  behaviorMetadata,
-}) => {
-  /** @type {Array<string>} */
-  const instructionTypes = instructionsMetadata.keys().toJSArray();
-  // @ts-ignore
-  return instructionTypes
-    .map(instructionType => {
-      const instructionMetadata = instructionsMetadata.get(instructionType);
-
-      if (instructionMetadata.isHidden()) return null;
-
-      return generateInstructionReferenceRowsText({
-        instructionType,
-        instructionMetadata,
-        isCondition: areConditions,
-        objectMetadata,
-        behaviorMetadata,
-      });
-    })
-    .filter(Boolean);
-};
-
-/**
- * @param {{ expressionsMetadata?: any, objectMetadata?: any, behaviorMetadata?: any }} metadata
- * @returns {Array<ReferenceText>}
- */
-const generateExpressionsReferenceRowsTexts = ({
-  expressionsMetadata,
-  objectMetadata,
-  behaviorMetadata,
-}) => {
-  /** @type {Array<string>} */
-  const expressionTypes = expressionsMetadata.keys().toJSArray();
-  // @ts-ignore
-  return expressionTypes
-    .map(expressionType => {
-      const expressionMetadata = expressionsMetadata.get(expressionType);
-
-      if (!expressionMetadata.isShown()) return null;
-
-      return generateExpressionReferenceRowsText({
-        expressionType,
-        expressionMetadata,
-        objectMetadata,
-        behaviorMetadata,
-      });
-    })
-    .filter(Boolean);
-};
-
-/**
- * @param {ReferenceText} referenceText1
- * @param {ReferenceText} referenceText2
- */
-const sortReferenceTexts = (referenceText1, referenceText2) => {
-  if (referenceText1.orderKey > referenceText2.orderKey) {
-    return 1;
-  } else if (referenceText1.orderKey < referenceText2.orderKey) {
-    return -1;
-  }
-  return 0;
 };
 
 /**
@@ -397,136 +84,28 @@ const generateAllExtensionReferences = gd => {
   /** @type {Array<ExtensionReference>} */
   const extensionReferences = mapVector(
     platformExtensions,
-    /** @returns {ExtensionReference} */
-    extension => {
-      const extensionExpressions = extension.getAllExpressions();
-      const extensionStrExpressions = extension.getAllStrExpressions();
-
-      /** @type {Array<string>} */
-      const objectTypes = extension.getExtensionObjectsTypes().toJSArray();
-      /** @type {Array<string>} */
-      const behaviorTypes = extension.getBehaviorsTypes().toJSArray();
-
-      // Object expressions
-      /** @type {Array<ObjectReference>} */
-      let objectReferences = objectTypes.map(objectType => {
-        const objectMetadata = extension.getObjectMetadata(objectType);
-        const actionsReferenceTexts = generateInstructionsReferenceRowsTexts({
-          areConditions: false,
-          instructionsMetadata: extension.getAllActionsForObject(objectType),
-          objectMetadata,
-        });
-        const conditionsReferenceTexts = generateInstructionsReferenceRowsTexts(
-          {
-            areConditions: true,
-            instructionsMetadata: extension.getAllConditionsForObject(
-              objectType
-            ),
-            objectMetadata,
-          }
-        );
-        const expressionsReferenceTexts = [
-          ...generateExpressionsReferenceRowsTexts({
-            expressionsMetadata: extension.getAllExpressionsForObject(
-              objectType
-            ),
-            objectMetadata,
-          }),
-          ...generateExpressionsReferenceRowsTexts({
-            expressionsMetadata: extension.getAllStrExpressionsForObject(
-              objectType
-            ),
-            objectMetadata,
-          }),
-        ];
-        expressionsReferenceTexts.sort(sortReferenceTexts);
-
-        return {
-          objectMetadata,
-          actionsReferenceTexts,
-          conditionsReferenceTexts,
-          expressionsReferenceTexts,
-        };
-      });
-
-      // Behavior expressions
-      /** @type {Array<BehaviorReference>} */
-      let behaviorReferences = behaviorTypes.map(behaviorType => {
-        const behaviorMetadata = extension.getBehaviorMetadata(behaviorType);
-        const actionsReferenceTexts = generateInstructionsReferenceRowsTexts({
-          areConditions: false,
-          instructionsMetadata: extension.getAllActionsForBehavior(
-            behaviorType
-          ),
-          behaviorMetadata,
-        });
-        const conditionsReferenceTexts = generateInstructionsReferenceRowsTexts(
-          {
-            areConditions: true,
-            instructionsMetadata: extension.getAllConditionsForBehavior(
-              behaviorType
-            ),
-            behaviorMetadata,
-          }
-        );
-        const expressionsReferenceTexts = [
-          ...generateExpressionsReferenceRowsTexts({
-            expressionsMetadata: extension.getAllExpressionsForBehavior(
-              behaviorType
-            ),
-            behaviorMetadata,
-          }),
-          ...generateExpressionsReferenceRowsTexts({
-            expressionsMetadata: extension.getAllStrExpressionsForBehavior(
-              behaviorType
-            ),
-            behaviorMetadata,
-          }),
-        ];
-        expressionsReferenceTexts.sort(sortReferenceTexts);
-
-        return {
-          behaviorMetadata,
-          actionsReferenceTexts,
-          conditionsReferenceTexts,
-          expressionsReferenceTexts,
-        };
-      });
-
-      // Free (non objects/non behaviors) actions/conditions/expressions
-      const freeActionsReferenceTexts = generateInstructionsReferenceRowsTexts({
-        areConditions: false,
-        instructionsMetadata: extension.getAllActions(),
-      });
-      const freeConditionsReferenceTexts = generateInstructionsReferenceRowsTexts(
-        {
-          areConditions: true,
-          instructionsMetadata: extension.getAllConditions(),
-        }
-      );
-      const freeExpressionsReferenceTexts = [
-        ...generateExpressionsReferenceRowsTexts({
-          expressionsMetadata: extensionStrExpressions,
-        }),
-        ...generateExpressionsReferenceRowsTexts({
-          expressionsMetadata: extensionExpressions,
-        }),
-      ];
-      freeExpressionsReferenceTexts.sort(sortReferenceTexts);
-
-      return {
-        extension,
-        freeActionsReferenceTexts,
-        freeConditionsReferenceTexts,
-        freeExpressionsReferenceTexts,
-        objectReferences,
-        behaviorReferences,
-      };
-    }
+    (platformExtension) => generateExtensionReference({
+      platform: gd.JsPlatform.get(),
+      extension: platformExtension,
+      eventsFunctionsExtension: null,
+    })
   );
 
   return extensionReferences;
 };
+
+/**
+ * @param {PlatformExtension} extension
+ * @return {ExtensionItem}
+ */
+const getPlatformExtensionItem = extension => ({
+  extensionName: extension.getName(),
+  fullName: extension.getFullName(),
+  description: extension.getShortDescription() || extension.getDescription(),
+  iconUrl: extension.getIconUrl(),
+  helpPath: extension.getHelpPath(),
+  category: extension.getCategory(),
+});
 
 /**
  * @param {Array<ExtensionReference>} extensionReferences
@@ -534,55 +113,75 @@ const generateAllExtensionReferences = gd => {
  */
 const generateAllFeaturesStartPageRawTexts = extensionReferences => {
   const headerText = {
-    text: `# All features
+    text: `---
+icon: material/star
+---
+# All GDevelop core features
 
-This page lists **all the features** that are provided in GDevelop. These can be objects, behaviors but also features that can be used directly using actions, conditions or expressions (without requiring an object to be existing on the scene).
+This page lists **all the core features** that are provided in GDevelop. These can be objects, visual effects, behaviors, actions, conditions or expressions.
 
-Note that GDevelop can also be extended with extensions: take a look at [[gdevelop5:extensions|the list of community extensions]] or learn how to create your [[gdevelop5:extensions:create|own set of features (behaviors, actions, conditions or expressions)]].
+GDevelop can also be extended with extensions: take a look at [the list of extended features](/gdevelop5/extensions) or learn how to create your [own extensions](/gdevelop5/extensions/create).
 
 `,
   };
   const footerText = {
     text: `
-You can also find a **reference sheet of all expressions**:
+You can also find a **reference sheet of all base expressions**:
 
-* [[gdevelop5:all-features:expressions-reference|Expressions reference]]
+* [Expressions reference](/gdevelop5/all-features/expressions-reference)
 
 ## More features as extensions
 
-Remember that you can also [[gdevelop5:extensions|search for new features in the community extensions]], or create your [[gdevelop5:extensions:create|own set of features (behaviors, actions, conditions or expressions)]].`,
+You can also [search for new features in list of extensions](/gdevelop5/extensions), or create your [own objects, behaviors, actions, conditions or expressions](/gdevelop5/extensions/create).`,
   };
 
-  return [
-    headerText,
-    ...extensionReferences
-      .filter(extensionReference => {
-        return !ignoredExtensionNames.includes(
-          extensionReference.extension.getName()
-        );
-      })
-      .flatMap(extensionReferences => {
-        const folderName = getExtensionFolderName(
-          extensionReferences.extension.getName()
-        );
-        const helpPagePath = extensionReferences.extension.getHelpPath();
-        const referencePageUrl = `${gdevelopWikiUrlRoot}/all-features/${folderName}/reference`;
-        const helpPageUrl = getHelpLink(helpPagePath) || referencePageUrl;
+  const filteredExtensions = extensionReferences
+    .filter(extensionReference => {
+      return !ignoredExtensionNames.includes(
+        extensionReference.extension.getName()
+      );
+    })
+    .map(extensionReference => extensionReference.extension);
 
-        return [
-          {
-            text:
-              '* ' +
-              // Link to help page or to reference if none.
-              `[[${helpPageUrl}|${extensionReferences.extension.getFullName()}]]` +
-              (helpPageUrl !== referencePageUrl
-                ? ` ([[${referencePageUrl}|reference]])`
-                : ''),
-          },
-        ];
-      }),
-    footerText,
-  ];
+  const groupedContent = generateAllExtensionsSections({
+    extensionItems: filteredExtensions.map(extension =>
+      getPlatformExtensionItem(extension)
+    ),
+    baseFolder: 'all-features',
+  });
+
+  return [headerText, { text: groupedContent }, footerText];
+};
+
+/** @returns {RawText} */
+const generateExtensionHeaderText = ({ extension, depth }) => {
+  return {
+    text:
+      generateHeader({
+        headerName: extension.getFullName() + (depth <= 1 ? ' Reference' : ''),
+        depth,
+      }).text +
+      `
+${extension.getDescription()} ${generateReadMoreLink(extension.getHelpPath())}
+`,
+  };
+};
+
+/** @returns {String} */
+const generateBuiltInExtensionNote = ({ extension }) => {
+  return `The ${extension.getFullName()} extension is always installed in all GDevelop projects: there is no need to add it from the Project Manager.\n\n`;
+};
+
+/** @returns {RawText} */
+const generateExtensionFooterText = ({ extension }) => {
+  return {
+    text:
+      `\n\n---\n\n` +
+      generateBuiltInExtensionNote({ extension }) +
+      `*This page is an auto-generated reference page about the **${extension.getFullName()}** feature of [GDevelop, the open-source, AI-powered, cross-platform game engine designed for everyone](https://gdevelop.io/).*` +
+      ' ' +
+      'Learn more about [all GDevelop features here](/gdevelop5/all-features).',
+  };
 };
 
 /**
@@ -597,110 +196,74 @@ const generateExtensionRawTexts = extensionReferences => {
       );
     })
     .map(extensionReference => {
-      const {
-        extension,
-        freeActionsReferenceTexts,
-        freeConditionsReferenceTexts,
-        freeExpressionsReferenceTexts,
-        objectReferences,
-        behaviorReferences,
-      } = extensionReference;
-
-      const withHeaderIfNotEmpty = (texts, { headerName, depth }) => {
-        if (!texts.length) return [];
-
-        return [generateHeader({ headerName, depth }), ...texts];
-      };
-
       return {
         folderName: getExtensionFolderName(
           extensionReference.extension.getName()
         ),
-        texts: [
-          generateExtensionHeaderText({ extension, depth: 1 }),
-          ...withHeaderIfNotEmpty(freeActionsReferenceTexts, {
-            headerName: 'Actions',
-            depth: 2,
-          }),
-          ...withHeaderIfNotEmpty(freeConditionsReferenceTexts, {
-            headerName: 'Conditions',
-            depth: 2,
-          }),
-          freeExpressionsReferenceTexts.length
-            ? generateExpressionsTableHeader({
-                headerName: 'Expressions',
-                depth: 2,
-              })
-            : { text: '' },
-          ...freeExpressionsReferenceTexts,
-          ...objectReferences.flatMap(objectReference => {
-            const {
-              objectMetadata,
-              actionsReferenceTexts,
-              conditionsReferenceTexts,
-              expressionsReferenceTexts,
-            } = objectReference;
-            return [
-              generateObjectHeaderText({
-                extension,
-                objectMetadata,
-                showExtensionName: false,
-                showHelpLink: false,
-              }),
-              ...withHeaderIfNotEmpty(actionsReferenceTexts, {
-                headerName: 'Object actions',
-                depth: 3,
-              }),
-              ...withHeaderIfNotEmpty(conditionsReferenceTexts, {
-                headerName: 'Object conditions',
-                depth: 3,
-              }),
-              expressionsReferenceTexts.length
-                ? generateExpressionsTableHeader({
-                    headerName: 'Object expressions',
-                    depth: 3,
-                  })
-                : generateObjectNoExpressionsText(),
-              ...expressionsReferenceTexts,
-            ];
-          }),
-          ...behaviorReferences.flatMap(behaviorReference => {
-            const {
-              behaviorMetadata,
-              actionsReferenceTexts,
-              conditionsReferenceTexts,
-              expressionsReferenceTexts,
-            } = behaviorReference;
-            return [
-              generateBehaviorHeaderText({
-                extension,
-                behaviorMetadata,
-                showExtensionName: false,
-                showHelpLink: false,
-              }),
-              ...withHeaderIfNotEmpty(actionsReferenceTexts, {
-                headerName: 'Behavior actions',
-                depth: 3,
-              }),
-              ...withHeaderIfNotEmpty(conditionsReferenceTexts, {
-                headerName: 'Behavior conditions',
-                depth: 3,
-              }),
-              expressionsReferenceTexts.length
-                ? generateExpressionsTableHeader({
-                    headerName: 'Behavior expressions',
-                    depth: 3,
-                  })
-                : generateBehaviorNoExpressionsText(),
-              ...expressionsReferenceTexts,
-            ];
-          }),
-          generateExtensionFooterText({ extension }),
-        ].filter(Boolean),
+        texts: generateExtensionRawText(
+          extensionReference,
+          generateExtensionHeaderText,
+          generateExtensionFooterText
+        ),
       };
     });
 
   return { allExtensionRawTexts };
+};
+
+/**
+ * Generate the .pages nav list for All features, grouped by category.
+ * @param {Array<ExtensionReference>} extensionReferences
+ * @param {number} indentationLevel
+ */
+const generateAllFeaturesPageList = (extensionReferences, indentationLevel) => {
+  const filteredExtensions = extensionReferences.filter(extensionReference => {
+    return !ignoredExtensionNames.includes(
+      extensionReference.extension.getName()
+    );
+  });
+
+  const extensionsByCategory = sortKeys(
+    groupBy(filteredExtensions, ref => ref.extension.getCategory() || 'General')
+  );
+
+  const baseIndentation = ' '.repeat(4 * indentationLevel);
+
+  let pagesList = '';
+  for (const category in extensionsByCategory) {
+    pagesList += `${baseIndentation}- ${category}:\n`;
+
+    const extensionReferences = extensionsByCategory[category]
+      .slice()
+      .sort((a, b) =>
+        a.extension.getFullName().localeCompare(b.extension.getFullName())
+      );
+    for (const { extension } of extensionReferences) {
+      const folderName = getExtensionFolderName(extension.getName());
+      pagesList += `${baseIndentation}    - ${extension.getFullName()}: ${folderName}\n`;
+    }
+  }
+
+  return pagesList.length === 0
+    ? pagesList
+    : pagesList.substring(0, pagesList.length - 1);
+};
+
+/**
+ * Write the .pages file for All features
+ * @param {Array<ExtensionReference>} extensionReferences
+ */
+const generateAllFeaturesMkDocsDotPagesFile = async extensionReferences => {
+  const dotPagesContent = `nav:
+    - index.md
+${generateAllFeaturesPageList(extensionReferences, 1)}
+    - ...
+    - expressions-reference.md
+`;
+
+  const allFeaturesDotPagesFilePath = path.join(allFeaturesRootPath, '.pages');
+  await fs.writeFile(allFeaturesDotPagesFilePath, dotPagesContent);
+  console.info(`ℹ️ File generated: ${allFeaturesDotPagesFilePath}`);
 };
 
 /**
@@ -785,13 +348,6 @@ const generateAllExpressionsRawTexts = extensionReferences => {
 
 const noopTranslationFunction = str => str;
 
-const rawTextsToString = rawTexts =>
-  rawTexts
-    .map(({ text }) => {
-      return text;
-    })
-    .join('\n');
-
 initializeGDevelopJs().then(async gd => {
   try {
     // @ts-ignore - not passing onFindGDJS - is it still useful?
@@ -827,7 +383,7 @@ initializeGDevelopJs().then(async gd => {
       const extensionReferenceFilePath = path.join(
         allFeaturesRootPath,
         folderName,
-        'reference.txt'
+        'reference.md'
       );
       await fs.mkdir(path.dirname(extensionReferenceFilePath), {
         recursive: true,
@@ -844,6 +400,9 @@ initializeGDevelopJs().then(async gd => {
       rawTextsToString(allFeaturesStartPageRawTexts)
     );
     console.info(`ℹ️ File generated: ${allFeaturesFilePath}`);
+
+    // Generate .pages to organize navigation by categories
+    await generateAllFeaturesMkDocsDotPagesFile(extensionReferences);
 
     if (improperlyFormattedHelpPaths.size > 0) {
       console.info(

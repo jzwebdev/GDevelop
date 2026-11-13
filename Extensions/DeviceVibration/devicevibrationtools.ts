@@ -1,4 +1,5 @@
 namespace gdjs {
+  /** @category Other extensions > Device Vibration */
   export namespace deviceVibration {
     /**
      * Vibrate the mobile device.
@@ -14,7 +15,7 @@ namespace gdjs {
     /**
      * Vibrate the mobile device in a pattern.
      * You can add multiple comma separated values where every second one determines the silence between vibrations.
-     * Example: "200,1000,500" (200ms vibration, 1sec silense, 500ms vibration)
+     * Example: "200,1000,500" (200ms vibration, 1sec silence, 500ms vibration)
      * @param intervals Comma separated list of values (in ms).
      */
     export const startVibrationPattern = function (intervals: string) {

@@ -1,356 +1,266 @@
 // @flow
-import { Trans } from '@lingui/macro';
+import { Trans, t } from '@lingui/macro';
 import * as React from 'react';
 import CreateProfile from '../Profile/CreateProfile';
 import AuthenticatedUserContext from '../Profile/AuthenticatedUserContext';
 import AlertMessage from '../UI/AlertMessage';
-import { Line, Spacer } from '../UI/Grid';
-import { ColumnStackLayout } from '../UI/Layout';
-import { showErrorBox } from '../UI/Messages/MessageBox';
 import PlaceholderError from '../UI/PlaceholderError';
 import PlaceholderLoader from '../UI/PlaceholderLoader';
 import RaisedButton from '../UI/RaisedButton';
-import {
-  type Game,
-  getGame,
-  registerGame,
-} from '../Utils/GDevelopServices/Game';
-import { type Profile } from '../Utils/GDevelopServices/Authentication';
-import TimelineIcon from '@material-ui/icons/Timeline';
-import MonetizationOnIcon from '@material-ui/icons/MonetizationOn';
-import { GameDetailsDialog } from './GameDetailsDialog';
+import { updateGame } from '../Utils/GDevelopServices/Game';
+import Text from '../UI/Text';
+import { Column, Line } from '../UI/Grid';
+import Toggle from '../UI/Toggle';
+import useAlertDialog from '../UI/Alert/useAlertDialog';
+import { ColumnStackLayout } from '../UI/Layout';
+import MarketingPlansDialog from '../MarketingPlans/MarketingPlansDialog';
+import { useGameManager } from '../Utils/UseGameAndBuildsManager';
+import RightLoader from '../UI/RightLoader';
 
-type Props = {|
+const styles = {
+  buttonContainer: {
+    flexShrink: 0, // To avoid the button content to be on multiple lines.
+  },
+};
+
+export type GameRegistrationProps = {|
   project: ?gdProject,
-  hideIfRegistered?: boolean,
-  hideIfSubscribed?: boolean,
+  suggestAdditionalActions?: boolean,
   hideLoader?: boolean,
-  onGameRegistered?: () => void,
+  onGameRegistered?: () => void | Promise<void>,
+  customRegistrationMessage?: React.Node,
+  icon?: React.Node,
 |};
 
-type DetailsTab = 'details' | 'analytics' | 'monetization';
-type UnavailableReason = 'unauthorized' | 'not-existing' | null;
+export type GameAvailabilityError = 'not-found' | 'not-owned' | 'unexpected';
 
 export const GameRegistration = ({
   project,
-  hideIfRegistered,
-  hideIfSubscribed,
+  suggestAdditionalActions,
   hideLoader,
   onGameRegistered,
-}: Props) => {
+  customRegistrationMessage,
+}: GameRegistrationProps): null | React.Node | React.Node => {
   const {
-    authenticated,
-    onLogin,
-    onCreateAccount,
+    onOpenLoginDialog,
+    onOpenCreateAccountDialog,
     getAuthorizationHeader,
     profile,
     onAcceptGameStatsEmail,
   } = React.useContext(AuthenticatedUserContext);
-  const [error, setError] = React.useState<Error | null>(null);
-  const [
-    unavailableReason,
-    setUnavailableReason,
-  ] = React.useState<UnavailableReason>(null);
-  const [game, setGame] = React.useState<Game | null>(null);
+  const { showAlert } = useAlertDialog();
+  const {
+    game,
+    setGame,
+    gameAvailabilityError,
+    refreshGame,
+    registerGameIfNeeded,
+  } = useGameManager({
+    project,
+  });
   const [registrationInProgress, setRegistrationInProgress] = React.useState(
     false
   );
   const [
-    acceptGameStatsEmailInProgress,
-    setAcceptGameStatsEmailInProgress,
+    toggleGameStatsEmailInProgress,
+    setToggleGameStatsEmailInProgress,
   ] = React.useState(false);
-  const [detailsOpened, setDetailsOpened] = React.useState(false);
-  const [detailsInitialTab, setDetailsInitialTab] = React.useState<DetailsTab>(
-    'details'
-  );
-
-  const loadGame = React.useCallback(
-    async () => {
-      if (!profile || !project) return;
-
-      const { id } = profile;
-      setError(null);
-      try {
-        const game = await getGame(
-          getAuthorizationHeader,
-          id,
-          project.getProjectUuid()
-        );
-        setUnavailableReason(null);
-        setGame(game);
-      } catch (err) {
-        console.log(err);
-        if (err.response) {
-          if (err.response.status === 403) {
-            setUnavailableReason('unauthorized');
-            return;
-          } else if (err.response.status === 404) {
-            setUnavailableReason('not-existing');
-            return;
-          }
-        }
-
-        setError(err);
-      }
-    },
-    [project, getAuthorizationHeader, profile]
-  );
+  const [
+    toggleGameCommentsInProgress,
+    setToggleGameCommentsInProgress,
+  ] = React.useState(false);
+  const [
+    marketingPlansDialogOpen,
+    setMarketingPlansDialogOpen,
+  ] = React.useState(false);
 
   const onRegisterGame = React.useCallback(
     async () => {
-      if (!profile || !project) return;
-
-      const { id } = profile;
       setRegistrationInProgress(true);
       try {
-        await registerGame(getAuthorizationHeader, id, {
-          gameId: project.getProjectUuid(),
-          authorName: project.getAuthor() || 'Unspecified author',
-          gameName: project.getName() || 'Untitled game',
-        });
-        loadGame();
+        await registerGameIfNeeded();
         if (onGameRegistered) onGameRegistered();
       } catch (error) {
         console.error('Unable to register the game', error);
-        showErrorBox({
-          rawError: error,
-          errorId: 'register-game-error',
-          // TODO: i18n
-          message:
-            'Unable to register the game.' +
-            ' ' +
-            'Verify your internet connection or try again later.',
+        showAlert({
+          title: t`Unable to register the game`,
+          message: t`Verify your internet connection or try again later.`,
         });
       }
       setRegistrationInProgress(false);
     },
-    [getAuthorizationHeader, profile, project, loadGame, onGameRegistered]
+    [registerGameIfNeeded, onGameRegistered, showAlert]
   );
 
-  const _onAcceptGameStatsEmail = React.useCallback(
-    async () => {
-      if (!profile || !project) return;
+  const onToggleGameStatsEmail = React.useCallback(
+    async (value: boolean) => {
+      if (!profile || !game) return;
 
-      setAcceptGameStatsEmailInProgress(true);
+      setToggleGameStatsEmailInProgress(true);
       try {
-        await onAcceptGameStatsEmail();
+        await onAcceptGameStatsEmail(value);
       } catch (error) {
-        console.error('Unable to accept game stats email.', error);
-        showErrorBox({
-          rawError: error,
-          errorId: 'game-stats-email-error',
-          message:
-            'Unable to accept game stats email. ' +
-            ' ' +
-            'Verify your internet connection or try again later.',
+        console.error('Unable to change your email preferences.', error);
+        showAlert({
+          title: t`Unable to change your email preferences`,
+          message: t`Verify your internet connection or try again later.`,
         });
       }
-      setAcceptGameStatsEmailInProgress(false);
+      setToggleGameStatsEmailInProgress(false);
     },
-    [profile, project, onAcceptGameStatsEmail]
+    [profile, game, onAcceptGameStatsEmail, showAlert]
   );
 
-  React.useEffect(
-    () => {
-      if (!game) {
-        loadGame();
+  const onToggleGameComments = React.useCallback(
+    async (value: boolean) => {
+      if (!profile || !game) return;
+
+      setToggleGameCommentsInProgress(true);
+      try {
+        const newGame = await updateGame(
+          getAuthorizationHeader,
+          profile.id,
+          game.id,
+          {
+            acceptsGameComments: value,
+          }
+        );
+        setGame(newGame);
+      } catch (error) {
+        console.error('Unable to change feedback for this game.', error);
+        showAlert({
+          title: t`Unable to change feedback for this game`,
+          message: t`Verify your internet connection or try again later.`,
+        });
       }
+      setToggleGameCommentsInProgress(false);
     },
-    [loadGame, game]
+    [profile, game, setGame, getAuthorizationHeader, showAlert]
   );
 
-  return (
-    <GameRegistrationWidget
-      authenticated={authenticated}
-      profile={profile}
-      onLogin={onLogin}
-      onCreateAccount={onCreateAccount}
-      project={project}
-      game={game}
-      setGame={setGame}
-      loadGame={loadGame}
-      onRegisterGame={onRegisterGame}
-      registrationInProgress={registrationInProgress}
-      hideIfRegistered={hideIfRegistered}
-      hideIfSubscribed={hideIfSubscribed}
-      unavailableReason={unavailableReason}
-      acceptGameStatsEmailInProgress={acceptGameStatsEmailInProgress}
-      onAcceptGameStatsEmail={_onAcceptGameStatsEmail}
-      detailsInitialTab={detailsInitialTab}
-      setDetailsInitialTab={setDetailsInitialTab}
-      detailsOpened={detailsOpened}
-      setDetailsOpened={setDetailsOpened}
-      error={error}
-      hideLoader={hideLoader}
-    />
-  );
-};
-
-export type GameRegistrationWidgetProps = {|
-  authenticated: boolean,
-  profile?: ?Profile,
-  onLogin: () => void,
-  onCreateAccount: () => void,
-  project?: ?gdProject,
-  game: ?Game,
-  setGame: Game => void,
-  loadGame: () => Promise<void>,
-  onRegisterGame: () => Promise<void>,
-  registrationInProgress: boolean,
-  hideIfRegistered?: boolean,
-  hideIfSubscribed?: boolean,
-  unavailableReason: ?UnavailableReason,
-  acceptGameStatsEmailInProgress: boolean,
-  onAcceptGameStatsEmail: () => Promise<void>,
-  detailsInitialTab: DetailsTab,
-  setDetailsInitialTab: (string: DetailsTab) => void,
-  detailsOpened: boolean,
-  setDetailsOpened: boolean => void,
-  error: ?Error,
-  hideLoader?: boolean,
-|};
-
-export const GameRegistrationWidget = ({
-  authenticated,
-  profile,
-  onLogin,
-  onCreateAccount,
-  project,
-  game,
-  setGame,
-  loadGame,
-  onRegisterGame,
-  registrationInProgress,
-  hideIfRegistered,
-  hideIfSubscribed,
-  unavailableReason,
-  acceptGameStatsEmailInProgress,
-  onAcceptGameStatsEmail,
-  detailsInitialTab,
-  setDetailsInitialTab,
-  detailsOpened,
-  setDetailsOpened,
-  error,
-  hideLoader,
-}: GameRegistrationWidgetProps) => {
   if (!project) {
     return null;
   }
 
-  if (!authenticated || !profile) {
+  if (!profile) {
     return (
-      <CreateProfile onLogin={onLogin} onCreateAccount={onCreateAccount} />
+      <CreateProfile
+        onOpenLoginDialog={onOpenLoginDialog}
+        onOpenCreateAccountDialog={onOpenCreateAccountDialog}
+        message={customRegistrationMessage}
+      />
     );
   }
 
-  if (unavailableReason === 'not-existing') {
+  if (gameAvailabilityError === 'not-found') {
     return (
       <AlertMessage
         kind="info"
         renderRightButton={() => (
-          <RaisedButton
-            label={<Trans>Register the project</Trans>}
-            disabled={registrationInProgress}
-            primary
-            onClick={onRegisterGame}
-          />
+          <div style={styles.buttonContainer}>
+            <RaisedButton
+              label={<Trans>Register the project</Trans>}
+              disabled={registrationInProgress}
+              primary
+              onClick={onRegisterGame}
+            />
+          </div>
         )}
       >
-        <Trans>
-          This project is not registered online. Register it now to get access
-          to metrics collected anonymously, like the number of daily players and
-          retention of the players after a few days.
-        </Trans>
+        {customRegistrationMessage || (
+          <Trans>
+            The project currently opened is not registered online. Register it
+            now to get access to leaderboards, player accounts, analytics and
+            more!
+          </Trans>
+        )}
       </AlertMessage>
     );
-  }
-
-  if (unavailableReason === 'unauthorized') {
+  } else if (gameAvailabilityError === 'not-owned') {
     return (
       <AlertMessage kind="error">
         <Trans>
-          This project is registered online but you don't have access to it. Ask
-          the original owner of the game to share it with you to get access to
-          the game metrics.
+          This game is registered online but you don't have access to it. Ask
+          the owner of the game to add your account to the list of owners to be
+          able to manage it.
         </Trans>
       </AlertMessage>
     );
-  }
-
-  if (error) {
+  } else if (gameAvailabilityError === 'unexpected') {
     return (
-      <PlaceholderError
-        onRetry={() => {
-          loadGame();
-        }}
-      >
+      <PlaceholderError onRetry={refreshGame}>
         <Trans>Can't check if the game is registered online.</Trans>{' '}
         <Trans>Verify your internet connection or try again later.</Trans>
       </PlaceholderError>
     );
   }
 
-  if (game) {
-    if (hideIfRegistered) return null;
-    if (!profile.getGameStatsEmail) {
-      return (
-        <AlertMessage
-          kind="info"
-          renderRightButton={() => (
-            <RaisedButton
-              label={<Trans>Get game stats</Trans>}
-              disabled={acceptGameStatsEmailInProgress}
-              primary
-              onClick={onAcceptGameStatsEmail}
-            />
-          )}
-        >
-          <Trans>Get stats about your game every week!</Trans>
-        </AlertMessage>
-      );
-    }
-    if (hideIfSubscribed) return null;
+  if (suggestAdditionalActions) {
     return (
-      <ColumnStackLayout noMargin>
-        <Line justifyContent="center">
-          <RaisedButton
-            icon={<TimelineIcon />}
-            label={<Trans>Analytics</Trans>}
-            onClick={() => {
-              setDetailsInitialTab('analytics');
-              setDetailsOpened(true);
-            }}
-          />
-          <Spacer />
-          <RaisedButton
-            icon={<MonetizationOnIcon />}
-            label={<Trans>Monetization</Trans>}
-            onClick={() => {
-              setDetailsInitialTab('monetization');
-              setDetailsOpened(true);
-            }}
-          />
-        </Line>
-        {detailsOpened && (
-          <GameDetailsDialog
+      <>
+        <ColumnStackLayout noMargin expand>
+          <Column noMargin>
+            <Text size="block-title">
+              <Trans>Taking your game further</Trans>
+            </Text>
+            <Column>
+              <Toggle
+                onToggle={() =>
+                  onToggleGameStatsEmail(!profile.getGameStatsEmail)
+                }
+                toggled={profile.getGameStatsEmail}
+                labelPosition="right"
+                label={
+                  <Trans>Receive weekly stats about your game by email</Trans>
+                }
+                disabled={toggleGameStatsEmailInProgress}
+              />
+              <Toggle
+                onToggle={() =>
+                  onToggleGameComments(!(game && game.acceptsGameComments))
+                }
+                toggled={!!(game && game.acceptsGameComments)}
+                labelPosition="right"
+                label={<Trans>Open game for player feedback</Trans>}
+                disabled={!game || toggleGameCommentsInProgress}
+              />
+            </Column>
+          </Column>
+          <Column noMargin>
+            <Text size="sub-title">
+              <Trans>Promoting your game to the community</Trans>
+            </Text>
+            <Text noMargin>
+              <Trans>
+                Make your game visible to the GDevelop community and to the
+                world with Marketing Boosts.
+              </Trans>
+            </Text>
+            <Line>
+              <RightLoader isLoading={!game}>
+                <RaisedButton
+                  label={<Trans>See Marketing Boosts</Trans>}
+                  primary
+                  onClick={() => setMarketingPlansDialogOpen(true)}
+                  disabled={!game}
+                />
+              </RightLoader>
+            </Line>
+          </Column>
+        </ColumnStackLayout>
+        {marketingPlansDialogOpen && game && (
+          <MarketingPlansDialog
             game={game}
-            project={project}
-            initialTab={detailsInitialTab}
-            onClose={() => {
-              setDetailsOpened(false);
-            }}
-            onGameUpdated={updatedGame => {
-              setGame(updatedGame);
-            }}
-            onGameDeleted={() => {
-              setDetailsOpened(false);
-              loadGame();
-            }}
+            onClose={() => setMarketingPlansDialogOpen(false)}
           />
         )}
-      </ColumnStackLayout>
+      </>
     );
   }
 
-  return hideLoader ? null : <PlaceholderLoader />;
+  if (!game && !hideLoader) {
+    return <PlaceholderLoader />;
+  }
+
+  return null; // Hide the component if the game is registered.
 };

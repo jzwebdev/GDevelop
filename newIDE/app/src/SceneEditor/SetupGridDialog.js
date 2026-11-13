@@ -5,7 +5,7 @@ import FlatButton from '../UI/FlatButton';
 import TextField from '../UI/TextField';
 import Checkbox from '../UI/Checkbox';
 import { ColumnStackLayout, ResponsiveLineStackLayout } from '../UI/Layout';
-import Dialog from '../UI/Dialog';
+import Dialog, { DialogPrimaryButton } from '../UI/Dialog';
 import ColorField from '../UI/ColorField';
 import {
   type InstancesEditorSettings,
@@ -26,7 +26,7 @@ type Props = {|
 /** Below this value, rendering the grid is too costly (risk of infinite loop/memory saturation). */
 const GRID_MIN_VALUE = 0.01;
 
-export default function SetupGridDialog(props: Props) {
+export default function SetupGridDialog(props: Props): React.Node {
   const [previousOptions] = React.useState(() =>
     cloneInstancesEditorSettings(props.instancesEditorSettings)
   );
@@ -36,8 +36,10 @@ export default function SetupGridDialog(props: Props) {
       ...props.instancesEditorSettings,
       gridWidth: previousOptions.gridWidth,
       gridHeight: previousOptions.gridHeight,
+      gridDepth: previousOptions.gridDepth,
       gridOffsetX: previousOptions.gridOffsetX,
       gridOffsetY: previousOptions.gridOffsetY,
+      gridOffsetZ: previousOptions.gridOffsetZ,
       gridColor: previousOptions.gridColor,
       gridType: previousOptions.gridType,
     });
@@ -46,7 +48,6 @@ export default function SetupGridDialog(props: Props) {
 
   return (
     <Dialog
-      onApply={props.onApply}
       title={<Trans>Edit Grid Options</Trans>}
       actions={[
         <FlatButton
@@ -55,22 +56,21 @@ export default function SetupGridDialog(props: Props) {
           primary={false}
           onClick={onCancel}
         />,
-        <FlatButton
+        <DialogPrimaryButton
           key="apply"
           label={<Trans>Apply</Trans>}
           primary={true}
-          keyboardFocused={true}
           onClick={props.onApply}
         />,
       ]}
-      cannotBeDismissed={true}
-      open
       onRequestClose={onCancel}
+      onApply={props.onApply}
+      open
       maxWidth="sm"
-      noMargin
+      exceptionallyStillAllowRenderingInstancesEditors
     >
-      <ColumnStackLayout>
-        <ResponsiveLineStackLayout noMargin expand>
+      <ColumnStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin expand noResponsiveLandscape>
           <ColorField
             floatingLabelText={<Trans>Line color</Trans>}
             fullWidth
@@ -88,7 +88,7 @@ export default function SetupGridDialog(props: Props) {
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin expand>
+        <ResponsiveLineStackLayout noMargin expand noResponsiveLandscape>
           <TextField
             floatingLabelText={<Trans>Cell width (in pixels)</Trans>}
             fullWidth
@@ -113,8 +113,20 @@ export default function SetupGridDialog(props: Props) {
               })
             }
           />
+          <TextField
+            floatingLabelText={<Trans>Cell depth (in pixels)</Trans>}
+            fullWidth
+            type="number"
+            value={props.instancesEditorSettings.gridDepth}
+            onChange={(e, value) =>
+              props.onChangeInstancesEditorSettings({
+                ...props.instancesEditorSettings,
+                gridDepth: Math.max(parseFloat(value), GRID_MIN_VALUE),
+              })
+            }
+          />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin expand>
+        <ResponsiveLineStackLayout noMargin expand noResponsiveLandscape>
           <TextField
             floatingLabelText={<Trans>X offset (in pixels)</Trans>}
             fullWidth
@@ -139,8 +151,20 @@ export default function SetupGridDialog(props: Props) {
               })
             }
           />
+          <TextField
+            floatingLabelText={<Trans>Z offset (in pixels)</Trans>}
+            fullWidth
+            type="number"
+            value={props.instancesEditorSettings.gridOffsetZ}
+            onChange={(e, value) =>
+              props.onChangeInstancesEditorSettings({
+                ...props.instancesEditorSettings,
+                gridOffsetZ: parseFloat(value),
+              })
+            }
+          />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin expand>
+        <ResponsiveLineStackLayout noMargin expand noResponsiveLandscape>
           <Checkbox
             checked={props.instancesEditorSettings.gridType === 'isometric'}
             label={<Trans>Isometric</Trans>}

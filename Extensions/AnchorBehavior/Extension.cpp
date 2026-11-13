@@ -17,16 +17,21 @@ void DeclareAnchorBehaviorExtension(gd::PlatformExtension& extension) {
                                _("Anchor objects to the window's bounds."),
                                "Victor Levasseur",
                                "Open source (MIT License)")
+      .SetShortDescription("Pin object edges/center to window bounds. Useful for HUD/UI elements that adapt to screen size.")
+      .SetDimension("2D")
+      .SetCategory("User interface")
+      .SetTags("anchor, ui, layout")
       .SetExtensionHelpPath("/behaviors/anchor");
 
   gd::BehaviorMetadata& aut = extension.AddBehavior(
       "AnchorBehavior",
       _("Anchor"),
       "Anchor",
-      _("Behavior that anchors objects to the window's bounds."),
+      _("Anchor objects to the window's bounds."),
       "",
       "CppPlatform/Extensions/AnchorIcon.png",
       "AnchorBehavior",
       std::make_shared<AnchorBehavior>(),
-      std::make_shared<gd::BehaviorsSharedData>());
+      std::make_shared<gd::BehaviorsSharedData>())
+      .MarkAsActivatedByDefaultInEditor();
 }

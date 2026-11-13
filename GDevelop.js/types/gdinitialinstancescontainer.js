@@ -9,13 +9,15 @@ declare class gdInitialInstancesContainer {
   removeAllInstancesOnLayer(layer: string): void;
   removeInitialInstancesOfObject(obj: string): void;
   hasInstancesOfObject(objectName: string): boolean;
+  isInstancesCountOfObjectGreaterThan(objectName: string, minInstanceCount: number): boolean;
   someInstancesAreOnLayer(layer: string): boolean;
   renameInstancesOfObject(oldName: string, newName: string): void;
   removeInstance(inst: gdInitialInstance): void;
+  getLayerInstancesCount(layerName: string): number;
   insertNewInitialInstance(): gdInitialInstance;
   insertInitialInstance(inst: gdInitialInstance): gdInitialInstance;
   serializeTo(element: gdSerializerElement): void;
-  unserializeFrom(element: gdSerializerElement): void;
+  unserializeFrom(project: gdProject, element: gdSerializerElement): void;
   delete(): void;
   ptr: number;
 };

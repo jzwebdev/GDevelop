@@ -1,4 +1,5 @@
 // @flow
+import { isEasingChoiceList, allEasingNames } from '../../Utils/Easings';
 import { type ExpressionParameters } from './ParameterFieldCommons';
 import { type ExpressionAutocompletion } from '../../ExpressionAutocompletion';
 const gd: libGDevelop = global.gd;
@@ -23,7 +24,7 @@ export const getLastObjectParameterValue = ({
   expressionMetadata: ?gdExpressionMetadata,
   expression: ?ExpressionParameters,
   parameterIndex: ?number,
-|}): ?string => {
+|}): string | null => {
   if (parameterIndex === undefined || parameterIndex == null) {
     // No parameter index given: the parameter is not even in a list of parameters
     return null;
@@ -39,7 +40,9 @@ export const getLastObjectParameterValue = ({
       objectParameterIndex >= 0 &&
       objectParameterIndex < instruction.getParametersCount()
     ) {
-      objectName = instruction.getParameter(objectParameterIndex);
+      objectName = instruction
+        .getParameter(objectParameterIndex)
+        .getPlainString();
     }
   } else if (expressionMetadata && expression) {
     const objectParameterIndex = gd.ParameterMetadataTools.getObjectParameterIndexFor(
@@ -57,19 +60,30 @@ export const getLastObjectParameterValue = ({
   return objectName;
 };
 
-export const getLastObjectParameterObjectType = (
-  parameters: gdVectorParameterMetadata,
+export const getLastObjectParameter = (
+  parameters: gdParameterMetadataContainer,
   parameterIndex: number
-) => {
+): gdParameterMetadata | null => {
   const objectParameterIndex = gd.ParameterMetadataTools.getObjectParameterIndexFor(
     parameters,
     parameterIndex
   );
-  if (objectParameterIndex < 0 || objectParameterIndex >= parameters.size()) {
-    return '';
+  if (
+    objectParameterIndex < 0 ||
+    objectParameterIndex >= parameters.getParametersCount()
+  ) {
+    return null;
   }
 
-  return parameters.at(objectParameterIndex).getExtraInfo();
+  return parameters.getParameterAt(objectParameterIndex);
+};
+
+export const getLastObjectParameterObjectType = (
+  parameters: gdParameterMetadataContainer,
+  parameterIndex: number
+): string => {
+  const objectParameter = getLastObjectParameter(parameters, parameterIndex);
+  return objectParameter ? objectParameter.getExtraInfo() : '';
 };
 
 /**
@@ -95,7 +109,7 @@ export const getPreviousParameterValue = ({
       parameterIndex >= 1 &&
       parameterIndex < instruction.getParametersCount()
     ) {
-      return instruction.getParameter(parameterIndex - 1);
+      return instruction.getParameter(parameterIndex - 1).getPlainString();
     }
   } else if (expression) {
     if (
@@ -132,18 +146,23 @@ export const tryExtractStringLiteralContent = (
   return null;
 };
 
-export const getParameterChoices = (
+export const getParameterChoiceAutocompletions = (
   parameterMetadata: ?gdParameterMetadata
-): Array<ExpressionAutocompletion> => {
+): Array<ExpressionAutocompletion> =>
+  getParameterChoiceValues(parameterMetadata).map(choice => ({
+    kind: 'Text',
+    completion: `"${choice}"`,
+  }));
+
+export const getParameterChoiceValues = (
+  parameterMetadata: ?gdParameterMetadata
+): Array<string> => {
   if (!parameterMetadata) {
     return [];
   }
 
   try {
-    return JSON.parse(parameterMetadata.getExtraInfo()).map(choice => ({
-      kind: 'Text',
-      completion: `"${choice}"`,
-    }));
+    return JSON.parse(parameterMetadata.getExtraInfo());
   } catch (exception) {
     console.error(
       'The parameter seems misconfigured, as an array of choices could not be extracted - verify that your properly wrote a list of choices in JSON format. Full exception is:',
@@ -152,4 +171,39 @@ export const getParameterChoices = (
   }
 
   return [];
+};
+
+/**
+ * Some extensions (notably community extensions) declare a list of easings
+ * as a generic list of choices ("stringWithSelector"). Consider them as
+ * "easing" so that they are displayed with a preview of the curve.
+ */
+export const getSpecializedParameterFieldType = (
+  fieldType: string,
+  parameterMetadata: ?gdParameterMetadata
+): string => {
+  if (
+    fieldType === 'stringWithSelector' &&
+    parameterMetadata &&
+    isEasingChoiceList(getParameterChoiceValues(parameterMetadata))
+  ) {
+    return 'easing';
+  }
+
+  return fieldType;
+};
+
+/**
+ * The easings that can be chosen for a parameter. A parameter of type "easing"
+ * can leave its list of choices empty to allow all the easings.
+ */
+export const getEasingChoices = (
+  parameterMetadata: ?gdParameterMetadata
+): Array<string> => {
+  if (!parameterMetadata || !parameterMetadata.getExtraInfo()) {
+    return allEasingNames;
+  }
+
+  const choices = getParameterChoiceValues(parameterMetadata);
+  return choices.length > 0 ? choices : allEasingNames;
 };

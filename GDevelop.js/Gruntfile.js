@@ -4,16 +4,33 @@ module.exports = function (grunt) {
   const fs = require('fs');
   const path = require('path');
   const isWin = /^win/.test(process.platform);
-  const isDev = grunt.option('dev') || false;
   const useMinGW = grunt.option('use-MinGW') || false;
+
+  const possibleVariants = [
+    'release',
+    'dev',
+    'debug',
+    'debug-assertions',
+    'debug-sanitizers',
+  ];
+  const variant = grunt.option('variant') || (grunt.option('dev') ? 'dev' : 'release');
+
+  if (variant && possibleVariants.indexOf(variant) === -1) {
+    console.error(
+      `Invalid build variant: ${variant}. Possible values are: ${possibleVariants.join(
+        ', '
+      )}.`
+    );
+    process.exit(1);
+  }
 
   const buildOutputPath = '../Binaries/embuild/GDevelop.js/';
   const buildPath = '../Binaries/embuild';
 
-  let cmakeBinary = 'emconfigure cmake';
+  let cmakeBinary = 'emcmake cmake';
   let cmakeGeneratorArgs = [];
   let makeBinary = 'emmake make';
-  let makeArgs = ['-j 4'];
+  let makeArgs = ['-j 8'];
 
   // Use more specific paths on Windows
   if (isWin) {
@@ -44,11 +61,11 @@ module.exports = function (grunt) {
 
     // Find CMake in usual folders or fallback to PATH.
     if (fs.existsSync('C:\\Program Files\\CMake\\bin\\cmake.exe')) {
-      cmakeBinary = 'emconfigure "C:\\Program Files\\CMake\\bin\\cmake"';
+      cmakeBinary = 'emcmake "C:\\Program Files\\CMake\\bin\\cmake"';
     } else if (
       fs.existsSync('C:\\Program Files (x86)\\CMake\\bin\\cmake.exe')
     ) {
-      cmakeBinary = 'emconfigure "C:\\Program Files (x86)\\CMake\\bin\\cmake"';
+      cmakeBinary = 'emcmake "C:\\Program Files (x86)\\CMake\\bin\\cmake"';
     } else {
       console.log(
         "⚠️ Can't find CMake in its usual Program Files folder. Make sure you have cmake in your PATH instead."
@@ -75,9 +92,7 @@ module.exports = function (grunt) {
             ...cmakeGeneratorArgs,
             '../..',
             // Disable link time optimizations for slightly faster build time.
-            isDev
-              ? '-DDISABLE_EMSCRIPTEN_LINK_OPTIMIZATIONS=TRUE'
-              : '-DDISABLE_EMSCRIPTEN_LINK_OPTIMIZATIONS=FALSE',
+            variant ? '-DGDEVELOPJS_BUILD_VARIANT=' + variant : '',
           ].join(' '),
         options: {
           execOptions: {
@@ -111,9 +126,25 @@ module.exports = function (grunt) {
           },
         },
       },
-      // Copy the library to newIDE
-      generateTypes: {
+      // Generate typings from the Bindings.idl
+      generateFlowTypes: {
         command: 'node scripts/generate-types.js',
+        options: {
+          execOptions: {
+            cwd: __dirname,
+          },
+        },
+      },
+      generateTSTypes: {
+        command: 'node scripts/generate-dts.mjs',
+        options: {
+          execOptions: {
+            cwd: __dirname,
+          },
+        },
+      },
+      syncVersions: {
+        command: 'node scripts/sync-versions.js',
         options: {
           execOptions: {
             cwd: __dirname,
@@ -126,6 +157,8 @@ module.exports = function (grunt) {
       build: {
         src: [
           buildPath,
+          'Bindings/glue.cpp',
+          'Bindings/glue.js',
           buildOutputPath + 'libGD.js',
           buildOutputPath + 'libGD.wasm',
         ],
@@ -146,8 +179,10 @@ module.exports = function (grunt) {
     'shell:make',
   ]);
   grunt.registerTask('build', [
+    'shell:syncVersions',
     'build:raw',
     'shell:copyToNewIDE',
-    'shell:generateTypes',
+    'shell:generateFlowTypes',
+    'shell:generateTSTypes',
   ]);
 };

@@ -6,16 +6,23 @@
 #include "EventsFunctionsExtension.h"
 
 #include "EventsBasedBehavior.h"
+#include "EventsBasedObject.h"
 #include "EventsFunction.h"
 #include "GDCore/Serialization/SerializerElement.h"
 #include "GDCore/Tools/MakeUnique.h"
+#include "GDCore/Extensions/PlatformExtension.h"
 
 namespace gd {
 
-EventsFunctionsExtension::EventsFunctionsExtension() {}
+EventsFunctionsExtension::EventsFunctionsExtension() :
+      eventsFunctionsContainer(gd::EventsFunctionsContainer::FunctionOwner::Extension),
+      globalVariables(gd::VariablesContainer::SourceType::ExtensionGlobal),
+      sceneVariables(gd::VariablesContainer::SourceType::ExtensionScene) {}
 
 EventsFunctionsExtension::EventsFunctionsExtension(
-    const EventsFunctionsExtension& other) {
+    const EventsFunctionsExtension& other) :
+    eventsFunctionsContainer(
+        gd::EventsFunctionsContainer::FunctionOwner::Extension) {
   Init(other);
 }
 
@@ -31,25 +38,35 @@ void EventsFunctionsExtension::Init(const gd::EventsFunctionsExtension& other) {
   extensionNamespace = other.extensionNamespace;
   shortDescription = other.shortDescription;
   description = other.description;
+  dimension = other.dimension;
   name = other.name;
   fullName = other.fullName;
+  category = other.category;
   tags = other.tags;
   author = other.author;
   authorIds = other.authorIds;
   previewIconUrl = other.previewIconUrl;
   iconUrl = other.iconUrl;
   helpPath = other.helpPath;
-  EventsFunctionsContainer::Init(other);
+  gdevelopVersion = other.gdevelopVersion;
+  eventsFunctionsContainer = other.eventsFunctionsContainer;
   eventsBasedBehaviors = other.eventsBasedBehaviors;
+  eventsBasedObjects = other.eventsBasedObjects;
+  globalVariables = other.GetGlobalVariables();
+  sceneVariables = other.GetSceneVariables();
+  tests = other.tests;
+  namedEasings = other.namedEasings;
 }
 
-void EventsFunctionsExtension::SerializeTo(SerializerElement& element) const {
+void EventsFunctionsExtension::SerializeTo(SerializerElement& element, bool isExternal) const {
   element.SetAttribute("version", version);
   element.SetAttribute("extensionNamespace", extensionNamespace);
   element.SetAttribute("shortDescription", shortDescription);
-  element.SetAttribute("description", description);
+  element.SetAttribute("dimension", dimension);
+  element.AddChild("description").SetMultilineStringValue(description);
   element.SetAttribute("name", name);
   element.SetAttribute("fullName", fullName);
+  element.SetAttribute("category", category);
   if (!originName.empty() || !originIdentifier.empty()) {
     element.AddChild("origin")
         .SetAttribute("name", originName)
@@ -69,28 +86,81 @@ void EventsFunctionsExtension::SerializeTo(SerializerElement& element) const {
   element.SetAttribute("previewIconUrl", previewIconUrl);
   element.SetAttribute("iconUrl", iconUrl);
   element.SetAttribute("helpPath", helpPath);
+  element.SetAttribute("gdevelopVersion", gdevelopVersion);
+  if (changelog.GetChangesCount() > 0) {
+    changelog.SerializeTo(element.AddChild("changelog"));
+  }
   auto& dependenciesElement = element.AddChild("dependencies");
   dependenciesElement.ConsiderAsArray();
   for (auto& dependency : dependencies)
     SerializeDependencyTo(dependency, dependenciesElement.AddChild(""));
 
-  SerializeEventsFunctionsTo(element.AddChild("eventsFunctions"));
+  if (!sourceFiles.empty()) {
+    auto& sourceFilesElement = element.AddChild("sourceFiles");
+    sourceFilesElement.ConsiderAsArray();
+    for (auto& sourceFile : sourceFiles)
+      sourceFile.SerializeTo(sourceFilesElement.AddChild(""));
+  }
+
+  GetGlobalVariables().SerializeTo(element.AddChild("globalVariables"));
+  GetSceneVariables().SerializeTo(element.AddChild("sceneVariables"));
+
+  eventsFunctionsContainer.SerializeEventsFunctionsTo(
+      element.AddChild("eventsFunctions"));
+  eventsFunctionsContainer.SerializeFoldersTo(
+      element.AddChild("eventsFunctionsFolderStructure"));
+
+  if (tests.GetTestsCount() > 0) {
+    tests.SerializeTestsTo(element.AddChild("tests"));
+  }
+
+  if (namedEasings.GetNamedEasingsCount() > 0) {
+    namedEasings.SerializeNamedEasingsTo(element.AddChild("namedEasings"));
+  }
+
   eventsBasedBehaviors.SerializeElementsTo(
       "eventsBasedBehavior", element.AddChild("eventsBasedBehaviors"));
+  if (isExternal) {
+    auto &eventsBasedObjectElement = element.AddChild("eventsBasedObjects");
+    eventsBasedObjectElement.ConsiderAsArrayOf("eventsBasedObject");
+    for (const auto &eventsBasedObject :
+         eventsBasedObjects.GetInternalVector()) {
+      eventsBasedObject->SerializeToExternal(
+          eventsBasedObjectElement.AddChild("eventsBasedObject"));
+    }
+  } else {
+    eventsBasedObjects.SerializeElementsTo(
+        "eventsBasedObject", element.AddChild("eventsBasedObjects"));
+  }
 }
 
 void EventsFunctionsExtension::UnserializeFrom(
     gd::Project& project, const SerializerElement& element) {
+  // Unserialize first the "declaration" (everything but objects content)
+  // so that objects can be then unserialized in proper order (they can depend
+  // on each others)
+  UnserializeExtensionDeclarationFrom(project, element);
+  UnserializeExtensionImplementationFrom(project, element);
+}
+
+void EventsFunctionsExtension::UnserializeExtensionDeclarationFrom(
+    gd::Project& project, const SerializerElement& element) {
   version = element.GetStringAttribute("version");
   extensionNamespace = element.GetStringAttribute("extensionNamespace");
   shortDescription = element.GetStringAttribute("shortDescription");
-  description = element.GetStringAttribute("description");
+  dimension = element.GetStringAttribute("dimension");
+  description = element.GetChild("description").GetMultilineStringValue();
   name = element.GetStringAttribute("name");
   fullName = element.GetStringAttribute("fullName");
+  category = element.GetStringAttribute("category");
   author = element.GetStringAttribute("author");
   previewIconUrl = element.GetStringAttribute("previewIconUrl");
   iconUrl = element.GetStringAttribute("iconUrl");
   helpPath = element.GetStringAttribute("helpPath");
+  gdevelopVersion = element.GetStringAttribute("gdevelopVersion");
+  if (element.HasChild("changelog")) {
+    changelog.UnserializeFrom(element.GetChild("changelog"));
+  }
 
   if (element.HasChild("origin")) {
     gd::String originName =
@@ -131,9 +201,105 @@ void EventsFunctionsExtension::UnserializeFrom(
     dependencies.push_back(
         UnserializeDependencyFrom(dependenciesElement.GetChild(i)));
 
-  UnserializeEventsFunctionsFrom(project, element.GetChild("eventsFunctions"));
+  sourceFiles.clear();
+  if (element.HasChild("sourceFiles")) {
+    const auto& sourceFilesElement = element.GetChild("sourceFiles");
+    sourceFilesElement.ConsiderAsArray();
+    for (size_t i = 0; i < sourceFilesElement.GetChildrenCount(); ++i) {
+      SourceFileMetadata sourceFile;
+      sourceFile.UnserializeFrom(sourceFilesElement.GetChild(i));
+      sourceFiles.push_back(sourceFile);
+    }
+  }
+
+  globalVariables.UnserializeFrom(element.GetChild("globalVariables"));
+  sceneVariables.UnserializeFrom(element.GetChild("sceneVariables"));
+
+  // Only unserialize behaviors and objects names.
+  // As event based objects can contains objects using CustomBehavior and/or
+  // CustomObject, this allows them to reference EventBasedBehavior and
+  // EventBasedObject respectively.
+  eventsBasedBehaviors.Clear();
+  auto &behaviorsElement = element.GetChild("eventsBasedBehaviors");
+  behaviorsElement.ConsiderAsArrayOf("eventsBasedBehavior");
+  for (std::size_t i = 0; i < behaviorsElement.GetChildrenCount(); ++i) {
+    const gd::String &behaviorName =
+        behaviorsElement.GetChild(i).GetStringAttribute("name");
+    eventsBasedBehaviors.InsertNew(behaviorName, eventsBasedBehaviors.GetCount());
+  }
+  eventsBasedObjects.Clear();
+  auto &objectsElement = element.GetChild("eventsBasedObjects");
+  objectsElement.ConsiderAsArrayOf("eventsBasedObject");
+  for (std::size_t i = 0; i < objectsElement.GetChildrenCount(); ++i) {
+    const gd::String &objectName =
+        objectsElement.GetChild(i).GetStringAttribute("name");
+    eventsBasedObjects.InsertNew(objectName, eventsBasedObjects.GetCount());
+  }
+}
+
+void EventsFunctionsExtension::UnserializeExtensionDefaultVariantsFrom(
+    gd::Project& project,
+    const SerializerElement& element) {
+  auto &eventsBasedObjectsElement = element.GetChild("eventsBasedObjects");
+  eventsBasedObjectsElement.ConsiderAsArrayOf("eventsBasedObject");
+  for (std::size_t elementIndex = 0;
+       elementIndex < eventsBasedObjectsElement.GetChildrenCount();
+       ++elementIndex) {
+    const SerializerElement& eventsBasedObjectElement =
+        eventsBasedObjectsElement.GetChild(elementIndex);
+    const gd::String& eventsBasedObjectName = eventsBasedObjectElement.GetStringAttribute("name");
+    size_t extensionIndex = eventsBasedObjects.GetPosition(
+        eventsBasedObjects.Get(eventsBasedObjectName));
+
+    eventsBasedObjects.at(extensionIndex)
+        .UnserializeDefaultVariantFrom(project, eventsBasedObjectElement);
+  }
+}
+
+void EventsFunctionsExtension::UnserializeExtensionImplementationFrom(
+    gd::Project& project,
+    const SerializerElement& element) {
+  eventsFunctionsContainer.UnserializeEventsFunctionsFrom(
+      project, element.GetChild("eventsFunctions"));
+  if (element.HasChild("eventsFunctionsFolderStructure")) {
+    eventsFunctionsContainer.UnserializeFoldersFrom(
+        element.GetChild("eventsFunctionsFolderStructure", 0));
+  }
+  else {
+    // Compatibility with GD <= 5.6.261
+    eventsFunctionsContainer.ReinitializeFolderStructure();
+    // end of compatibility code
+  }
+  // Just in case
+  eventsFunctionsContainer.AddMissingFunctionsInRootFolder();
+
+  tests.ClearTests();
+  if (element.HasChild("tests")) {
+    tests.UnserializeTestsFrom(element.GetChild("tests"));
+  }
+
+  namedEasings.ClearNamedEasings();
+  if (element.HasChild("namedEasings")) {
+    namedEasings.UnserializeNamedEasingsFrom(element.GetChild("namedEasings"));
+  }
+
   eventsBasedBehaviors.UnserializeElementsFrom(
       "eventsBasedBehavior", project, element.GetChild("eventsBasedBehaviors"));
+
+  auto &eventsBasedObjectsElement = element.GetChild("eventsBasedObjects");
+  eventsBasedObjectsElement.ConsiderAsArrayOf("eventsBasedObject");
+  for (std::size_t elementIndex = 0;
+       elementIndex < eventsBasedObjectsElement.GetChildrenCount();
+       ++elementIndex) {
+    const SerializerElement& eventsBasedObjectElement =
+        eventsBasedObjectsElement.GetChild(elementIndex);
+    const gd::String& eventsBasedObjectName = eventsBasedObjectElement.GetStringAttribute("name");
+    size_t extensionIndex = eventsBasedObjects.GetPosition(
+        eventsBasedObjects.Get(eventsBasedObjectName));
+
+    eventsBasedObjects.at(extensionIndex)
+        .UnserializeFrom(project, eventsBasedObjectElement);
+  }
 }
 
 bool EventsFunctionsExtension::IsExtensionLifecycleEventsFunction(

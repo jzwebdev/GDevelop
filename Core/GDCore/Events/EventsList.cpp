@@ -5,6 +5,7 @@
  */
 
 #include "EventsList.h"
+
 #include "GDCore/Events/Event.h"
 #include "GDCore/Project/Project.h"
 #include "GDCore/Tools/Log.h"
@@ -52,7 +53,7 @@ void EventsList::InsertEvent(std::shared_ptr<gd::BaseEvent> event,
     events.push_back(event);
 }
 
-gd::BaseEvent& EventsList::InsertNewEvent(gd::Project& project,
+gd::BaseEvent& EventsList::InsertNewEvent(const gd::Project& project,
                                           const gd::String& eventType,
                                           size_t position) {
   gd::BaseEventSPtr event = project.CreateEvent(eventType);
@@ -100,9 +101,8 @@ bool EventsList::Contains(const gd::BaseEvent& eventToSearch,
 }
 
 bool EventsList::MoveEventToAnotherEventsList(const gd::BaseEvent& eventToMove,
-                                  gd::EventsList& newEventsList,
-                                  std::size_t newPosition) {
-
+                                              gd::EventsList& newEventsList,
+                                              std::size_t newPosition) {
   for (std::size_t i = 0; i < GetEventsCount(); ++i) {
     if (events[i].get() == &eventToMove) {
       std::shared_ptr<BaseEvent> event = events[i];

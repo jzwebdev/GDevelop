@@ -5,7 +5,6 @@ import { I18n } from '@lingui/react';
 import { type I18n as I18nType } from '@lingui/core';
 
 import * as React from 'react';
-import OpenInNew from '@material-ui/icons/OpenInNew';
 import IconButton from '../../../../UI/IconButton';
 import classNames from 'classnames';
 import {
@@ -14,12 +13,20 @@ import {
   selectableArea,
   linkContainer,
   disabledText,
+  icon,
+  instructionInvalidParameter,
 } from '../../ClassNames';
 import InlinePopover from '../../../InlinePopover';
 import ExternalEventsAutoComplete from './ExternalEventsAutoComplete';
 import { showWarningBox } from '../../../../UI/Messages/MessageBox';
 import { type EventRendererProps } from '../EventRenderer';
 import { shouldActivate } from '../../../../UI/KeyboardShortcuts/InteractionKeys';
+import ShareExternal from '../../../../UI/CustomSvgIcons/ShareExternal';
+import InfoIcon from '../../../../UI/CustomSvgIcons/CircledInfo';
+import Tooltip from '@material-ui/core/Tooltip';
+import { Column } from '../../../../UI/Grid';
+import Text from '../../../../UI/Text';
+
 const gd: libGDevelop = global.gd;
 
 const styles = {
@@ -40,9 +47,13 @@ const styles = {
   },
 };
 
-export default class LinkEvent extends React.Component<EventRendererProps, *> {
+export default class LinkEvent extends React.Component<
+  EventRendererProps,
+  any
+> {
   _externalEventsAutoComplete: ?ExternalEventsAutoComplete = null;
 
+  // $FlowFixMe[missing-local-annot]
   state = {
     editing: false,
     editingPreviousValue: null,
@@ -109,11 +120,14 @@ export default class LinkEvent extends React.Component<EventRendererProps, *> {
 
   endEditing = () => {
     const { anchorEl } = this.state;
+    const linkEvent = gd.asLinkEvent(this.props.event);
 
     // Put back the focus after closing the inline popover.
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-type]
     if (anchorEl) anchorEl.focus();
-
+    if (this.state.editingPreviousValue !== linkEvent.getTarget()) {
+      this.props.onEndEditingEvent();
+    }
     this.setState({
       editing: false,
       editingPreviousValue: null,
@@ -121,7 +135,26 @@ export default class LinkEvent extends React.Component<EventRendererProps, *> {
     });
   };
 
-  render() {
+  isLinkedToWrongLayout = (target: string): boolean => {
+    const { project, layout } = this.props.scope;
+    return (
+      !!layout &&
+      project.hasExternalEventsNamed(target) &&
+      project.getExternalEvents(target).getAssociatedLayout() !==
+        layout.getName()
+    );
+  };
+
+  isInvalidLink = (target: string): boolean => {
+    const { project } = this.props.scope;
+    return (
+      target.length > 0 &&
+      !project.hasExternalEventsNamed(target) &&
+      !project.hasLayoutNamed(target)
+    );
+  };
+
+  render(): any {
     const linkEvent = gd.asLinkEvent(this.props.event);
     const target = linkEvent.getTarget();
 
@@ -135,6 +168,7 @@ export default class LinkEvent extends React.Component<EventRendererProps, *> {
               [linkContainer]: true,
             })}
             style={styles.container}
+            id={`${this.props.idPrefix}-link`}
           >
             <span
               style={styles.title}
@@ -157,8 +191,44 @@ export default class LinkEvent extends React.Component<EventRendererProps, *> {
                     }}
                     tabIndex={0}
                   >
-                    {target || (
-                      <Trans>{`<Enter the name of external events>`}</Trans>
+                    {this.isInvalidLink(target) ? (
+                      <span
+                        className={classNames({
+                          [instructionInvalidParameter]: true,
+                        })}
+                      >
+                        {target}
+                      </span>
+                    ) : this.isLinkedToWrongLayout(target) ? (
+                      <>
+                        <Tooltip
+                          title={
+                            <Column noMargin>
+                              <Text size="sub-title">
+                                {<Trans>Owned by another scene</Trans>}
+                              </Text>
+                              <Text size="body">
+                                <Trans>
+                                  Ensure this scene has the same objects,
+                                  behaviors and variables as the ones used in
+                                  these events.
+                                </Trans>
+                              </Text>
+                            </Column>
+                          }
+                        >
+                          <InfoIcon
+                            className={classNames({
+                              [icon]: true,
+                            })}
+                          />
+                        </Tooltip>
+                        {target}
+                      </>
+                    ) : (
+                      target || (
+                        <Trans>{`<Enter the name of external events>`}</Trans>
+                      )
                     )}
                   </i>{' '}
                 </>
@@ -170,7 +240,7 @@ export default class LinkEvent extends React.Component<EventRendererProps, *> {
               onClick={() => this.openTarget(i18n)}
               disabled={!target}
             >
-              <OpenInNew style={styles.openInNewIcon} />
+              <ShareExternal style={styles.openInNewIcon} />
             </IconButton>
             <InlinePopover
               open={this.state.editing}

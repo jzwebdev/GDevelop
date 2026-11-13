@@ -8,21 +8,32 @@ namespace gdjs {
 
   /**
    * Children of a structure.
+   * @category Core Engine > Variables
    */
-  type Children = Record<string, gdjs.Variable>;
+  export type Children = Record<string, gdjs.Variable>;
 
   /**
    * A Variable is an object storing a value (number or a string) or children variables.
+   * @category Core Engine > Variables
    */
   export class Variable {
+    // Set by RuntimeGame on startup based on project properties.
+    static useDeprecatedZeroAsDefaultStringVariable: boolean = false;
+
     // TODO: convert this to an integer to speed up the type checks at runtime.
     _type: VariableType = 'number';
     _value: float = 0;
     _str: string = '0';
     _bool: boolean = false;
     _children: Children = {};
-    _childrenArray: gdjs.Variable[] = [];
+    /** Arrays can have holes when a child has been set outside of its bounds. */
+    _childrenArray: Array<gdjs.Variable | undefined> = [];
     _undefinedInContainer: boolean = false;
+
+    // When synchronised over the network, this defines which player is the owner of the variable.
+    // Default is 0, meaning that the variable is owned by the host.
+    // If null, the variable is not synchronised over the network.
+    _playerNumber: number | null = 0;
 
     /**
      * @param [varData] The optional initial content of the variable.
@@ -47,20 +58,26 @@ namespace gdjs {
           // Protect against NaN.
           if (this._value !== this._value) this._value = 0;
         } else if (this._type === 'string') {
-          this._str = '' + varData.value || '0';
+          this._str = gdjs.Variable.useDeprecatedZeroAsDefaultStringVariable
+            ? '' + varData.value || '0'
+            : varData.value !== undefined
+              ? '' + varData.value
+              : '';
         } else if (this._type === 'boolean') {
           this._bool = !!varData.value;
         } else if (this._type === 'structure') {
           if (varData.children !== undefined) {
-            for (var i = 0, len = varData.children.length; i < len; ++i) {
-              var childData = varData.children[i];
-              if (childData.name === undefined) continue;
+            for (let i = 0, len = varData.children.length; i < len; ++i) {
+              const childData = varData.children[i];
+              if (!childData || childData.name === undefined) continue;
               this._children[childData.name] = new gdjs.Variable(childData);
             }
           }
         } else if (this._type === 'array' && varData.children) {
           for (const childData of varData.children)
-            this._childrenArray.push(new gdjs.Variable(childData));
+            this._childrenArray.push(
+              childData ? new gdjs.Variable(childData) : undefined
+            );
         }
       }
     }
@@ -97,10 +114,207 @@ namespace gdjs {
             target.addChild(p, children[p].clone());
         }
       } else if (source.getType() === 'array') {
-        for (const p of source.getAllChildrenArray())
-          target.pushVariableCopy(p);
+        const array: Array<gdjs.Variable | undefined> = [];
+        for (const child of source.getAllChildrenArray()) {
+          array.push(child ? child.clone() : child);
+        }
+        target.replaceChildrenArray(array);
       }
       return target;
+    }
+
+    static getVariableDataFromNetworkSyncData = (
+      syncData: VariableNetworkSyncData
+    ): VariableData => {
+      return {
+        name: syncData.name,
+        value: syncData.value,
+        type: syncData.type,
+        children: syncData.children
+          ? syncData.children.map((childSyncData) =>
+              childSyncData
+                ? gdjs.Variable.getVariableDataFromNetworkSyncData(
+                    childSyncData
+                  )
+                : undefined
+            )
+          : undefined,
+      };
+    };
+
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): UnnamedVariableNetworkSyncData | undefined {
+      if (
+        // Variable undefined.
+        this.isUndefinedInContainer()
+      )
+        return;
+
+      const variableOwner = this.getPlayerOwnership();
+
+      if (syncOptions.shouldExcludeVariableFromData) {
+        // Saving for "save state": serialize all variables unless excluded.
+        if (syncOptions.shouldExcludeVariableFromData(this)) {
+          return;
+        }
+      } else {
+        // Saving for "multiplayer": only serialize the variable if owned by the player.
+        const syncedPlayerNumber = syncOptions.playerNumber;
+        const isHost = syncOptions.isHost;
+
+        if (
+          // Variable marked as not to be synchronized.
+          variableOwner === null ||
+          // Getting sync data for a specific player:
+          (syncedPlayerNumber !== undefined &&
+            // Variable is owned by host but this player number is not the host.
+            variableOwner === 0 &&
+            !isHost) ||
+          // Variable is owned by a player but not getting sync data for this player number.
+          (variableOwner !== 0 && syncedPlayerNumber !== variableOwner)
+        ) {
+          // In those cases, the variable should not be synchronized.
+          return;
+        }
+      }
+
+      const variableType = this.getType();
+      const variableValue =
+        variableType === 'structure' || variableType === 'array'
+          ? ''
+          : this.getValue();
+
+      return {
+        value: variableValue,
+        type: variableType,
+        children: this.getStructureNetworkSyncData(this),
+        owner: variableOwner,
+      };
+    }
+
+    // Structure variables can contain other variables, so we need to recursively
+    // get the sync data for each child variable.
+    getStructureNetworkSyncData(
+      variable: gdjs.Variable
+    ): Array<VariableNetworkSyncData | undefined> | undefined {
+      if (variable.getType() === 'array') {
+        const allVariableNetworkSyncData: Array<
+          VariableNetworkSyncData | undefined
+        > = [];
+        variable.getAllChildrenArray().forEach((childVariable) => {
+          if (!childVariable) {
+            allVariableNetworkSyncData.push(undefined);
+            return;
+          }
+          const childVariableType = childVariable.getType();
+          const childVariableValue =
+            childVariableType === 'structure' || childVariableType === 'array'
+              ? ''
+              : childVariable.getValue();
+
+          const childVariableOwner = childVariable.getPlayerOwnership();
+          if (
+            // Variable undefined.
+            childVariable.isUndefinedInContainer() ||
+            // Variable marked as not to be synchronized.
+            childVariableOwner === null
+          ) {
+            // In those cases, the variable should not be synchronized.
+            return;
+          }
+
+          allVariableNetworkSyncData.push({
+            name: '',
+            value: childVariableValue,
+            type: childVariableType,
+            children: this.getStructureNetworkSyncData(childVariable),
+            owner: childVariableOwner,
+          });
+        });
+
+        return allVariableNetworkSyncData;
+      }
+
+      if (variable.getType() === 'structure') {
+        const variableChildren = variable.getAllChildren();
+        if (!variableChildren) return undefined;
+        const allVariableNetworkSyncData: VariableNetworkSyncData[] = [];
+
+        Object.entries(variableChildren).forEach(
+          ([childVariableName, childVariable]) => {
+            const childVariableType = childVariable.getType();
+            const childVariableValue =
+              childVariableType === 'structure' || childVariableType === 'array'
+                ? ''
+                : childVariable.getValue();
+            const childVariableOwner = childVariable.getPlayerOwnership();
+            if (
+              // Variable undefined.
+              childVariable.isUndefinedInContainer() ||
+              // Variable marked as not to be synchronized.
+              childVariableOwner === null
+            ) {
+              // In those cases, the variable should not be synchronized.
+              return;
+            }
+
+            allVariableNetworkSyncData.push({
+              name: childVariableName,
+              value: childVariableValue,
+              type: childVariableType,
+              children: this.getStructureNetworkSyncData(childVariable),
+              owner: childVariableOwner,
+            });
+          }
+        );
+
+        return allVariableNetworkSyncData;
+      }
+
+      return undefined;
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: VariableNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ) {
+      // // If we receive an update for this variable for a different owner than the one we know about,
+      // then 2 cases:
+      // - If we are the owner of the variable, then ignore the message, we assume it's a late update message or a wrong one,
+      //   we are confident that we own this variable. (it may be reverted if we don't receive an acknowledgment in time)
+      // - If we are not the owner of the variable, then assume that we missed the ownership change message, so update the variable's
+      //   ownership and then update the variable.
+      const syncedVariableOwner = networkSyncData.owner;
+      const variableData =
+        gdjs.Variable.getVariableDataFromNetworkSyncData(networkSyncData);
+
+      if (
+        options.shouldExcludeVariableFromUpdate &&
+        options.shouldExcludeVariableFromUpdate(this)
+      ) {
+        return;
+      }
+
+      if (!options.ignoreVariableOwnership) {
+        const currentPlayerNumber = gdjs.multiplayer.getCurrentPlayerNumber();
+
+        const currentVariableOwner = this.getPlayerOwnership();
+        if (currentPlayerNumber === currentVariableOwner) {
+          // Variable owned by us, ignoring update message.
+          return;
+        }
+
+        if (
+          syncedVariableOwner &&
+          syncedVariableOwner !== currentVariableOwner
+        ) {
+          /// Variable owned by someone else on our game, changing ownership as part of the update event.
+          this.setPlayerOwnership(syncedVariableOwner);
+        }
+      }
+
+      this.reinitialize(variableData);
     }
 
     /**
@@ -131,7 +345,7 @@ namespace gdjs {
       } else if (typeof obj === 'object') {
         this.castTo('structure');
         this.clearChildren();
-        for (var p in obj)
+        for (const p in obj)
           if (obj.hasOwnProperty(p)) this.getChild(p).fromJSObject(obj[p]);
       } else if (typeof obj === 'symbol') {
         this.setString(obj.toString());
@@ -143,7 +357,7 @@ namespace gdjs {
               " aren't supported by GDevelop variables, it will be reduced to that size."
           );
         // @ts-ignore
-        variable.setNumber(parseInt(obj, 10));
+        this.setNumber(parseInt(obj, 10));
       } else if (typeof obj === 'function') {
         logger.error(
           'Error while converting JS variable to GDevelop variable: Impossible to set variable value to a function.'
@@ -194,7 +408,13 @@ namespace gdjs {
           return obj;
         case 'array':
           const arr: any[] = [];
-          for (const item of this._childrenArray) arr.push(item.toJSObject());
+          for (const item of this._childrenArray) {
+            // item can be undefined if there are empty elements in the array.
+            // A variable can have empty items in its children array if one inserts
+            // a variable at an index greater than highest index. All the array elements
+            // in the gap will be empty elements.
+            arr.push(item === undefined ? undefined : item.toJSObject());
+          }
           return arr;
       }
     }
@@ -250,25 +470,42 @@ namespace gdjs {
     }
 
     /**
+     * Get the child with the specified name or at the specified index.
+     *
+     * If the variable is an array, prefer `getChildAt`.
+     * If the variable is a structure, prefer `getChildNamed`.
+     *
+     * If the variable has not the specified child, an empty variable with the specified name
+     * (or index) is added as child.
+     *
+     * @returns The child variable
+     */
+    getChild(childName: string | number): gdjs.Variable {
+      if (this._type === 'array')
+        return this.getChildAt(
+          // @ts-ignore
+          Number.isInteger(childName) ? childName : parseInt(childName, 10) || 0
+        );
+      else {
+        if (this._type !== 'structure') this.castTo('structure');
+        return this.getChildNamed('' + childName);
+      }
+    }
+
+    /**
      * Get the child with the specified name.
      *
      * If the variable has not the specified child, an empty variable with the specified name
      * is added as child.
+     *
      * @returns The child variable
      */
-    getChild(childName: string): gdjs.Variable {
-      // Make sure the variable is a collection
-      if (this.isPrimitive()) this.castTo('structure');
+    getChildNamed(childName: string): gdjs.Variable {
+      const child = this._children[childName];
+      if (child === undefined || child === null)
+        return (this._children[childName] = new gdjs.Variable());
 
-      if (this._type === 'array')
-        return this.getChildAt(parseInt(childName, 10) || 0);
-
-      if (
-        this._children[childName] === undefined ||
-        this._children[childName] === null
-      )
-        this._children[childName] = new gdjs.Variable();
-      return this._children[childName];
+      return child;
     }
 
     /**
@@ -280,8 +517,8 @@ namespace gdjs {
      * @returns The variable (for chaining calls)
      */
     addChild(childName: string, childVariable: gdjs.Variable): this {
-      // Make sure this is a structure
-      this.castTo('structure');
+      if (this._type !== 'structure') this.castTo('structure');
+
       this._children[childName] = childVariable;
       return this;
     }
@@ -330,7 +567,7 @@ namespace gdjs {
      * Replaces all the children with a new array of children.
      * @param newChildren The array of new children.
      */
-    replaceChildrenArray(newChildren: gdjs.Variable[]) {
+    replaceChildrenArray(newChildren: Array<gdjs.Variable | undefined>) {
       this._type = 'array';
       this._childrenArray = newChildren;
     }
@@ -388,6 +625,21 @@ namespace gdjs {
     }
 
     /**
+     * Get the value of the variable, as a number if it's one,
+     * or as a string (if it's a string or something else)
+     *
+     * In most cases, prefer calling `getAsNumber` or `getAsString` directly.
+     * This is a fallback in case a variable type can't be known statically for sure,
+     * like `getValue`.
+     *
+     * @private
+     */
+    getAsNumberOrString(): number | string {
+      if (this._type === 'number') return this._value;
+      return this.getAsString();
+    }
+
+    /**
      * Get the value of the variable, considered as a boolean
      * @return The boolean value of the variable.
      */
@@ -412,6 +664,13 @@ namespace gdjs {
     }
 
     /**
+     * Toggle the value of the variable, considered as a boolean.
+     */
+    toggle() {
+      this.setBoolean(!this.getAsBoolean());
+    }
+
+    /**
      * Sets the primitive value using the setter of the current type.
      * @param newValue The primitive value of the variable.
      */
@@ -428,8 +687,8 @@ namespace gdjs {
       return this._type === 'number'
         ? this.getAsNumber()
         : this._type === 'boolean'
-        ? this.getAsBoolean()
-        : this.getAsString();
+          ? this.getAsBoolean()
+          : this.getAsString();
     }
 
     /**
@@ -465,19 +724,21 @@ namespace gdjs {
       return this._type === 'structure'
         ? this._children
         : this._type === 'array'
-        ? ((Object.assign({}, this._childrenArray) as unknown) as Children)
-        : {};
+          ? (Object.assign({}, this._childrenArray) as unknown as Children)
+          : {};
     }
 
     /**
      * Return an Array containing all the children of the variable.
+     *
+     * Arrays can have holes when a child has been set outside of its bounds.
      */
-    getAllChildrenArray(): gdjs.Variable[] {
+    getAllChildrenArray(): Array<gdjs.Variable | undefined> {
       return this._type === 'structure'
         ? Object.values(this._children)
         : this._type === 'array'
-        ? this._childrenArray
-        : [];
+          ? this._childrenArray
+          : [];
     }
 
     /**
@@ -487,8 +748,8 @@ namespace gdjs {
       return this._type === 'structure'
         ? Object.keys(this._children).length
         : this._type === 'array'
-        ? this._childrenArray.length
-        : 0;
+          ? this._childrenArray.length
+          : 0;
     }
 
     /**
@@ -543,14 +804,15 @@ namespace gdjs {
     /**
      * Get a variable at a given index of the array.
      */
-    getChildAt(index: integer) {
-      this.castTo('array');
-      if (
-        this._childrenArray[index] === undefined ||
-        this._childrenArray[index] === null
-      )
-        this._childrenArray[index] = new gdjs.Variable();
-      return this._childrenArray[index];
+    getChildAt(index: integer): gdjs.Variable {
+      if (this._type !== 'array') this.castTo('array');
+
+      let child = this._childrenArray[index];
+      if (!child) {
+        child = new gdjs.Variable();
+        this._childrenArray[index] = child;
+      }
+      return child;
     }
 
     /**
@@ -564,21 +826,45 @@ namespace gdjs {
      * Pushes a copy of a variable into the array.
      */
     pushVariableCopy(variable: gdjs.Variable) {
-      this.castTo('array');
+      if (this._type !== 'array') this.castTo('array');
+
       this._childrenArray.push(variable.clone());
+    }
+
+    /**
+     * Pushes a variable into the array without duplicating it first.
+     * This should only be used by generated code.
+     */
+    _pushVariable(variable: gdjs.Variable) {
+      if (this._type !== 'array') this.castTo('array');
+
+      this._childrenArray.push(variable);
     }
 
     /**
      * Pushes a value into the array.
      */
     pushValue(value: string | float | boolean) {
-      this.castTo('array');
+      if (this._type !== 'array') this.castTo('array');
+
       this._childrenArray.push(
         new gdjs.Variable({
           type: typeof value as 'string' | 'number' | 'boolean',
           value,
         })
       );
+    }
+
+    getPlayerOwnership(): number | null {
+      return this._playerNumber;
+    }
+
+    setPlayerOwnership(playerNumber: number) {
+      this._playerNumber = playerNumber;
+    }
+
+    disableSynchronization() {
+      this._playerNumber = null;
     }
   }
 }

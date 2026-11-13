@@ -5,18 +5,36 @@ import PreferencesContext, {
   initialPreferences,
   type Preferences,
   type AlertMessageIdentifier,
+  type EditorStateForProject,
+  type EditorStateForProjectUpdate,
+  type EditorStateForPropertyPanel,
 } from './PreferencesContext';
 import optionalRequire from '../../Utils/OptionalRequire';
 import { getIDEVersion } from '../../Version';
 import {
   type PreferencesValues,
   type EditorMosaicName,
+  type ProjectSpecificPreferencesValues,
 } from './PreferencesContext';
-import type { ResourceKind } from '../../ResourcesList/ResourceSource';
+import type {
+  ResourceKind,
+  ResourceImportationBehavior,
+} from '../../ResourcesList/ResourceSource';
 import { type EditorMosaicNode } from '../../UI/EditorMosaic';
 import { type FileMetadataAndStorageProviderName } from '../../ProjectsStorage';
 import defaultShortcuts from '../../KeyboardShortcuts/DefaultShortcuts';
 import { type CommandName } from '../../CommandPalette/CommandsList';
+import {
+  getBrowserLanguageOrLocale,
+  setLanguageInDOM,
+  selectLanguageOrLocale,
+} from '../../Utils/Language';
+import { type GamesDashboardOrderBy } from '../../GameDashboard/GamesList';
+import { isWebGL2Supported } from '../../Utils/WebGL';
+import {
+  CHECK_APP_UPDATES_TIMEOUT,
+  PERIODIC_APP_UPDATES_TIMEOUT,
+} from '../../Utils/GlobalFetchTimeouts';
 const electron = optionalRequire('electron');
 const ipcRenderer = electron ? electron.ipcRenderer : null;
 
@@ -27,71 +45,445 @@ type Props = {|
 
 type State = Preferences;
 
-const LocalStorageItem = 'gd-preferences';
-const MAX_RECENT_FILES_COUNT = 20;
+const localStorageItem = 'gd-preferences';
+
+export const loadPreferencesFromLocalStorage = (): ?PreferencesValues => {
+  try {
+    const persistedState = localStorage.getItem(localStorageItem);
+    if (!persistedState) return null;
+
+    const values = JSON.parse(persistedState);
+
+    // "Migrate" non existing properties to their default values
+    // (useful when upgrading the preferences to a new version where
+    // a new preference was added).
+    for (const key in initialPreferences.values) {
+      if (
+        initialPreferences.values.hasOwnProperty(key) &&
+        typeof values[key] === 'undefined'
+      ) {
+        // $FlowFixMe[invalid-computed-prop]
+        values[key] = initialPreferences.values[key];
+      }
+    }
+
+    // Migrate renamed themes.
+    if (values.themeName === 'GDevelop default') {
+      values.themeName = 'GDevelop default Light';
+    } else if (values.themeName === 'Dark') {
+      values.themeName = 'Blue Dark';
+    }
+
+    if (typeof values.showDeprecatedInstructionWarning === 'boolean') {
+      values.showDeprecatedInstructionWarning = values.showDeprecatedInstructionWarning
+        ? 'icon'
+        : 'no';
+    }
+
+    // 3D rendering requires WebGL2 (the preference used to only require WebGL1).
+    if (values.use3DEditor && !isWebGL2Supported()) {
+      values.use3DEditor = false;
+    }
+
+    return values;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const getInitialPreferences = (): {
+  autoDisplayChangelog: boolean,
+  autoDownloadUpdates: boolean,
+  autoOpenMostRecentProject: boolean,
+  automaticallyApplyAiRequestEditsByProjectId: { [string]: boolean },
+  automaticallyUseCreditsForAiRequests: boolean,
+  autosaveOnPreview: boolean,
+  backdropClickBehavior: string,
+  blockPreviewAndExportOnDiagnosticErrors: boolean,
+  codeEditorThemeName: string,
+  defaultEditorMosaicNodes: {},
+  disableNpmScriptConfirmation: boolean,
+  displaySaveReminder: { activated: boolean },
+  editorStateByProject: {},
+  eventsSheetCancelInlineParameter: string,
+  eventsSheetIndentScale: number,
+  eventsSheetShowObjectThumbnails: boolean,
+  eventsSheetUseAssignmentOperators: boolean,
+  eventsSheetZoomLevel: number,
+  fetchPlayerTokenForPreviewAutomatically: boolean,
+  gamesDashboardOrderBy: string,
+  hasProjectOpened: boolean,
+  hiddenAlertMessages: {},
+  hiddenAnnouncements: {},
+  hiddenAskAiStandAloneForms: {},
+  hiddenTutorialHints: {},
+  inAppTutorialsProgress: {},
+  isAlwaysOnTopInPreview: boolean,
+  isMenuBarHiddenInPreview: boolean,
+  language: string,
+  lastClaimableProductsDialogMonth: null,
+  autoDisplayClaimableProductsDialog: boolean,
+  lastLaunchedVersion: void,
+  newFeaturesAcknowledgements: {},
+  newObjectDialogDefaultTab: any,
+  newEffectDialogDefaultTab: string,
+  newProjectsDefaultFolder: any,
+  newProjectsDefaultStorageProviderName: string,
+  openDiagnosticReportAutomatically: boolean,
+  previewCrashReportUploadLevel: string,
+  projectLastUsedPaths: {},
+  recentProjectFiles: any,
+  resourcesImporationBehavior: string,
+  shareDialogDefaultTab: string,
+  showAiAskButtonInTitleBar: boolean,
+  showBasicProfilingCounters: boolean,
+  showCreateSectionByDefault: boolean,
+  showDeprecatedInstructionWarning: string,
+  showEffectParameterNames: boolean,
+  showExperimentalExtensions: boolean,
+  showInAppTutorialDeveloperMode: boolean,
+  takeScreenshotOnPreview: boolean,
+  gameplayTestFramePosition: {| left: number, bottom: number |} | null,
+  gameplayTestFrameZoomFactor: number | null,
+  themeName: any,
+  use3DEditor: any,
+  useBackgroundSerializerForSaving: boolean,
+  showJsTypeError: boolean,
+  canonicalEventSerialization: boolean,
+  useGDJSDevelopmentWatcher: boolean,
+  useShortcutToClosePreviewWindow: boolean,
+  userShortcutMap: {},
+  watchProjectFolderFilesForLocalProjects: boolean,
+} => {
+  let languageOrLocale = 'en';
+  const browserLanguageOrLocale = getBrowserLanguageOrLocale();
+  if (browserLanguageOrLocale)
+    languageOrLocale = selectLanguageOrLocale(
+      browserLanguageOrLocale,
+      languageOrLocale
+    );
+
+  return { ...initialPreferences.values, language: languageOrLocale };
+};
+
+const getPreferences = (): PreferencesValues => {
+  const preferences =
+    loadPreferencesFromLocalStorage() || getInitialPreferences();
+  setLanguageInDOM(preferences.language);
+  // $FlowFixMe[incompatible-type]
+  return preferences;
+};
 
 export default class PreferencesProvider extends React.Component<Props, State> {
+  _periodicUpdateCheckTimeout: ?TimeoutID = null;
+  _periodicUpdateCheckInterval: ?IntervalID = null;
+
+  // $FlowFixMe[missing-local-annot]
   state = {
-    values: this._loadValuesFromLocalStorage() || initialPreferences.values,
-    setLanguage: this._setLanguage.bind(this),
-    setThemeName: this._setThemeName.bind(this),
-    setCodeEditorThemeName: this._setCodeEditorThemeName.bind(this),
-    setAutoDownloadUpdates: this._setAutoDownloadUpdates.bind(this),
-    checkUpdates: this._checkUpdates.bind(this),
-    setAutoDisplayChangelog: this._setAutoDisplayChangelog.bind(this),
-    showAlertMessage: this._showAlertMessage.bind(this),
-    showAllAlertMessages: this._showAllAlertMessages.bind(this),
-    showTutorialHint: this._showTutorialHint.bind(this),
-    showAllTutorialHints: this._showAllTutorialHints.bind(this),
-    verifyIfIsNewVersion: this._verifyIfIsNewVersion.bind(this),
-    setEventsSheetShowObjectThumbnails: this._setEventsSheetShowObjectThumbnails.bind(
+    values: (getPreferences(): PreferencesValues),
+    // $FlowFixMe[method-unbinding]
+    setMultipleValues: (this._setMultipleValues.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setLanguage: (this._setLanguage.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setThemeName: (this._setThemeName.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setCodeEditorThemeName: (this._setCodeEditorThemeName.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setAutoDownloadUpdates: (this._setAutoDownloadUpdates.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    checkUpdates: ((forceDownload?: boolean) =>
+      this._checkUpdates(forceDownload, true): any),
+    // $FlowFixMe[method-unbinding]
+    setAutoDisplayChangelog: (this._setAutoDisplayChangelog.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAlertMessage: (this._showAlertMessage.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAllAlertMessages: (this._showAllAlertMessages.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showTutorialHint: (this._showTutorialHint.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAllTutorialHints: (this._showAllTutorialHints.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAnnouncement: (this._showAnnouncement.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAllAnnouncements: (this._showAllAnnouncements.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAskAiStandAloneForm: (this._showAskAiStandAloneForm.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    showAllAskAiStandAloneForms: (this._showAllAskAiStandAloneForms.bind(
       this
-    ),
-    setAutosaveOnPreview: this._setAutosaveOnPreview.bind(this),
-    setUseNewInstructionEditorDialog: this._setUseNewInstructionEditorDialog.bind(
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    verifyIfIsNewVersion: (this._verifyIfIsNewVersion.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setEventsSheetShowObjectThumbnails: (this._setEventsSheetShowObjectThumbnails.bind(
       this
-    ),
-    setUseUndefinedVariablesInAutocompletion: this._setUseUndefinedVariablesInAutocompletion.bind(
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setAutosaveOnPreview: (this._setAutosaveOnPreview.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setUseGDJSDevelopmentWatcher: (this._setUseGDJSDevelopmentWatcher.bind(
       this
-    ),
-    setUseGDJSDevelopmentWatcher: this._setUseGDJSDevelopmentWatcher.bind(this),
-    setEventsSheetUseAssignmentOperators: this._setEventsSheetUseAssignmentOperators.bind(
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setEventsSheetUseAssignmentOperators: (this._setEventsSheetUseAssignmentOperators.bind(
       this
-    ),
-    setEventsSheetZoomLevel: this._setEventsSheetZoomLevel.bind(this),
-    setShowEffectParameterNames: this._setShowEffectParameterNames.bind(this),
-    getLastUsedPath: this._getLastUsedPath.bind(this),
-    setLastUsedPath: this._setLastUsedPath.bind(this),
-    getDefaultEditorMosaicNode: this._getDefaultEditorMosaicNode.bind(this),
-    setDefaultEditorMosaicNode: this._setDefaultEditorMosaicNode.bind(this),
-    getRecentProjectFiles: this._getRecentProjectFiles.bind(this),
-    insertRecentProjectFile: this._insertRecentProjectFile.bind(this),
-    removeRecentProjectFile: this._removeRecentProjectFile.bind(this),
-    getAutoOpenMostRecentProject: this._getAutoOpenMostRecentProject.bind(this),
-    setAutoOpenMostRecentProject: this._setAutoOpenMostRecentProject.bind(this),
-    hadProjectOpenedDuringLastSession: this._hadProjectOpenedDuringLastSession.bind(
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setEventsSheetIndentScale: (this._setEventsSheetIndentScale.bind(
       this
-    ),
-    setHasProjectOpened: this._setHasProjectOpened.bind(this),
-    setShortcutForCommand: this._setShortcutForCommand.bind(this),
-    resetShortcutsToDefault: this._resetShortcutsToDefault.bind(this),
-    getNewObjectDialogDefaultTab: this._getNewObjectDialogDefaultTab.bind(this),
-    setNewObjectDialogDefaultTab: this._setNewObjectDialogDefaultTab.bind(this),
-    getIsMenuBarHiddenInPreview: this._getIsMenuBarHiddenInPreview.bind(this),
-    setIsMenuBarHiddenInPreview: this._setIsMenuBarHiddenInPreview.bind(this),
-    setBackdropClickBehavior: this._setBackdropClickBehavior.bind(this),
-    getIsAlwaysOnTopInPreview: this._getIsAlwaysOnTopInPreview.bind(this),
-    setIsAlwaysOnTopInPreview: this._setIsAlwaysOnTopInPreview.bind(this),
-    setEventsSheetCancelInlineParameter: this._setEventsSheetCancelInlineParameter.bind(
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setEventsSheetZoomLevel: (this._setEventsSheetZoomLevel.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setShowEffectParameterNames: (this._setShowEffectParameterNames.bind(
       this
-    ),
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getLastUsedPath: (this._getLastUsedPath.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setLastUsedPath: (this._setLastUsedPath.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getDefaultEditorMosaicNode: (this._getDefaultEditorMosaicNode.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setDefaultEditorMosaicNode: (this._setDefaultEditorMosaicNode.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getRecentProjectFiles: (this._getRecentProjectFiles.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    insertRecentProjectFile: (this._insertRecentProjectFile.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    removeRecentProjectFile: (this._removeRecentProjectFile.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getAutoOpenMostRecentProject: (this._getAutoOpenMostRecentProject.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setAutoOpenMostRecentProject: (this._setAutoOpenMostRecentProject.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    hadProjectOpenedDuringLastSession: (this._hadProjectOpenedDuringLastSession.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setHasProjectOpened: (this._setHasProjectOpened.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setShortcutForCommand: (this._setShortcutForCommand.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    resetShortcutsToDefault: (this._resetShortcutsToDefault.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getNewObjectDialogDefaultTab: (this._getNewObjectDialogDefaultTab.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setNewObjectDialogDefaultTab: (this._setNewObjectDialogDefaultTab.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getNewEffectDialogDefaultTab: (this._getNewEffectDialogDefaultTab.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setNewEffectDialogDefaultTab: (this._setNewEffectDialogDefaultTab.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getShareDialogDefaultTab: (this._getShareDialogDefaultTab.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setShareDialogDefaultTab: (this._setShareDialogDefaultTab.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getIsMenuBarHiddenInPreview: (this._getIsMenuBarHiddenInPreview.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setIsMenuBarHiddenInPreview: (this._setIsMenuBarHiddenInPreview.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setBackdropClickBehavior: (this._setBackdropClickBehavior.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setResourcesImporationBehavior: (this._setResourcesImporationBehavior.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getIsAlwaysOnTopInPreview: (this._getIsAlwaysOnTopInPreview.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setIsAlwaysOnTopInPreview: (this._setIsAlwaysOnTopInPreview.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setEventsSheetCancelInlineParameter: (this._setEventsSheetCancelInlineParameter.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowExperimentalExtensions: (this._setShowCommunityExtensions.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowCreateSectionByDefault: (this._setShowCreateSectionByDefault.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowInAppTutorialDeveloperMode: (this._setShowInAppTutorialDeveloperMode.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setOpenDiagnosticReportAutomatically: (this._setOpenDiagnosticReportAutomatically.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getOpenDiagnosticReportAutomatically: (this._getOpenDiagnosticReportAutomatically.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setBlockPreviewAndExportOnDiagnosticErrors: (this._setBlockPreviewAndExportOnDiagnosticErrors.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getBlockPreviewAndExportOnDiagnosticErrors: (this._getBlockPreviewAndExportOnDiagnosticErrors.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowDeprecatedInstructionWarning: (this._setShowDeprecatedInstructionWarning.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    getShowDeprecatedInstructionWarning: (this._getShowDeprecatedInstructionWarning.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setUse3DEditor: (this._setUse3DEditor.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getUse3DEditor: (this._getUse3DEditor.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setShowBasicProfilingCounters: (this._setShowBasicProfilingCounters.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setDisableNpmScriptConfirmation: (this._setDisableNpmScriptConfirmation.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    saveTutorialProgress: (this._saveTutorialProgress.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getTutorialProgress: (this._getTutorialProgress.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setNewProjectsDefaultFolder: (this._setNewProjectsDefaultFolder.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setNewProjectsDefaultStorageProviderName: (this._setNewProjectsDefaultStorageProviderName.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setUseShortcutToClosePreviewWindow: (this._setUseShortcutToClosePreviewWindow.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setWatchProjectFolderFilesForLocalProjects: (this._setWatchProjectFolderFilesForLocalProjects.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setLastClaimableProductsDialogMonth: (this._setLastClaimableProductsDialogMonth.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setAutoDisplayClaimableProductsDialog: (this._setAutoDisplayClaimableProductsDialog.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setNewFeaturesAcknowledgements: (this._setNewFeaturesAcknowledgements.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setDisplaySaveReminder: (this._setDisplaySaveReminder.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    getEditorStateForProject: (this._getEditorStateForProject.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setEditorStateForProject: (this._setEditorStateForProject.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setFetchPlayerTokenForPreviewAutomatically: (this._setFetchPlayerTokenForPreviewAutomatically.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setPreviewCrashReportUploadLevel: (this._setPreviewCrashReportUploadLevel.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setGamesDashboardOrderBy: (this._setGamesDashboardOrderBy.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setTakeScreenshotOnPreview: (this._setTakeScreenshotOnPreview.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setGameplayTestFramePosition: (this._setGameplayTestFramePosition.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setGameplayTestFrameZoomFactor: (this._setGameplayTestFrameZoomFactor.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowAiAskButtonInTitleBar: (this._setShowAiAskButtonInTitleBar.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setAutomaticallyUseCreditsForAiRequests: (this._setAutomaticallyUseCreditsForAiRequests.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setAutomaticallyApplyAiRequestEditsForProjectId: (this._setAutomaticallyApplyAiRequestEditsForProjectId.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setUseBackgroundSerializerForSaving: (this._setUseBackgroundSerializerForSaving.bind(
+      this
+    ): any),
+    // $FlowFixMe[method-unbinding]
+    setShowJsTypeError: (this._setShowJsTypeError.bind(this): any),
+    // $FlowFixMe[method-unbinding]
+    setCanonicalEventSerialization: (this._setCanonicalEventSerialization.bind(
+      this
+    ): any),
   };
 
   componentDidMount() {
-    setTimeout(() => this._checkUpdates(), 10000);
+    this._periodicUpdateCheckTimeout = setTimeout(
+      () => this._checkUpdates(),
+      CHECK_APP_UPDATES_TIMEOUT
+    );
+    this._periodicUpdateCheckInterval = setInterval(
+      () => this._checkUpdates(),
+      PERIODIC_APP_UPDATES_TIMEOUT
+    );
+  }
+
+  componentWillUnmount() {
+    clearTimeout(this._periodicUpdateCheckTimeout);
+    clearInterval(this._periodicUpdateCheckInterval);
+  }
+
+  _setMultipleValues(updates: ProjectSpecificPreferencesValues) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          ...updates,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
   }
 
   _setLanguage(language: string) {
+    setLanguageInDOM(language);
     this.setState(
       state => ({
         values: {
@@ -129,30 +521,52 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _setUseNewInstructionEditorDialog(useNewInstructionEditorDialog: boolean) {
+  _saveTutorialProgress({
+    tutorialId,
+    userId,
+    ...tutorialProgress
+  }: {|
+    tutorialId: string,
+    userId: ?string,
+    step: number,
+    progress: number,
+    fileMetadataAndStorageProviderName: FileMetadataAndStorageProviderName,
+    projectData: {| [key: string]: string |},
+  |}) {
+    const userIdKey: string = userId || 'anonymous';
     this.setState(
-      state => ({
-        values: {
-          ...state.values,
-          useNewInstructionEditorDialog,
-        },
-      }),
+      ({ values }) => {
+        return {
+          values: {
+            ...values,
+            inAppTutorialsProgress: {
+              ...values.inAppTutorialsProgress,
+              [tutorialId]: {
+                ...values.inAppTutorialsProgress[tutorialId],
+                // $FlowFixMe[incompatible-type]
+                [userIdKey]: tutorialProgress,
+              },
+            },
+          },
+        };
+      },
       () => this._persistValuesToLocalStorage(this.state)
     );
   }
 
-  _setUseUndefinedVariablesInAutocompletion(
-    useUndefinedVariablesInAutocompletion: boolean
-  ) {
-    this.setState(
-      state => ({
-        values: {
-          ...state.values,
-          useUndefinedVariablesInAutocompletion,
-        },
-      }),
-      () => this._persistValuesToLocalStorage(this.state)
-    );
+  _getTutorialProgress({
+    tutorialId,
+    userId,
+  }: {|
+    tutorialId: string,
+    userId: ?string,
+  |}): any {
+    const userIdKey: string = userId || 'anonymous';
+    const tutorialProgresses = this.state.values.inAppTutorialsProgress[
+      tutorialId
+    ];
+    if (!tutorialProgresses) return undefined;
+    return tutorialProgresses[userIdKey];
   }
 
   _setUseGDJSDevelopmentWatcher(useGDJSDevelopmentWatcher: boolean) {
@@ -181,6 +595,18 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
+  _setEventsSheetIndentScale(eventsSheetIndentScale: number) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          eventsSheetIndentScale,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
   _setEventsSheetZoomLevel(eventsSheetZoomLevel: number) {
     this.setState(
       state => ({
@@ -199,6 +625,18 @@ export default class PreferencesProvider extends React.Component<Props, State> {
         values: {
           ...state.values,
           showEffectParameterNames,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setShowCreateSectionByDefault(showCreateSectionByDefault: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showCreateSectionByDefault,
         },
       }),
       () => this._persistValuesToLocalStorage(this.state)
@@ -267,7 +705,145 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _checkUpdates(forceDownload?: boolean) {
+  _setUseShortcutToClosePreviewWindow(
+    useShortcutToClosePreviewWindow: boolean
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          useShortcutToClosePreviewWindow,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setShowCommunityExtensions(showExperimentalExtensions: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showExperimentalExtensions,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setShowInAppTutorialDeveloperMode(showInAppTutorialDeveloperMode: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showInAppTutorialDeveloperMode,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setOpenDiagnosticReportAutomatically(
+    openDiagnosticReportAutomatically: boolean
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          openDiagnosticReportAutomatically,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getOpenDiagnosticReportAutomatically(): any {
+    return this.state.values.openDiagnosticReportAutomatically;
+  }
+
+  _setBlockPreviewAndExportOnDiagnosticErrors(
+    blockPreviewAndExportOnDiagnosticErrors: boolean
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          blockPreviewAndExportOnDiagnosticErrors,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getBlockPreviewAndExportOnDiagnosticErrors(): any {
+    return this.state.values.blockPreviewAndExportOnDiagnosticErrors;
+  }
+
+  _setShowDeprecatedInstructionWarning(
+    showDeprecatedInstructionWarning:
+      | 'no'
+      | 'icon'
+      | 'icon-and-deprecated-warning-text'
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showDeprecatedInstructionWarning,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getShowDeprecatedInstructionWarning():
+    | 'no'
+    | 'icon'
+    | 'icon-and-deprecated-warning-text' {
+    return this.state.values.showDeprecatedInstructionWarning;
+  }
+
+  _setUse3DEditor(use3DEditor: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          use3DEditor,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getUse3DEditor(): any {
+    return this.state.values.use3DEditor;
+  }
+
+  _setShowBasicProfilingCounters(showBasicProfilingCounters: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showBasicProfilingCounters,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setDisableNpmScriptConfirmation(disableNpmScriptConfirmation: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          disableNpmScriptConfirmation,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _checkUpdates(forceDownload?: boolean, explicit?: boolean) {
     // Checking for updates is only done on Electron.
     // Note: This could be abstracted away later if other updates mechanisms
     // should be supported.
@@ -275,13 +851,13 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     if (!ipcRenderer || disableCheckForUpdates) return;
 
     if (!!forceDownload || this.state.values.autoDownloadUpdates) {
-      ipcRenderer.send('updates-check-and-download');
+      ipcRenderer.send('updates-check-and-download', { explicit: !!explicit });
     } else {
-      ipcRenderer.send('updates-check');
+      ipcRenderer.send('updates-check', { explicit: !!explicit });
     }
   }
 
-  _verifyIfIsNewVersion() {
+  _verifyIfIsNewVersion(): any {
     const currentVersion = getIDEVersion();
     const { lastLaunchedVersion } = this.state.values;
     if (lastLaunchedVersion === currentVersion) {
@@ -316,7 +892,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
           ...state.values,
           hiddenAlertMessages: {
             ...state.values.hiddenAlertMessages,
-            // $FlowFixMe - Flow won't typecheck this because of https://medium.com/flow-type/spreads-common-errors-fixes-9701012e9d58
+            // $FlowFixMe[incompatible-type] - Flow won't typecheck this because of https://medium.com/flow-type/spreads-common-errors-fixes-9701012e9d58
             [identifier]: !show,
           },
         },
@@ -364,35 +940,64 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _loadValuesFromLocalStorage(): ?PreferencesValues {
-    try {
-      const persistedState = localStorage.getItem(LocalStorageItem);
-      if (!persistedState) return null;
-
-      const values = JSON.parse(persistedState);
-
-      // "Migrate" non existing properties to their default values
-      // (useful when upgrading the preferences to a new version where
-      // a new preference was added).
-      for (const key in initialPreferences.values) {
-        if (
-          initialPreferences.values.hasOwnProperty(key) &&
-          typeof values[key] === 'undefined'
-        ) {
-          values[key] = initialPreferences.values[key];
-        }
-      }
-
-      return values;
-    } catch (e) {
-      return null;
-    }
+  _showAnnouncement(identifier: string, show: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          hiddenAnnouncements: {
+            ...state.values.hiddenAnnouncements,
+            [identifier]: !show,
+          },
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
   }
 
-  _persistValuesToLocalStorage(preferences: Preferences) {
+  _showAllAnnouncements() {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          hiddenAnnouncements: {},
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _showAskAiStandAloneForm(identifier: string, show: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          hiddenAskAiStandAloneForms: {
+            ...state.values.hiddenAskAiStandAloneForms,
+            [identifier]: !show,
+          },
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _showAllAskAiStandAloneForms() {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          hiddenAskAiStandAloneForms: {},
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _persistValuesToLocalStorage(preferences: Preferences): any {
     try {
       localStorage.setItem(
-        LocalStorageItem,
+        localStorageItem,
         JSON.stringify(preferences.values)
       );
     } catch (e) {
@@ -402,7 +1007,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     return preferences;
   }
 
-  _getLastUsedPath(project: gdProject, kind: ResourceKind) {
+  _getLastUsedPath(project: gdProject, kind: ResourceKind): any {
     const projectPath = project.getProjectFile();
     const { values } = this.state;
     const projectPaths = values.projectLastUsedPaths[projectPath];
@@ -434,7 +1039,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _getDefaultEditorMosaicNode(name: EditorMosaicName) {
+  _getDefaultEditorMosaicNode(name: EditorMosaicName): any {
     return this.state.values.defaultEditorMosaicNodes[name] || null;
   }
 
@@ -445,7 +1050,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
           ...state.values,
           defaultEditorMosaicNodes: {
             ...state.values.defaultEditorMosaicNodes,
-            // $FlowFixMe - Flow errors on unions in computed properties
+            // $FlowFixMe[incompatible-type] - Flow errors on unions in computed properties
             [name]: node,
           },
         },
@@ -454,8 +1059,12 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _getRecentProjectFiles() {
-    return this.state.values.recentProjectFiles;
+  _getRecentProjectFiles(
+    options: ?{| limit: number |}
+  ): Array<FileMetadataAndStorageProviderName> {
+    const limit = options ? options.limit : undefined;
+    const recentProjectFiles = this.state.values.recentProjectFiles;
+    return limit ? recentProjectFiles.slice(0, limit) : recentProjectFiles;
   }
 
   _setRecentProjectFiles(recents: Array<FileMetadataAndStorageProviderName>) {
@@ -471,29 +1080,31 @@ export default class PreferencesProvider extends React.Component<Props, State> {
   }
 
   _insertRecentProjectFile(newRecentFile: FileMetadataAndStorageProviderName) {
+    // Do not store recent project in preferences as they will be accessible only from user account.
+    if (newRecentFile.storageProviderName === 'Cloud') return;
+
     let recentProjectFiles = this._getRecentProjectFiles();
+    // $FlowFixMe[missing-local-annot]
     const isNotNewRecentFile = recentFile =>
-      JSON.stringify(recentFile) !== JSON.stringify(newRecentFile);
-    this._setRecentProjectFiles(
-      [newRecentFile, ...recentProjectFiles.filter(isNotNewRecentFile)].slice(
-        0,
-        MAX_RECENT_FILES_COUNT
-      )
-    );
+      recentFile.fileMetadata.fileIdentifier !==
+      newRecentFile.fileMetadata.fileIdentifier;
+    this._setRecentProjectFiles([
+      newRecentFile,
+      ...recentProjectFiles.filter(isNotNewRecentFile),
+    ]);
   }
 
   _removeRecentProjectFile(recentFile: FileMetadataAndStorageProviderName) {
-    const isNotSadPathRecentFile = recentFileItem =>
-      JSON.stringify(recentFileItem) !== JSON.stringify(recentFile);
-    this._setRecentProjectFiles(
-      [...this._getRecentProjectFiles().filter(isNotSadPathRecentFile)].slice(
-        0,
-        MAX_RECENT_FILES_COUNT
-      )
-    );
+    // $FlowFixMe[missing-local-annot]
+    const isNotRemovedRecentFile = recentFileItem =>
+      recentFileItem.fileMetadata.fileIdentifier !==
+      recentFile.fileMetadata.fileIdentifier;
+    this._setRecentProjectFiles([
+      ...this._getRecentProjectFiles().filter(isNotRemovedRecentFile),
+    ]);
   }
 
-  _getAutoOpenMostRecentProject() {
+  _getAutoOpenMostRecentProject(): any {
     return this.state.values.autoOpenMostRecentProject;
   }
 
@@ -509,7 +1120,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _hadProjectOpenedDuringLastSession() {
+  _hadProjectOpenedDuringLastSession(): any {
     return this.state.values.hasProjectOpened;
   }
 
@@ -550,7 +1161,7 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _getNewObjectDialogDefaultTab() {
+  _getNewObjectDialogDefaultTab(): any {
     return this.state.values.newObjectDialogDefaultTab;
   }
 
@@ -565,7 +1176,35 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _getIsMenuBarHiddenInPreview() {
+  _getNewEffectDialogDefaultTab(): any {
+    return this.state.values.newEffectDialogDefaultTab;
+  }
+
+  _setNewEffectDialogDefaultTab(
+    newEffectDialogDefaultTab: 'asset-store' | 'from-scratch'
+  ) {
+    this.setState(
+      state => ({
+        values: { ...state.values, newEffectDialogDefaultTab },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getShareDialogDefaultTab(): any {
+    return this.state.values.shareDialogDefaultTab;
+  }
+
+  _setShareDialogDefaultTab(shareDialogDefaultTab: 'invite' | 'publish') {
+    this.setState(
+      state => ({
+        values: { ...state.values, shareDialogDefaultTab },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getIsMenuBarHiddenInPreview(): any {
     return this.state.values.isMenuBarHiddenInPreview;
   }
 
@@ -592,7 +1231,18 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  _getIsAlwaysOnTopInPreview() {
+  _setResourcesImporationBehavior(
+    resourcesImporationBehavior: ResourceImportationBehavior
+  ) {
+    this.setState(
+      state => ({
+        values: { ...state.values, resourcesImporationBehavior },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getIsAlwaysOnTopInPreview(): any {
     return this.state.values.isAlwaysOnTopInPreview;
   }
 
@@ -608,7 +1258,299 @@ export default class PreferencesProvider extends React.Component<Props, State> {
     );
   }
 
-  render() {
+  _setNewProjectsDefaultFolder(newProjectsDefaultFolder: string) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          newProjectsDefaultFolder,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setNewProjectsDefaultStorageProviderName(newStorageProviderName: string) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          newProjectsDefaultStorageProviderName: newStorageProviderName,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setWatchProjectFolderFilesForLocalProjects(enable: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          watchProjectFolderFilesForLocalProjects: enable,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setAutoDisplayClaimableProductsDialog(
+    autoDisplayClaimableProductsDialog: boolean
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          autoDisplayClaimableProductsDialog,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setLastClaimableProductsDialogMonth(month: string) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          lastClaimableProductsDialogMonth: month,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setNewFeaturesAcknowledgements(newFeaturesAcknowledgements: {
+    [featureId: string]: {| dates: [number] |},
+  }) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          newFeaturesAcknowledgements,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setDisplaySaveReminder(newValue: {| activated: boolean |}) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          displaySaveReminder: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setUseBackgroundSerializerForSaving(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: { ...state.values, useBackgroundSerializerForSaving: newValue },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setShowJsTypeError(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: { ...state.values, showJsTypeError: newValue },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setCanonicalEventSerialization(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: { ...state.values, canonicalEventSerialization: newValue },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _getEditorStateForProject(projectId: string): any {
+    const editorState = this.state.values.editorStateByProject[projectId];
+    if (!editorState) return null;
+
+    const defaultState: EditorStateForPropertyPanel = {
+      scrollPosition: 0,
+      collapsedSections: {},
+    };
+    for (const panelType in editorState.propertiesPanel) {
+      const states = editorState.propertiesPanel[panelType];
+      for (const id in states) {
+        states[id] = {
+          ...defaultState,
+          ...states[id],
+        };
+      }
+    }
+
+    return {
+      editorTabs:
+        editorState.editorTabs == null ? null : editorState.editorTabs,
+      propertiesPanel: editorState.propertiesPanel || {},
+    };
+  }
+
+  _setEditorStateForProject(
+    projectId: string,
+    editorState: EditorStateForProjectUpdate | null
+  ) {
+    this.setState(
+      state => {
+        const nextEditorStateByProject = {
+          ...state.values.editorStateByProject,
+        };
+
+        if (editorState === null) {
+          delete nextEditorStateByProject[projectId];
+        } else {
+          const previousEditorState = state.values.editorStateByProject[
+            projectId
+          ] || {
+            editorTabs: null,
+            propertiesPanel: {},
+          };
+          const mergedEditorState: EditorStateForProject = {
+            ...previousEditorState,
+            ...editorState,
+          };
+
+          nextEditorStateByProject[projectId] = mergedEditorState;
+        }
+
+        return {
+          values: {
+            ...state.values,
+            editorStateByProject: nextEditorStateByProject,
+          },
+        };
+      },
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setFetchPlayerTokenForPreviewAutomatically(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          fetchPlayerTokenForPreviewAutomatically: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setPreviewCrashReportUploadLevel(newValue: string) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          previewCrashReportUploadLevel: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setGamesDashboardOrderBy(newValue: GamesDashboardOrderBy) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          gamesDashboardOrderBy: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setTakeScreenshotOnPreview(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          takeScreenshotOnPreview: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setGameplayTestFramePosition(newValue: {| left: number, bottom: number |}) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          gameplayTestFramePosition: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setGameplayTestFrameZoomFactor(newValue: number) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          gameplayTestFrameZoomFactor: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setShowAiAskButtonInTitleBar(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          showAiAskButtonInTitleBar: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setAutomaticallyUseCreditsForAiRequests(newValue: boolean) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          automaticallyUseCreditsForAiRequests: newValue,
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  _setAutomaticallyApplyAiRequestEditsForProjectId(
+    projectId: string,
+    newValue: boolean
+  ) {
+    this.setState(
+      state => ({
+        values: {
+          ...state.values,
+          automaticallyApplyAiRequestEditsByProjectId: {
+            ...state.values.automaticallyApplyAiRequestEditsByProjectId,
+            [projectId]: newValue,
+          },
+        },
+      }),
+      () => this._persistValuesToLocalStorage(this.state)
+    );
+  }
+
+  render(): any {
     return (
       <PreferencesContext.Provider value={this.state}>
         {this.props.children}

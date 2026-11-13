@@ -7,6 +7,7 @@ namespace gdjs {
   /**
    * VariablesContainer stores variables, usually for a a RuntimeGame, a RuntimeScene
    * or a RuntimeObject.
+   * @category Core Engine > Variables
    */
   export class VariablesContainer {
     _variables: Hashtable<gdjs.Variable>;
@@ -86,6 +87,28 @@ namespace gdjs {
       }
     }
 
+    rebuildIndexFrom(data: VariableData[]) {
+      this._variablesArray.length = 0;
+      for (const variableData of data) {
+        if (variableData.name) {
+          const variable = this._variables.get(variableData.name);
+          this._variablesArray.push(variable);
+        }
+      }
+    }
+
+    /**
+     * Declare a new variable.
+     * This should only be used by generated code.
+     *
+     * @param name Variable name
+     * @param newVariable The variable to be declared
+     */
+    _declare(name: string, newVariable: gdjs.Variable): void {
+      this._variables.put(name, newVariable);
+      this._variablesArray.push(newVariable);
+    }
+
     /**
      * Add a new variable.
      * This can be costly, don't use in performance sensitive paths.
@@ -131,7 +154,7 @@ namespace gdjs {
     get(name: string): gdjs.Variable {
       let variable = this._variables.get(name);
       if (!variable) {
-        //Add automatically inexisting variables.
+        //Add automatically non-existing variables.
         variable = new gdjs.Variable();
         this._variables.put(name, variable);
       } else {
@@ -178,9 +201,116 @@ namespace gdjs {
      */
     has(name: string): boolean {
       const variable = this._variables.get(name);
-      return variable && !variable.isUndefinedInContainer();
+      return !!variable && !variable.isUndefinedInContainer();
     }
+
+    /**
+     * Check if a variable exists in the container.
+     * @param variable The variable
+     * @return true if the variable exists.
+     */
+    hasVariable(variable: gdjs.Variable): boolean {
+      const foundVariable = this._variablesArray.find((v) => v === variable);
+      return !!foundVariable && !foundVariable.isUndefinedInContainer();
+    }
+
+    getVariableNameInContainerByLoopingThroughAllVariables(
+      variable: gdjs.Variable
+    ): string | null {
+      const variableItems = this._variables.items;
+      for (const variableName in variableItems) {
+        if (variableItems.hasOwnProperty(variableName)) {
+          if (variableItems[variableName] === variable) {
+            return variableName;
+          }
+        }
+      }
+
+      return null;
+    }
+
+    getVariablePathInContainerByLoopingThroughAllVariables(
+      variable: gdjs.Variable,
+      childrenToLookIn: Children | null = null
+    ): string[] | null {
+      const variables = childrenToLookIn || this._variables.items;
+      for (const variableName in variables) {
+        if (variables.hasOwnProperty(variableName)) {
+          const variableItem = variables[variableName];
+          if (variableItem === variable) {
+            return [variableName];
+          } else if (variableItem.getType() === 'structure') {
+            const variableItemChildren = variableItem.getAllChildren();
+            const childPath =
+              this.getVariablePathInContainerByLoopingThroughAllVariables(
+                variable,
+                variableItemChildren
+              );
+            if (childPath) {
+              return [variableName, ...childPath];
+            }
+          }
+        }
+      }
+
+      return null;
+    }
+
+    getVariableFromPath(variablePath: string[]): gdjs.Variable | null {
+      let variableItems = this._variables.items;
+      for (let i = 0; i < variablePath.length; i++) {
+        const part = variablePath[i];
+        const nextVariable = variableItems[part];
+        if (!nextVariable) {
+          return null;
+        }
+        if (i === variablePath.length - 1) {
+          return nextVariable;
+        }
+        variableItems = nextVariable.getAllChildren();
+      }
+
+      return null;
+    }
+
     static _deletedVars: Array<string | undefined> = [];
+
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): VariableNetworkSyncData[] {
+      const networkSyncData: VariableNetworkSyncData[] = [];
+      const variableNames = [];
+      this._variables.keys(variableNames);
+      variableNames.forEach((variableName) => {
+        const variable = this._variables.get(variableName);
+        const variableSyncData = variable.getNetworkSyncData(syncOptions);
+        if (variableSyncData) {
+          networkSyncData.push({
+            name: variableName,
+            ...variableSyncData,
+          });
+        }
+      });
+
+      return networkSyncData;
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: VariableNetworkSyncData[],
+      options: UpdateFromNetworkSyncDataOptions
+    ) {
+      const that = this;
+      for (let j = 0; j < networkSyncData.length; ++j) {
+        const variableSyncData = networkSyncData[j];
+        const variableData =
+          gdjs.Variable.getVariableDataFromNetworkSyncData(variableSyncData);
+        const variableName = variableData.name;
+        if (!variableName) continue;
+
+        const variable = that.get(variableName);
+        variable.updateFromNetworkSyncData(variableSyncData, options);
+      }
+    }
 
     /**
      * "Bad" variable container, used by events when no other valid container can be found.
@@ -205,7 +335,31 @@ namespace gdjs {
       add: function () {
         return;
       },
+      _declare: function () {
+        return;
+      },
       initFrom: function () {
+        return;
+      },
+      getNetworkSyncData: function () {
+        return [];
+      },
+      updateFromNetworkSyncData: function () {
+        return;
+      },
+      hasVariable: function () {
+        return false;
+      },
+      getVariableNameInContainerByLoopingThroughAllVariables: function () {
+        return '';
+      },
+      getVariablePathInContainerByLoopingThroughAllVariables: function () {
+        return [];
+      },
+      getVariableFromPath: function () {
+        return null;
+      },
+      rebuildIndexFrom: function () {
         return;
       },
     };
@@ -223,6 +377,7 @@ namespace gdjs {
       _str: '',
       _undefinedInContainer: true,
       _value: 0,
+      _playerNumber: 0,
       fromJSON: () => gdjs.VariablesContainer.badVariable,
       toJSObject: () => 0,
       fromJSObject: () => gdjs.VariablesContainer.badVariable,
@@ -241,9 +396,11 @@ namespace gdjs {
         return true;
       },
       setValue: () => {},
+      toggle: () => {},
       getValue: () => 0,
       getChild: () => gdjs.VariablesContainer.badVariable,
       getChildAt: () => gdjs.VariablesContainer.badVariable,
+      getChildNamed: () => gdjs.VariablesContainer.badVariable,
       hasChild: function () {
         return false;
       },
@@ -271,6 +428,9 @@ namespace gdjs {
       getAsNumber: function () {
         return 0;
       },
+      getAsNumberOrString: function () {
+        return 0;
+      },
       getAsBoolean: function () {
         return false;
       },
@@ -281,6 +441,7 @@ namespace gdjs {
         return [];
       },
       pushVariableCopy: () => {},
+      _pushVariable: () => {},
       pushValue: () => {},
       removeAtIndex: function () {
         return;
@@ -308,6 +469,24 @@ namespace gdjs {
       },
       isUndefinedInContainer: function () {
         return true;
+      },
+      getPlayerOwnership: function () {
+        return 0;
+      },
+      setPlayerOwnership: function () {
+        return;
+      },
+      disableSynchronization: function () {
+        return;
+      },
+      getNetworkSyncData: function () {
+        return undefined;
+      },
+      getStructureNetworkSyncData: function () {
+        return [];
+      },
+      updateFromNetworkSyncData: function () {
+        return;
       },
     };
   }

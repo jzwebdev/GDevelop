@@ -1,19 +1,25 @@
 // @flow
 import * as React from 'react';
-import InstructionsList from '../InstructionsList.js';
+import InstructionsList from '../InstructionsList';
+import VariableDeclarationsList from '../VariableDeclarationsList';
 import classNames from 'classnames';
 import {
   largeSelectedArea,
   largeSelectableArea,
   selectableArea,
-  executableEventContainer,
+  conditionsActionsContainer,
   disabledText,
+  instructionParameter,
+  instructionInvalidParameter,
+  eventLabel,
 } from '../ClassNames';
 import InlinePopover from '../../InlinePopover';
-import DefaultField from '../../ParameterFields/DefaultField';
+import ExpressionField from '../../ParameterFields/ExpressionField';
+import { type ParameterFieldInterface } from '../../ParameterFields/ParameterFieldCommons';
 import { type EventRendererProps } from './EventRenderer';
 import ConditionsActionsColumns from '../ConditionsActionsColumns';
-import { shouldActivate } from '../../../UI/KeyboardShortcuts/InteractionKeys.js';
+import { shouldActivate } from '../../../UI/KeyboardShortcuts/InteractionKeys';
+import ParameterRenderingService from '../../ParameterRenderingService';
 import { Trans } from '@lingui/macro';
 const gd: libGDevelop = global.gd;
 
@@ -32,9 +38,11 @@ const styles = {
 
 export default class RepeatEvent extends React.Component<
   EventRendererProps,
+  // $FlowFixMe[unsupported-syntax]
   *
 > {
-  _field: ?DefaultField = null;
+  _field: ?ParameterFieldInterface = null;
+  // $FlowFixMe[missing-local-annot]
   state = {
     editing: false,
     editingPreviousValue: null,
@@ -43,7 +51,7 @@ export default class RepeatEvent extends React.Component<
 
   edit = (domEvent: any) => {
     const repeatEvent = gd.asRepeatEvent(this.props.event);
-    const expression = repeatEvent.getRepeatExpression();
+    const expression = repeatEvent.getRepeatExpression().getPlainString();
 
     // We should not need to use a timeout, but
     // if we don't do this, the InlinePopover's clickaway listener
@@ -75,7 +83,7 @@ export default class RepeatEvent extends React.Component<
     const repeatEvent = gd.asRepeatEvent(this.props.event);
     const { editingPreviousValue } = this.state;
     if (editingPreviousValue != null) {
-      repeatEvent.setRepeatExpression(editingPreviousValue);
+      repeatEvent.setRepeatExpressionPlainString(editingPreviousValue);
       this.forceUpdate();
     }
   };
@@ -84,7 +92,7 @@ export default class RepeatEvent extends React.Component<
     const { anchorEl } = this.state;
 
     // Put back the focus after closing the inline popover.
-    // $FlowFixMe
+    // $FlowFixMe[incompatible-type]
     if (anchorEl) anchorEl.focus();
 
     this.setState({
@@ -94,9 +102,35 @@ export default class RepeatEvent extends React.Component<
     });
   };
 
-  render() {
+  applyEditing = () => {
+    const repeatEvent = gd.asRepeatEvent(this.props.event);
+    const { editingPreviousValue } = this.state;
+    if (
+      editingPreviousValue != null &&
+      editingPreviousValue !==
+        repeatEvent.getRepeatExpression().getPlainString()
+    ) {
+      // Value changed: record the change in the history (this also flags the project as having unsaved changes).
+      this.props.onEndEditingEvent();
+    }
+    this.endEditing();
+  };
+
+  render(): any {
     const repeatEvent = gd.asRepeatEvent(this.props.event);
     const expression = repeatEvent.getRepeatExpression();
+    const expressionPlainString = expression.getPlainString();
+
+    const expressionValidator = new gd.ExpressionValidator(
+      gd.JsPlatform.get(),
+      this.props.projectScopedContainersAccessor.get(),
+      'number',
+      '',
+      ''
+    );
+    expression.getRootNode().visit(expressionValidator);
+    const isExpressionValid = expressionValidator.getAllErrors().size() === 0;
+    expressionValidator.delete();
 
     return (
       <div
@@ -104,10 +138,22 @@ export default class RepeatEvent extends React.Component<
         className={classNames({
           [largeSelectableArea]: true,
           [largeSelectedArea]: this.props.selected,
-          [executableEventContainer]: true,
         })}
       >
-        <div>
+        <VariableDeclarationsList
+          variablesContainer={repeatEvent.getVariables()}
+          loopIndexVariableName={repeatEvent.getLoopIndexVariableName()}
+          onVariableDeclarationClick={this.props.onVariableDeclarationClick}
+          onVariableDeclarationDoubleClick={
+            this.props.onVariableDeclarationDoubleClick
+          }
+          className={'local-variables-container'}
+          disabled={this.props.disabled}
+          screenType={this.props.screenType}
+          windowSize={this.props.windowSize}
+          idPrefix={this.props.idPrefix}
+        />
+        <div className={eventLabel}>
           <span
             className={classNames({
               [selectableArea]: true,
@@ -121,20 +167,54 @@ export default class RepeatEvent extends React.Component<
             }}
             tabIndex={0}
           >
-            {expression ? (
-              <Trans>Repeat {expression} times:</Trans>
-            ) : (
-              <i>
-                <Trans>Click to choose how many times will be repeated</Trans>
-              </i>
-            )}
+            <Trans>
+              Repeat{' '}
+              <span
+                className={classNames({
+                  [selectableArea]: true,
+                  [instructionParameter]: true,
+                  number: true,
+                })}
+                onClick={this.edit}
+                onKeyPress={event => {
+                  if (shouldActivate(event)) {
+                    this.edit(event);
+                  }
+                }}
+                tabIndex={0}
+              >
+                {expressionPlainString ? (
+                  <span>
+                    {isExpressionValid ? (
+                      expressionPlainString
+                    ) : (
+                      <span
+                        className={classNames({
+                          [instructionInvalidParameter]: true,
+                        })}
+                      >
+                        {expressionPlainString}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="instruction-missing-parameter" />
+                )}
+              </span>{' '}
+              times:
+            </Trans>
           </span>
         </div>
         <ConditionsActionsColumns
           leftIndentWidth={this.props.leftIndentWidth}
-          windowWidth={this.props.windowWidth}
+          windowSize={this.props.windowSize}
+          eventsSheetWidth={this.props.eventsSheetWidth}
+          className={classNames({
+            [conditionsActionsContainer]: true,
+          })}
           renderConditionsList={({ style, className }) => (
             <InstructionsList
+              platform={this.props.project.getCurrentPlatform()}
               instrsList={repeatEvent.getConditions()}
               style={style}
               className={className}
@@ -154,11 +234,22 @@ export default class RepeatEvent extends React.Component<
               disabled={this.props.disabled}
               renderObjectThumbnail={this.props.renderObjectThumbnail}
               screenType={this.props.screenType}
-              windowWidth={this.props.windowWidth}
+              windowSize={this.props.windowSize}
+              scope={this.props.scope}
+              resourcesManager={this.props.project.getResourcesManager()}
+              globalObjectsContainer={this.props.globalObjectsContainer}
+              objectsContainer={this.props.objectsContainer}
+              projectScopedContainersAccessor={
+                this.props.projectScopedContainersAccessor
+              }
+              idPrefix={this.props.idPrefix}
+              highlightedSearchText={this.props.highlightedSearchText}
+              highlightedSearchMatchCase={this.props.highlightedSearchMatchCase}
             />
           )}
           renderActionsList={({ className }) => (
             <InstructionsList
+              platform={this.props.project.getCurrentPlatform()}
               instrsList={repeatEvent.getActions()}
               style={
                 {
@@ -182,7 +273,17 @@ export default class RepeatEvent extends React.Component<
               disabled={this.props.disabled}
               renderObjectThumbnail={this.props.renderObjectThumbnail}
               screenType={this.props.screenType}
-              windowWidth={this.props.windowWidth}
+              windowSize={this.props.windowSize}
+              scope={this.props.scope}
+              resourcesManager={this.props.project.getResourcesManager()}
+              globalObjectsContainer={this.props.globalObjectsContainer}
+              objectsContainer={this.props.objectsContainer}
+              projectScopedContainersAccessor={
+                this.props.projectScopedContainersAccessor
+              }
+              idPrefix={this.props.idPrefix}
+              highlightedSearchText={this.props.highlightedSearchText}
+              highlightedSearchMatchCase={this.props.highlightedSearchMatchCase}
             />
           )}
         />
@@ -190,18 +291,22 @@ export default class RepeatEvent extends React.Component<
           open={this.state.editing}
           anchorEl={this.state.anchorEl}
           onRequestClose={this.cancelEditing}
-          onApply={this.endEditing}
+          onApply={this.applyEditing}
         >
-          <DefaultField
+          <ExpressionField
             project={this.props.project}
             scope={this.props.scope}
             globalObjectsContainer={this.props.globalObjectsContainer}
             objectsContainer={this.props.objectsContainer}
-            value={expression}
+            projectScopedContainersAccessor={
+              this.props.projectScopedContainersAccessor
+            }
+            value={expressionPlainString}
             onChange={text => {
-              repeatEvent.setRepeatExpression(text);
+              repeatEvent.setRepeatExpressionPlainString(text);
               this.props.onUpdate();
             }}
+            parameterRenderingService={ParameterRenderingService}
             isInline
             ref={field => (this._field = field)}
           />

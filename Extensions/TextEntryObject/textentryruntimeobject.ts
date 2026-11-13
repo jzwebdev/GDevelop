@@ -5,6 +5,8 @@
 namespace gdjs {
   /**
    * The TextEntryRuntimeObject allows to capture text typed on the keyboard.
+   * @category Objects > Text Entry
+   * @deprecated
    */
   export class TextEntryRuntimeObject extends gdjs.RuntimeObject {
     _str: string = '';
@@ -12,14 +14,15 @@ namespace gdjs {
     _renderer: gdjs.TextEntryRuntimeObjectRenderer;
 
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The container the object belongs to.
      * @param textEntryObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      textEntryObjectData: ObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      textEntryObjectData: ObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, textEntryObjectData);
+      super(instanceContainer, textEntryObjectData, instanceData);
       this._renderer = new gdjs.TextEntryRuntimeObjectRenderer(this);
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
@@ -31,14 +34,12 @@ namespace gdjs {
       return true;
     }
 
-    onDestroyFromScene(runtimeScene): void {
-      super.onDestroyFromScene(runtimeScene);
-      if (this._renderer.onDestroy) {
-        this._renderer.onDestroy();
-      }
+    onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.onDestroy();
     }
 
-    update(runtimeScene: gdjs.RuntimeScene): void {
+    update(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       if ((this._renderer as any).getString) {
         this._str = (this._renderer as any).getString();
       }

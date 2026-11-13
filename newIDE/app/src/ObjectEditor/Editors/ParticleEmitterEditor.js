@@ -23,19 +23,23 @@ export default class ParticleEmitterEditor extends React.Component<
   EditorProps,
   void
 > {
-  render() {
+  render(): any {
     const {
-      object,
+      objectConfiguration,
       project,
-      resourceSources,
-      onChooseResource,
-      resourceExternalEditors,
+      resourceManagementProps,
+      projectScopedContainersAccessor,
+      objectName,
+      renderObjectNameField,
     } = this.props;
-    const particleEmitterObject = gd.asParticleEmitterObject(object);
-    const tutorialIds = getObjectTutorialIds(object.getType());
+    const particleEmitterConfiguration = gd.asParticleEmitterConfiguration(
+      objectConfiguration
+    );
+    const tutorialIds = getObjectTutorialIds(objectConfiguration.getType());
 
     return (
-      <ColumnStackLayout>
+      <ColumnStackLayout noMargin>
+        {renderObjectNameField && renderObjectNameField()}
         {tutorialIds.map(tutorialId => (
           <DismissableTutorialMessage
             key={tutorialId}
@@ -45,44 +49,41 @@ export default class ParticleEmitterEditor extends React.Component<
         <SelectField
           fullWidth
           floatingLabelText={<Trans>Particle type</Trans>}
-          value={particleEmitterObject.getRendererType()}
+          value={particleEmitterConfiguration.getRendererType()}
           onChange={(e, i, value: string) => {
             const rendererType = parseInt(value, 10) || 0;
-            particleEmitterObject.setRendererType(rendererType);
+            particleEmitterConfiguration.setRendererType(rendererType);
             if (rendererType !== gd.ParticleEmitterObject.Quad) {
-              particleEmitterObject.setParticleTexture('');
+              particleEmitterConfiguration.setParticleTexture('');
             }
             this.forceUpdate();
           }}
         >
           <SelectOption
             value={gd.ParticleEmitterObject.Point}
-            primaryText={t`Circle`}
+            label={t`Circle`}
           />
-          <SelectOption
-            value={gd.ParticleEmitterObject.Line}
-            primaryText={t`Line`}
-          />
+          <SelectOption value={gd.ParticleEmitterObject.Line} label={t`Line`} />
           <SelectOption
             value={gd.ParticleEmitterObject.Quad}
-            primaryText={t`Image`}
+            label={t`Image`}
           />
         </SelectField>
-        {particleEmitterObject.getRendererType() ===
+        {particleEmitterConfiguration.getRendererType() ===
           gd.ParticleEmitterObject.Point && (
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Size</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getRendererParam1()}
+            value={particleEmitterConfiguration.getRendererParam1()}
             onChange={value => {
-              particleEmitterObject.setRendererParam1(parseFloat(value));
+              particleEmitterConfiguration.setRendererParam1(parseFloat(value));
               this.forceUpdate();
             }}
           />
         )}
-        {particleEmitterObject.getRendererType() ===
+        {particleEmitterConfiguration.getRendererType() ===
           gd.ParticleEmitterObject.Line && (
           <ResponsiveLineStackLayout noMargin>
             <SemiControlledTextField
@@ -90,9 +91,11 @@ export default class ParticleEmitterEditor extends React.Component<
               floatingLabelText={<Trans>Lines length</Trans>}
               fullWidth
               type="number"
-              value={particleEmitterObject.getRendererParam1()}
+              value={particleEmitterConfiguration.getRendererParam1()}
               onChange={value => {
-                particleEmitterObject.setRendererParam1(parseFloat(value));
+                particleEmitterConfiguration.setRendererParam1(
+                  parseFloat(value)
+                );
                 this.forceUpdate();
               }}
             />
@@ -101,41 +104,43 @@ export default class ParticleEmitterEditor extends React.Component<
               floatingLabelText={<Trans>Lines thickness</Trans>}
               fullWidth
               type="number"
-              value={particleEmitterObject.getRendererParam2()}
+              value={particleEmitterConfiguration.getRendererParam2()}
               onChange={value => {
-                particleEmitterObject.setRendererParam2(parseFloat(value));
+                particleEmitterConfiguration.setRendererParam2(
+                  parseFloat(value)
+                );
                 this.forceUpdate();
               }}
             />
           </ResponsiveLineStackLayout>
         )}
-        {particleEmitterObject.getRendererType() ===
+        {particleEmitterConfiguration.getRendererType() ===
           gd.ParticleEmitterObject.Quad && (
           <ResourceSelectorWithThumbnail
             project={project}
-            resourceSources={resourceSources}
-            onChooseResource={onChooseResource}
+            resourceManagementProps={resourceManagementProps}
+            projectScopedContainersAccessor={projectScopedContainersAccessor}
             resourceKind="image"
-            resourceName={particleEmitterObject.getParticleTexture()}
-            resourceExternalEditors={resourceExternalEditors}
+            resourceName={particleEmitterConfiguration.getParticleTexture()}
+            defaultNewResourceName={objectName}
             onChange={resourceName => {
-              particleEmitterObject.setParticleTexture(resourceName);
+              particleEmitterConfiguration.setParticleTexture(resourceName);
               this.forceUpdate();
             }}
             floatingLabelText={<Trans>Select an image</Trans>}
           />
         )}
-        {particleEmitterObject.getRendererType() ===
+        {particleEmitterConfiguration.getRendererType() ===
           gd.ParticleEmitterObject.Quad && (
-          <ResponsiveLineStackLayout noMargin>
+          <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
             <SemiControlledTextField
               commitOnBlur
               floatingLabelText={<Trans>Particles start width</Trans>}
               fullWidth
               type="number"
-              value={particleEmitterObject.getRendererParam1()}
+              value={particleEmitterConfiguration.getRendererParam1()}
               onChange={value => {
-                particleEmitterObject.setRendererParam1(
+                particleEmitterConfiguration.setRendererParam1(
                   Math.max(0, parseFloat(value))
                 );
                 this.forceUpdate();
@@ -146,9 +151,9 @@ export default class ParticleEmitterEditor extends React.Component<
               floatingLabelText={<Trans>Particles start height</Trans>}
               fullWidth
               type="number"
-              value={particleEmitterObject.getRendererParam2()}
+              value={particleEmitterConfiguration.getRendererParam2()}
               onChange={value => {
-                particleEmitterObject.setRendererParam2(
+                particleEmitterConfiguration.setRendererParam2(
                   Math.max(0, parseFloat(value))
                 );
                 this.forceUpdate();
@@ -156,23 +161,18 @@ export default class ParticleEmitterEditor extends React.Component<
             />
           </ResponsiveLineStackLayout>
         )}
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <ColorField
             floatingLabelText={<Trans>Particles start color</Trans>}
             disableAlpha
             fullWidth
-            color={rgbColorToRGBString({
-              r: particleEmitterObject.getParticleRed1(),
-              g: particleEmitterObject.getParticleGreen1(),
-              b: particleEmitterObject.getParticleBlue1(),
-            })}
+            color={particleEmitterConfiguration.getParticleColor1()}
             onChange={color => {
               const rgbColor = rgbStringAndAlphaToRGBColor(color);
               if (rgbColor) {
-                particleEmitterObject.setParticleRed1(rgbColor.r);
-                particleEmitterObject.setParticleGreen1(rgbColor.g);
-                particleEmitterObject.setParticleBlue1(rgbColor.b);
-
+                particleEmitterConfiguration.setParticleColor1(
+                  rgbColorToRGBString(rgbColor)
+                );
                 this.forceUpdate();
               }
             }}
@@ -182,30 +182,27 @@ export default class ParticleEmitterEditor extends React.Component<
             floatingLabelText={<Trans>Start opacity (0-255)</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleAlpha1()}
+            value={particleEmitterConfiguration.getParticleAlpha1()}
             onChange={value => {
-              particleEmitterObject.setParticleAlpha1(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setParticleAlpha1(
+                parseInt(value, 10) || 0
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <ColorField
             floatingLabelText={<Trans>Particles end color</Trans>}
             disableAlpha
             fullWidth
-            color={rgbColorToRGBString({
-              r: particleEmitterObject.getParticleRed2(),
-              g: particleEmitterObject.getParticleGreen2(),
-              b: particleEmitterObject.getParticleBlue2(),
-            })}
+            color={particleEmitterConfiguration.getParticleColor2()}
             onChange={color => {
               const rgbColor = rgbStringAndAlphaToRGBColor(color);
               if (rgbColor) {
-                particleEmitterObject.setParticleRed2(rgbColor.r);
-                particleEmitterObject.setParticleGreen2(rgbColor.g);
-                particleEmitterObject.setParticleBlue2(rgbColor.b);
-
+                particleEmitterConfiguration.setParticleColor2(
+                  rgbColorToRGBString(rgbColor)
+                );
                 this.forceUpdate();
               }
             }}
@@ -215,31 +212,33 @@ export default class ParticleEmitterEditor extends React.Component<
             floatingLabelText={<Trans>End opacity (0-255)</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleAlpha2()}
+            value={particleEmitterConfiguration.getParticleAlpha2()}
             onChange={value => {
-              particleEmitterObject.setParticleAlpha2(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setParticleAlpha2(
+                parseInt(value, 10) || 0
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
         <Checkbox
           label={<Trans>Additive rendering</Trans>}
-          checked={particleEmitterObject.isRenderingAdditive()}
+          checked={particleEmitterConfiguration.isRenderingAdditive()}
           onCheck={(e, checked) => {
-            if (checked) particleEmitterObject.setRenderingAdditive();
-            else particleEmitterObject.setRenderingAlpha();
+            if (checked) particleEmitterConfiguration.setRenderingAdditive();
+            else particleEmitterConfiguration.setRenderingAlpha();
             this.forceUpdate();
           }}
         />
         <Checkbox
           label={<Trans>Delete when out of particles</Trans>}
-          checked={particleEmitterObject.getDestroyWhenNoParticles()}
+          checked={particleEmitterConfiguration.getDestroyWhenNoParticles()}
           onCheck={(e, checked) => {
-            particleEmitterObject.setDestroyWhenNoParticles(checked);
+            particleEmitterConfiguration.setDestroyWhenNoParticles(checked);
             this.forceUpdate();
           }}
         />
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={
@@ -247,14 +246,16 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getMaxParticleNb()}
+            value={particleEmitterConfiguration.getMaxParticleNb()}
             onChange={value => {
-              particleEmitterObject.setMaxParticleNb(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setMaxParticleNb(
+                parseInt(value, 10) || 0
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={
@@ -262,9 +263,9 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getTank()}
+            value={particleEmitterConfiguration.getTank()}
             onChange={value => {
-              particleEmitterObject.setTank(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setTank(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
@@ -275,14 +276,14 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getFlow()}
+            value={particleEmitterConfiguration.getFlow()}
             onChange={value => {
-              particleEmitterObject.setFlow(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setFlow(parseFloat(value) || 0);
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={
@@ -290,10 +291,10 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getEmitterForceMin()}
+            value={particleEmitterConfiguration.getEmitterForceMin()}
             onChange={value => {
-              particleEmitterObject.setEmitterForceMin(
-                parseInt(value, 10) || 0
+              particleEmitterConfiguration.setEmitterForceMin(
+                parseFloat(value) || 0
               );
               this.forceUpdate();
             }}
@@ -305,24 +306,26 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getEmitterForceMax()}
+            value={particleEmitterConfiguration.getEmitterForceMax()}
             onChange={value => {
-              particleEmitterObject.setEmitterForceMax(
-                parseInt(value, 10) || 0
+              particleEmitterConfiguration.setEmitterForceMax(
+                parseFloat(value) || 0
               );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Spray cone angle (in degrees)</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getConeSprayAngle()}
+            value={particleEmitterConfiguration.getConeSprayAngle()}
             onChange={value => {
-              particleEmitterObject.setConeSprayAngle(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setConeSprayAngle(
+                parseFloat(value) || 0
+              );
               this.forceUpdate();
             }}
           />
@@ -331,22 +334,26 @@ export default class ParticleEmitterEditor extends React.Component<
             floatingLabelText={<Trans>Radius of the emitter</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getZoneRadius()}
+            value={particleEmitterConfiguration.getZoneRadius()}
             onChange={value => {
-              particleEmitterObject.setZoneRadius(parseInt(value, 10) || 0);
+              particleEmitterConfiguration.setZoneRadius(
+                parseFloat(value) || 0
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Gravity on particles on X axis</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleGravityX()}
+            value={particleEmitterConfiguration.getParticleGravityX()}
             onChange={value => {
-              particleEmitterObject.setParticleGravityX(parseFloat(value));
+              particleEmitterConfiguration.setParticleGravityX(
+                parseFloat(value)
+              );
               this.forceUpdate();
             }}
           />
@@ -355,14 +362,16 @@ export default class ParticleEmitterEditor extends React.Component<
             floatingLabelText={<Trans>Gravity on particles on Y axis</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleGravityY()}
+            value={particleEmitterConfiguration.getParticleGravityY()}
             onChange={value => {
-              particleEmitterObject.setParticleGravityY(parseFloat(value));
+              particleEmitterConfiguration.setParticleGravityY(
+                parseFloat(value)
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={
@@ -370,9 +379,11 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleLifeTimeMin()}
+            value={particleEmitterConfiguration.getParticleLifeTimeMin()}
             onChange={value => {
-              particleEmitterObject.setParticleLifeTimeMin(parseFloat(value));
+              particleEmitterConfiguration.setParticleLifeTimeMin(
+                parseFloat(value)
+              );
               this.forceUpdate();
             }}
           />
@@ -383,22 +394,24 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleLifeTimeMax()}
+            value={particleEmitterConfiguration.getParticleLifeTimeMax()}
             onChange={value => {
-              particleEmitterObject.setParticleLifeTimeMax(parseFloat(value));
+              particleEmitterConfiguration.setParticleLifeTimeMax(
+                parseFloat(value)
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Particle start size (in percents)</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleSize1()}
+            value={particleEmitterConfiguration.getParticleSize1()}
             onChange={value => {
-              particleEmitterObject.setParticleSize1(parseFloat(value));
+              particleEmitterConfiguration.setParticleSize1(parseFloat(value));
               this.forceUpdate();
             }}
           />
@@ -407,14 +420,14 @@ export default class ParticleEmitterEditor extends React.Component<
             floatingLabelText={<Trans>Particle end size (in percents)</Trans>}
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleSize2()}
+            value={particleEmitterConfiguration.getParticleSize2()}
             onChange={value => {
-              particleEmitterObject.setParticleSize2(parseFloat(value));
+              particleEmitterConfiguration.setParticleSize2(parseFloat(value));
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={
@@ -422,9 +435,9 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleAngle1()}
+            value={particleEmitterConfiguration.getParticleAngle1()}
             onChange={value => {
-              particleEmitterObject.setParticleAngle1(parseFloat(value));
+              particleEmitterConfiguration.setParticleAngle1(parseFloat(value));
               this.forceUpdate();
             }}
           />
@@ -435,9 +448,26 @@ export default class ParticleEmitterEditor extends React.Component<
             }
             fullWidth
             type="number"
-            value={particleEmitterObject.getParticleAngle2()}
+            value={particleEmitterConfiguration.getParticleAngle2()}
             onChange={value => {
-              particleEmitterObject.setParticleAngle2(parseFloat(value));
+              particleEmitterConfiguration.setParticleAngle2(parseFloat(value));
+              this.forceUpdate();
+            }}
+          />
+        </ResponsiveLineStackLayout>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
+          <SemiControlledTextField
+            commitOnBlur
+            floatingLabelText={
+              <Trans>Jump forward in time on creation (in seconds)</Trans>
+            }
+            fullWidth
+            type="number"
+            value={particleEmitterConfiguration.getJumpForwardInTimeOnCreation()}
+            onChange={value => {
+              particleEmitterConfiguration.setJumpForwardInTimeOnCreation(
+                parseFloat(value)
+              );
               this.forceUpdate();
             }}
           />

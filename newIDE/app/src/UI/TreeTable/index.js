@@ -1,6 +1,5 @@
 // @flow
 import * as React from 'react';
-import GDevelopThemeContext from '../Theme/ThemeContext';
 
 const styles = {
   row: {
@@ -15,20 +14,19 @@ const styles = {
 };
 
 type TreeTableRowProps = {|
+  id?: string,
   children: React.Node,
   /* Allow to specify a different alignment than the default (centered). */
   alignItems?: ?'flex-start',
 |};
 
-export const TreeTableRow = (props: TreeTableRowProps) => {
-  const gdevelopTheme = React.useContext(GDevelopThemeContext);
-
+export const TreeTableRow = (props: TreeTableRowProps): React.MixedElement => {
   return (
     <div
+      id={props.id}
       style={{
         ...styles.row,
         alignItems: props.alignItems,
-        backgroundColor: gdevelopTheme.list.itemsBackgroundColor,
       }}
     >
       {props.children}
@@ -42,7 +40,9 @@ type TreeTableCellProps = {|
   children?: React.Node,
 |};
 
-export const TreeTableCell = (props: TreeTableCellProps) => (
+export const TreeTableCell = (
+  props: TreeTableCellProps
+): React.MixedElement => (
   <div
     style={{
       ...styles.cell,

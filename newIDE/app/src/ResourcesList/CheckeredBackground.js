@@ -1,9 +1,9 @@
 // @flow
 import * as React from 'react';
-import GDevelopThemeContext from '../UI/Theme/ThemeContext';
+import GDevelopThemeContext from '../UI/Theme/GDevelopThemeContext';
 
 type Props = {|
-  style?: Object,
+  borderRadius?: number,
 |};
 
 /**
@@ -22,7 +22,7 @@ type Props = {|
  * (or it just doesn't work as expected), ensure that the parent element and
  * at least one of the sibling elements have `position: relative` set.
  */
-const CheckeredBackground = (props: Props) => {
+const CheckeredBackground = ({ borderRadius }: Props): React.MixedElement => {
   const theme = React.useContext(GDevelopThemeContext);
   const backgroundStyle = {
     position: 'absolute',
@@ -30,12 +30,11 @@ const CheckeredBackground = (props: Props) => {
     left: 0,
     width: '100%',
     height: '100%',
+    borderRadius: borderRadius,
 
     // Apply a theme-defined CSS filter on static checkered background
     background: 'url("res/transparentback.png") repeat',
     filter: theme.imagePreview.backgroundFilter || 'none',
-
-    ...props.style,
   };
 
   return <div style={backgroundStyle} />;

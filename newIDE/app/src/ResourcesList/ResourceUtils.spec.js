@@ -1,23 +1,54 @@
 // @flow
-import { renameResourcesInProject } from './ResourceUtils';
-import { makeTestProject } from '../fixtures/TestProject';
+import {
+  getLocalResourceFullPath,
+  parseLocalFilePathOrExtensionFromMetadata,
+  renameResourcesInProject,
+  updateResourceJsonMetadata,
+  getResourceCustomProperties,
+  getResourceCustomPropertyValue,
+  setResourceCustomPropertyValue,
+} from './ResourceUtils';
 const gd: libGDevelop = global.gd;
 
 const addNewAnimationWithImageToSpriteObject = (
   object: gdObject,
   imageName: string
 ) => {
-  const spriteObject = gd.asSpriteObject(object);
+  const spriteObject = gd.asSpriteConfiguration(object.getConfiguration());
+  const animations = spriteObject.getAnimations();
 
   const animation = new gd.Animation();
   animation.setDirectionsCount(1);
   const sprite = new gd.Sprite();
   sprite.setImageName(imageName);
   animation.getDirection(0).addSprite(sprite);
-  spriteObject.addAnimation(animation);
+  animations.addAnimation(animation);
 };
 
 describe('ResourceUtils', () => {
+  it('gives the path on disk of a local resource, even with special characters', () => {
+    const project = gd.ProjectHelper.createNewGDJSProject();
+    project.setProjectFile('/home/user/My Project/game.json');
+    const resource = new gd.AudioResource();
+    resource.setName('Track #3');
+    resource.setFile('assets/Track #3 (100%).wav');
+    project.getResourcesManager().addResource(resource);
+    const urlResource = new gd.ImageResource();
+    urlResource.setName('Remote');
+    urlResource.setFile('https://example.com/a%23b.png');
+    project.getResourcesManager().addResource(urlResource);
+
+    expect(getLocalResourceFullPath(project, 'Track #3')).toBe(
+      '/home/user/My Project/assets/Track #3 (100%).wav'
+    );
+    expect(getLocalResourceFullPath(project, 'Remote')).toBe(
+      'https://example.com/a%23b.png'
+    );
+    expect(getLocalResourceFullPath(project, 'Unknown')).toBe('');
+
+    project.delete();
+  });
+
   it('can rename a resource in the whole project', () => {
     const project = gd.ProjectHelper.createNewGDJSProject();
 
@@ -40,16 +71,15 @@ describe('ResourceUtils', () => {
     project.getResourcesManager().addResource(audioResource2);
 
     // Add objects using these resources
-    const globalObject = project.insertNewObject(
-      project,
-      'Sprite',
-      'MyGlobalObject',
-      0
-    );
+    const globalObject = project
+      .getObjects()
+      .insertNewObject(project, 'Sprite', 'MyGlobalObject', 0);
     addNewAnimationWithImageToSpriteObject(globalObject, 'fake-image1.png');
 
     const scene = project.insertNewLayout('MyScene', 0);
-    const object = scene.insertNewObject(project, 'Sprite', 'MyObject', 0);
+    const object = scene
+      .getObjects()
+      .insertNewObject(project, 'Sprite', 'MyObject', 0);
     addNewAnimationWithImageToSpriteObject(object, 'fake-image1.png');
 
     // Also add an event referring to these resources.
@@ -99,7 +129,8 @@ describe('ResourceUtils', () => {
     // Verify renaming was done in objects and in events.
     expect(
       gd
-        .asSpriteObject(globalObject)
+        .asSpriteConfiguration(globalObject.getConfiguration())
+        .getAnimations()
         .getAnimation(0)
         .getDirection(0)
         .getSprite(0)
@@ -107,7 +138,8 @@ describe('ResourceUtils', () => {
     ).toBe('Image1');
     expect(
       gd
-        .asSpriteObject(object)
+        .asSpriteConfiguration(object.getConfiguration())
+        .getAnimations()
         .getAnimation(0)
         .getDirection(0)
         .getSprite(0)
@@ -119,6 +151,153 @@ describe('ResourceUtils', () => {
         .getActions()
         .get(0)
         .getParameter(1)
+        .getPlainString()
     ).toBe('Audio1');
+  });
+
+  describe('Resource metadata', () => {
+    let resource = null;
+    afterEach(() => {
+      if (resource) resource.delete();
+      resource = null;
+    });
+
+    it('can update a resource metadata', () => {
+      resource = new gd.Resource();
+      updateResourceJsonMetadata(resource, { test: 123, test2: { '4': '56' } });
+      // $FlowFixMe[incompatible-use]
+      expect(resource.getMetadata()).toMatchInlineSnapshot(
+        `"{\\"test\\":123,\\"test2\\":{\\"4\\":\\"56\\"}}"`
+      );
+      // $FlowFixMe[incompatible-type]
+      updateResourceJsonMetadata(resource, { test2: 789 });
+      // $FlowFixMe[incompatible-use]
+      expect(resource.getMetadata()).toMatchInlineSnapshot(
+        `"{\\"test\\":123,\\"test2\\":789}"`
+      );
+
+      // $FlowFixMe[incompatible-use]
+      resource.setMetadata('invalid json');
+      // $FlowFixMe[incompatible-type]
+      updateResourceJsonMetadata(resource, {
+        test3: 'this overwrote everything',
+      });
+      // $FlowFixMe[incompatible-use]
+      expect(resource.getMetadata()).toMatchInlineSnapshot(
+        `"{\\"test3\\":\\"this overwrote everything\\"}"`
+      );
+    });
+
+    it('can extract "localFilePath" and "extension" from the metadata (used for Blob uploads)', () => {
+      resource = new gd.Resource();
+
+      // No extension and no localFilePath found.
+      updateResourceJsonMetadata(resource, { other: 'thing' });
+      // $FlowFixMe[incompatible-type]
+      expect(parseLocalFilePathOrExtensionFromMetadata(resource))
+        .toMatchInlineSnapshot(`
+        Object {
+          "extension": null,
+          "localFilePath": null,
+        }
+      `);
+
+      // Just an extension found.
+      // $FlowFixMe[incompatible-type]
+      updateResourceJsonMetadata(resource, {
+        extension: '.png',
+        other: 'thing',
+      });
+      // $FlowFixMe[incompatible-type]
+      expect(parseLocalFilePathOrExtensionFromMetadata(resource))
+        .toMatchInlineSnapshot(`
+        Object {
+          "extension": ".png",
+          "localFilePath": null,
+        }
+      `);
+
+      // Both found.
+      // $FlowFixMe[incompatible-type]
+      updateResourceJsonMetadata(resource, {
+        localFilePath: 'test',
+        extension: '.png',
+        other: 'thing',
+      });
+      // $FlowFixMe[incompatible-type]
+      expect(parseLocalFilePathOrExtensionFromMetadata(resource))
+        .toMatchInlineSnapshot(`
+        Object {
+          "extension": ".png",
+          "localFilePath": "test",
+        }
+      `);
+
+      // Both found but not the proper type.
+      // $FlowFixMe[incompatible-type]
+      updateResourceJsonMetadata(resource, {
+        localFilePath: 456,
+        extension: 123,
+        other: 'thing',
+      });
+      // $FlowFixMe[incompatible-type]
+      expect(parseLocalFilePathOrExtensionFromMetadata(resource))
+        .toMatchInlineSnapshot(`
+        Object {
+          "extension": null,
+          "localFilePath": null,
+        }
+      `);
+    });
+  });
+
+  describe('Resource custom properties', () => {
+    let resource = null;
+    afterEach(() => {
+      if (resource) resource.delete();
+      resource = null;
+    });
+
+    it('returns an empty object when no custom properties are set', () => {
+      const r = (resource = new gd.Resource());
+      expect(getResourceCustomProperties(r)).toEqual({});
+    });
+
+    it('can set and read custom property values of different types', () => {
+      const r = (resource = new gd.Resource());
+      setResourceCustomPropertyValue(r, 'scale-multiplier', 0.3);
+      setResourceCustomPropertyValue(r, 'no-resize', true);
+      setResourceCustomPropertyValue(r, 'no-atlas', false);
+
+      expect(getResourceCustomProperties(r)).toEqual({
+        'scale-multiplier': 0.3,
+        'no-resize': true,
+        'no-atlas': false,
+      });
+      expect(getResourceCustomPropertyValue(r, 'scale-multiplier', null)).toBe(
+        0.3
+      );
+      expect(getResourceCustomPropertyValue(r, 'no-resize', null)).toBe(true);
+      expect(getResourceCustomPropertyValue(r, 'no-atlas', null)).toBe(false);
+    });
+
+    it('falls back to the provided default when a property is not set', () => {
+      const r = (resource = new gd.Resource());
+      expect(getResourceCustomPropertyValue(r, 'scale-multiplier', 1)).toBe(1);
+      expect(getResourceCustomPropertyValue(r, 'missing', null)).toBeNull();
+    });
+
+    it('does not collide with other metadata keys', () => {
+      const r = (resource = new gd.Resource());
+      updateResourceJsonMetadata(r, { localFilePath: 'test' });
+      setResourceCustomPropertyValue(r, 'no-atlas', true);
+
+      // $FlowFixMe[incompatible-type]
+      expect(parseLocalFilePathOrExtensionFromMetadata(r)).toEqual({
+        extension: null,
+        localFilePath: 'test',
+      });
+      expect(getResourceCustomProperties(r)).toEqual({ 'no-atlas': true });
+    });
   });
 });

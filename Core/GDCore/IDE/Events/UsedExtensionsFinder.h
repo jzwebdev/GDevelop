@@ -4,11 +4,15 @@
  * reserved. This project is released under the MIT License.
  */
 
-#ifndef GDCORE_USED_EXTENSIONS_FINDER_H
-#define GDCORE_USED_EXTENSIONS_FINDER_H
+#pragma once
+
 #include <set>
+#include <vector>
 
 #include "GDCore/Events/Parsers/ExpressionParser2NodeWorker.h"
+#include "GDCore/Extensions/Metadata/SourceFileMetadata.h"
+#include "GDCore/Extensions/Metadata/InGameEditorResourceMetadata.h"
+#include "GDCore/Extensions/PlatformExtension.h"
 #include "GDCore/IDE/Events/ArbitraryEventsWorker.h"
 #include "GDCore/IDE/Project/ArbitraryObjectsWorker.h"
 #include "GDCore/String.h"
@@ -16,28 +20,94 @@
 namespace gd {
 class Project;
 class Object;
-class BehaviorContent;
+class Behavior;
 }  // namespace gd
 
 namespace gd {
+
+class GD_CORE_API UsedExtensionsResult {
+public:
+  /**
+   * The extensions used by the project (or part of it).
+   */
+  const std::set<gd::String> &GetUsedExtensions() const {
+    return usedExtensions;
+  }
+
+  /**
+   * The include files used at runtime by the project (or part of it).
+   */
+  const std::set<gd::String> &GetUsedIncludeFiles() const {
+    return usedIncludeFiles;
+  }
+
+  /**
+   * The additional files required at runtime by the project (or part of it).
+   */
+  const std::set<gd::String> &GetUsedRequiredFiles() const {
+    return usedRequiredFiles;
+  }
+
+  const std::vector<gd::SourceFileMetadata>& GetUsedSourceFiles() const {
+    return usedSourceFiles;
+  }
+
+  const std::vector<gd::InGameEditorResourceMetadata>& GetUsedInGameEditorResources() const {
+    return usedInGameEditorResources;
+  }
+
+  /**
+   * \brief Return true when at least 1 object uses the 3D renderer.
+   */
+  bool Has3DObjects() const {
+    return has3DObjects;
+  }
+
+  void AddUsedExtension(const gd::PlatformExtension& extension);
+  void AddUsedBuiltinExtension(const gd::Project& project, const gd::String& extensionName);
+  void AddUsedIncludeFiles(const gd::String& includeFile) { usedIncludeFiles.insert(includeFile); }
+  void AddUsedRequiredFiles(const gd::String& requiredFile) { usedRequiredFiles.insert(requiredFile); }
+  void AddUsedInGameEditorResource(const gd::InGameEditorResourceMetadata& inGameEditorResource) {
+    usedInGameEditorResources.push_back(inGameEditorResource);
+  }
+
+  void MarkAsHaving3DObjects() {
+    has3DObjects = true;
+  }
+
+private:
+  std::set<gd::String> usedExtensions;
+  std::set<gd::String> usedIncludeFiles;
+  std::set<gd::String> usedRequiredFiles;
+  std::vector<gd::SourceFileMetadata> usedSourceFiles;
+  std::vector<gd::InGameEditorResourceMetadata> usedInGameEditorResources;
+  bool has3DObjects = false;
+};
 
 class GD_CORE_API UsedExtensionsFinder
     : public ArbitraryObjectsWorker,
       public ArbitraryEventsWorkerWithContext,
       public ExpressionParser2NodeWorker {
  public:
-  static std::set<gd::String> ScanProject(gd::Project& project);
+  static const UsedExtensionsResult ScanProject(gd::Project& project);
+  static const UsedExtensionsResult ScanEventsFunctionsExtension(
+      gd::Project &project,
+      const gd::EventsFunctionsExtension &eventsFunctionsExtension);
+  static const std::vector<gd::String> FindExtensionsDependentOn(
+      gd::Project &project,
+      const gd::EventsFunctionsExtension &eventsFunctionsExtension);
 
- private:
+private:
   UsedExtensionsFinder(gd::Project& project_) : project(project_){};
   gd::Project& project;
-  std::set<gd::String> usedExtensions;
+  gd::String rootType;
+  UsedExtensionsResult result;
 
   // Object Visitor
   void DoVisitObject(gd::Object& object) override;
 
   // Behavior Visitor
-  void DoVisitBehavior(gd::BehaviorContent& behavior) override;
+  void DoVisitBehavior(gd::Behavior& behavior) override;
 
   // Instructions Visitor
   bool DoVisitInstruction(gd::Instruction& instruction,
@@ -60,5 +130,3 @@ class GD_CORE_API UsedExtensionsFinder
 };
 
 };  // namespace gd
-
-#endif

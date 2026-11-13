@@ -3,6 +3,9 @@
  *  2013 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
+  /**
+   * @category Objects > Panel Sprite
+   */
   export type PanelSpriteObjectDataType = {
     /** The right margin */
     rightMargin: number;
@@ -22,12 +25,33 @@ namespace gdjs {
     texture: string;
   };
 
+  /**
+   * @category Objects > Panel Sprite
+   */
   export type PanelSpriteObjectData = ObjectData & PanelSpriteObjectDataType;
 
   /**
-   * The PanelSpriteRuntimeObject displays a tiled texture.
+   * @category Objects > Panel Sprite
    */
-  export class PanelSpriteRuntimeObject extends gdjs.RuntimeObject {
+  export type PanelSpriteNetworkSyncDataType = {
+    op: number;
+    color: string;
+  };
+
+  /**
+   * @category Objects > Panel Sprite
+   */
+  export type PanelSpriteNetworkSyncData = ObjectNetworkSyncData &
+    PanelSpriteNetworkSyncDataType;
+
+  /**
+   * The PanelSpriteRuntimeObject displays a tiled texture.
+   * @category Objects > Panel Sprite
+   */
+  export class PanelSpriteRuntimeObject
+    extends gdjs.RuntimeObject
+    implements gdjs.Resizable, gdjs.OpacityHandler
+  {
     _rBorder: integer;
     _lBorder: integer;
     _tBorder: integer;
@@ -42,15 +66,19 @@ namespace gdjs {
 
     _renderer: gdjs.PanelSpriteRuntimeObjectRenderer;
 
+    _objectData: PanelSpriteObjectData;
+
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The container the object belongs to.
      * @param panelSpriteObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      panelSpriteObjectData: PanelSpriteObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      panelSpriteObjectData: PanelSpriteObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, panelSpriteObjectData);
+      super(instanceContainer, panelSpriteObjectData, instanceData);
+      this._objectData = panelSpriteObjectData;
       this._rBorder = panelSpriteObjectData.rightMargin;
       this._lBorder = panelSpriteObjectData.leftMargin;
       this._tBorder = panelSpriteObjectData.topMargin;
@@ -60,7 +88,7 @@ namespace gdjs {
       this._height = panelSpriteObjectData.height;
       this._renderer = new gdjs.PanelSpriteRuntimeObjectRenderer(
         this,
-        runtimeScene,
+        instanceContainer,
         panelSpriteObjectData.texture,
         panelSpriteObjectData.tiled
       );
@@ -73,6 +101,7 @@ namespace gdjs {
       oldObjectData: PanelSpriteObjectData,
       newObjectData: PanelSpriteObjectData
     ): boolean {
+      this._objectData = newObjectData;
       if (oldObjectData.width !== newObjectData.width) {
         this.setWidth(newObjectData.width);
       }
@@ -100,7 +129,7 @@ namespace gdjs {
         updateTexture = true;
       }
       if (updateTexture) {
-        this.setTexture(newObjectData.texture, this._runtimeScene);
+        this.setTexture(newObjectData.texture, this.getRuntimeScene());
       }
       if (oldObjectData.tiled !== newObjectData.tiled) {
         return false;
@@ -108,20 +137,42 @@ namespace gdjs {
       return true;
     }
 
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): PanelSpriteNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        op: this.getOpacity(),
+        color: this.getColor(),
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: PanelSpriteNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      // Texture is not synchronized, see if this is asked or not.
+
+      if (networkSyncData.op !== undefined) {
+        this.setOpacity(networkSyncData.op);
+      }
+      if (networkSyncData.color !== undefined) {
+        this.setColor(networkSyncData.color);
+      }
+    }
+
     getRendererObject() {
       return this._renderer.getRendererObject();
     }
 
-    onDestroyFromScene(runtimeScene): void {
-      super.onDestroyFromScene(runtimeScene);
-      // @ts-ignore
-      if (this._renderer.onDestroy) {
-        // @ts-ignore
-        this._renderer.onDestroy();
-      }
+    onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
     }
 
-    update(runtimeScene: gdjs.RuntimeScene): void {
+    update(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       this._renderer.ensureUpToDate();
     }
 
@@ -133,6 +184,11 @@ namespace gdjs {
         this.setWidth(initialInstanceData.width);
         this.setHeight(initialInstanceData.height);
       }
+      this.setOpacity(
+        initialInstanceData.opacity === undefined
+          ? 255
+          : initialInstanceData.opacity
+      );
     }
 
     /**
@@ -156,10 +212,13 @@ namespace gdjs {
     /**
      * Set the texture of the panel sprite.
      * @param textureName The name of the texture.
-     * @param runtimeScene The scene the object lives in.
+     * @param instanceContainer The container the object lives in.
      */
-    setTexture(textureName: string, runtimeScene: gdjs.RuntimeScene): void {
-      this._renderer.setTexture(textureName, runtimeScene);
+    setTexture(
+      textureName: string,
+      instanceContainer: gdjs.RuntimeInstanceContainer
+    ): void {
+      this._renderer.setTexture(textureName, instanceContainer);
     }
 
     /**
@@ -187,34 +246,35 @@ namespace gdjs {
       return this._height;
     }
 
-    /**
-     * Set the width of the panel sprite.
-     * @param width The new width in pixels.
-     */
     setWidth(width: float): void {
       if (this._width === width) return;
 
       this._width = width;
       this._renderer.updateWidth();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
-    /**
-     * Set the height of the panel sprite.
-     * @param height The new height in pixels.
-     */
     setHeight(height: float): void {
       if (this._height === height) return;
 
       this._height = height;
       this._renderer.updateHeight();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
-    /**
-     * Change the transparency of the object.
-     * @param opacity The new opacity, between 0 (transparent) and 255 (opaque).
-     */
+    setSize(newWidth: float, newHeight: float): void {
+      this.setWidth(newWidth);
+      this.setHeight(newHeight);
+    }
+
+    override getOriginalWidth(): float {
+      return this._objectData.width;
+    }
+
+    override getOriginalHeight(): float {
+      return this._objectData.height;
+    }
+
     setOpacity(opacity: float): void {
       if (opacity < 0) {
         opacity = 0;
@@ -226,10 +286,6 @@ namespace gdjs {
       this._renderer.updateOpacity();
     }
 
-    /**
-     * Get the transparency of the object.
-     * @return The opacity, between 0 (transparent) and 255 (opaque).
-     */
     getOpacity(): number {
       return this.opacity;
     }
@@ -255,10 +311,14 @@ namespace gdjs {
     // Implement support for get/set scale:
 
     /**
-     * Get scale of the tiled sprite object.
+     * Get the scale of the object (or the geometric mean of the X and Y scale in case they are different).
+     *
+     * @return the scale of the object (or the geometric mean of the X and Y scale in case they are different).
      */
     getScale(): float {
-      return (this.getScaleX() + this.getScaleY()) / 2.0;
+      const scaleX = Math.abs(this.getScaleX());
+      const scaleY = Math.abs(this.getScaleY());
+      return scaleX === scaleY ? scaleX : Math.sqrt(scaleX * scaleY);
     }
 
     /**

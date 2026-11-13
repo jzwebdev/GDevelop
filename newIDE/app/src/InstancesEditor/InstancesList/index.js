@@ -1,5 +1,5 @@
 // @flow
-import { Trans } from '@lingui/macro';
+import { t, Trans } from '@lingui/macro';
 import React, { Component } from 'react';
 import {
   AutoSizer,
@@ -9,31 +9,35 @@ import {
 } from 'react-virtualized';
 import IconButton from '../../UI/IconButton';
 import KeyboardShortcuts from '../../UI/KeyboardShortcuts';
-import ThemeConsumer from '../../UI/Theme/ThemeConsumer';
-import SearchBar, {
-  useShouldAutofocusSearchbar,
-  type SearchBarInterface,
-} from '../../UI/SearchBar';
-import Lock from '@material-ui/icons/Lock';
-import LockOpen from '@material-ui/icons/LockOpen';
-const gd /*TODO: add flow in this file */ = global.gd;
+import CompactSearchBar from '../../UI/CompactSearchBar';
+import RemoveCircle from '../../UI/CustomSvgIcons/RemoveCircle';
+import Lock from '../../UI/CustomSvgIcons/Lock';
+import LockOpen from '../../UI/CustomSvgIcons/LockOpen';
+import Visibility from '../../UI/CustomSvgIcons/Visibility';
+import VisibilityOff from '../../UI/CustomSvgIcons/VisibilityOff';
+import RotateZ from '../../UI/CustomSvgIcons/RotateZ';
+import Layers from '../../UI/CustomSvgIcons/Layers';
+import SortArrowUp from '../../UI/CustomSvgIcons/SortArrowUp';
+import SortArrowDown from '../../UI/CustomSvgIcons/SortArrowDown';
+import { toFixedWithoutTrailingZeros } from '../../Utils/Mathematics';
+import ErrorBoundary from '../../UI/ErrorBoundary';
+import useForceUpdate from '../../Utils/UseForceUpdate';
+import { Column, Line } from '../../UI/Grid';
+const gd = global.gd;
 
-type State = {|
-  searchText: string,
-  sortBy: string,
-  sortDirection: SortDirection,
-|};
-
-type Props = {|
-  instances: gdInitialInstancesContainer,
-  selectedInstances: Array<gdInitialInstance>,
-  onSelectInstances: (Array<gdInitialInstance>, boolean) => void,
-|};
+const minimumWidths = {
+  table: 400,
+  objectName: 80,
+  icon: 40,
+  numberProperty: 40,
+  layerName: 50,
+};
 
 type RenderedRowInfo = {
   instance: gdInitialInstance,
   name: string,
   locked: boolean,
+  hidden: boolean,
   x: string,
   y: string,
   angle: string,
@@ -47,6 +51,16 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'stretch',
+    minWidth: 0,
+    // Search-bar band: matches the column-header band, kept distinct from the
+    // alternating row colors so it stays stable when the rows change.
+    backgroundColor: 'var(--table-header-background-color)',
+  },
+  tableContainer: {
+    flex: 1,
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    backgroundColor: 'var(--table-header-background-color)',
   },
 };
 
@@ -59,27 +73,74 @@ const compareStrings = (x: string, y: string, direction: number): number => {
   return 0;
 };
 
-export default class InstancesList extends Component<Props, State> {
-  state = {
+const renderSortableHeader = ({
+  dataKey,
+  label,
+  sortBy,
+  sortDirection,
+}: {
+  dataKey: string,
+  label: React.Node,
+  sortBy: string,
+  sortDirection: string,
+}) => {
+  const isActive = dataKey === sortBy;
+  return (
+    <span
+      style={{
+        color: isActive
+          ? 'var(--theme-text-default-color)'
+          : 'var(--table-text-color-header)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+      }}
+    >
+      {label}
+      {isActive &&
+        (sortDirection === 'ASC' ? (
+          <SortArrowUp style={{ width: 12, height: 12, display: 'block' }} />
+        ) : (
+          <SortArrowDown style={{ width: 12, height: 12, display: 'block' }} />
+        ))}
+    </span>
+  );
+};
+
+export type InstancesListInterface = {|
+  forceUpdate: () => void,
+|};
+
+type State = {|
+  searchText: string,
+  sortBy: string,
+  // $FlowFixMe[value-as-type]
+  sortDirection: SortDirection,
+|};
+
+type Props = {|
+  instances: gdInitialInstancesContainer,
+  selectedInstances: Array<gdInitialInstance>,
+  onSelectInstances: (Array<gdInitialInstance>, boolean) => void,
+  onInstancesModified: (Array<gdInitialInstance>) => void,
+|};
+
+class InstancesList extends Component<Props, State> {
+  state: State = {
     searchText: '',
-    sortBy: '',
-    sortDirection: SortDirection.ASC,
+    sortBy: 'zOrder',
+    sortDirection: SortDirection.DESC,
   };
   renderedRows: Array<RenderedRowInfo> = [];
   instanceRowRenderer: ?typeof gd.InitialInstanceJSFunctor;
   table: ?typeof RVTable;
-  _searchBar = React.createRef<SearchBarInterface>();
-  _keyboardShortcuts = new KeyboardShortcuts({
+  _keyboardShortcuts: KeyboardShortcuts = new KeyboardShortcuts({
     isActive: () => false,
     shortcutCallbacks: {},
   });
 
-  componentDidMount() {
-    if (useShouldAutofocusSearchbar() && this._searchBar.current)
-      this._searchBar.current.focus();
-  }
-
-  componentWillMount() {
+  // This should be updated, see https://reactjs.org/blog/2018/03/27/update-on-async-rendering.html.
+  UNSAFE_componentWillMount() {
     // Functor used to display an instance row
     this.instanceRowRenderer = new gd.InitialInstanceJSFunctor();
     this.instanceRowRenderer.invoke = instancePtr => {
@@ -95,11 +156,12 @@ export default class InstancesList extends Component<Props, State> {
           instance,
           name,
           locked: instance.isLocked(),
-          x: instance.getX().toFixed(2),
-          y: instance.getY().toFixed(2),
-          angle: instance.getAngle().toFixed(2),
+          hidden: instance.isHidden(),
+          x: toFixedWithoutTrailingZeros(instance.getX(), 2),
+          y: toFixedWithoutTrailingZeros(instance.getY(), 2),
+          angle: toFixedWithoutTrailingZeros(instance.getAngle(), 2),
           layer: instance.getLayer(),
-          zOrder: instance.getZOrder(),
+          zOrder: String(instance.getZOrder()),
         });
       }
     };
@@ -109,7 +171,7 @@ export default class InstancesList extends Component<Props, State> {
     if (this.instanceRowRenderer) this.instanceRowRenderer.delete();
   }
 
-  _onRowClick = ({ index }: { index: number }) => {
+  _onRowClick = ({ index }: {| index: number |}) => {
     if (!this.renderedRows[index]) return;
 
     this.props.onSelectInstances(
@@ -118,11 +180,11 @@ export default class InstancesList extends Component<Props, State> {
     );
   };
 
-  _rowGetter = ({ index }: { index: number }) => {
+  _rowGetter = ({ index }: {| index: number |}): RenderedRowInfo => {
     return this.renderedRows[index];
   };
 
-  _rowClassName = ({ index }: { index: number }) => {
+  _rowClassName = ({ index }: {| index: number |}): string => {
     if (index < 0) {
       return 'tableHeaderRow';
     } else {
@@ -134,15 +196,56 @@ export default class InstancesList extends Component<Props, State> {
     }
   };
 
-  _renderLockCell = ({ rowData }: { rowData: RenderedRowInfo }) => {
+  _renderVisibilityCell = ({
+    rowData: { instance },
+  }: {
+    rowData: RenderedRowInfo,
+  }): React.Node => {
+    return (
+      <IconButton
+        size="small"
+        tooltip={
+          instance.isHidden()
+            ? t`Hidden when the scene starts`
+            : t`Visible when the scene starts`
+        }
+        onClick={() => {
+          instance.setHidden(!instance.isHidden());
+          this.props.onInstancesModified([instance]);
+        }}
+      >
+        {instance.isHidden() ? <VisibilityOff /> : <Visibility />}
+      </IconButton>
+    );
+  };
+
+  _renderLockCell = ({
+    rowData: { instance },
+  }: {
+    rowData: RenderedRowInfo,
+  }): React.Node => {
     return (
       <IconButton
         size="small"
         onClick={() => {
-          rowData.instance.setLocked(!rowData.instance.isLocked());
+          if (instance.isSealed()) {
+            instance.setSealed(false);
+            instance.setLocked(false);
+          } else if (instance.isLocked()) {
+            instance.setSealed(true);
+          } else {
+            instance.setLocked(true);
+          }
+          this.props.onInstancesModified([instance]);
         }}
       >
-        {rowData.instance.isLocked() ? <Lock /> : <LockOpen />}
+        {instance.isLocked() && instance.isSealed() ? (
+          <RemoveCircle />
+        ) : instance.isLocked() ? (
+          <Lock />
+        ) : (
+          <LockOpen />
+        )}
       </IconButton>
     );
   };
@@ -158,6 +261,7 @@ export default class InstancesList extends Component<Props, State> {
     sortDirection,
   }: {
     sortBy: string,
+    // $FlowFixMe[value-as-type]
     sortDirection: SortDirection,
   }) => {
     this.setState({ sortBy, sortDirection });
@@ -192,7 +296,7 @@ export default class InstancesList extends Component<Props, State> {
     );
   };
 
-  render() {
+  render(): React.Node {
     const { searchText, sortBy, sortDirection } = this.state;
     const { instances } = this.props;
 
@@ -208,81 +312,10 @@ export default class InstancesList extends Component<Props, State> {
     const tableKey = instances.ptr;
 
     return (
-      <ThemeConsumer>
-        {muiTheme => (
-          <div style={styles.container}>
-            <div
-              style={{ flex: 1 }}
-              onKeyDown={this._keyboardShortcuts.onKeyDown}
-              onKeyUp={this._keyboardShortcuts.onKeyUp}
-            >
-              <AutoSizer>
-                {({ height, width }) => (
-                  <RVTable
-                    ref={table => (this.table = table)}
-                    key={tableKey}
-                    headerHeight={30}
-                    height={height}
-                    className={`gd-table ${muiTheme.tableRootClassName}`}
-                    headerClassName={'tableHeaderColumn'}
-                    rowCount={this.renderedRows.length}
-                    rowGetter={this._rowGetter}
-                    rowHeight={32}
-                    onRowClick={this._onRowClick}
-                    rowClassName={this._rowClassName}
-                    sort={this._sort}
-                    sortBy={sortBy}
-                    sortDirection={sortDirection}
-                    width={width}
-                  >
-                    <RVColumn
-                      label={<Trans>Object name</Trans>}
-                      dataKey="name"
-                      width={width * 0.35}
-                      className={'tableColumn'}
-                    />
-                    <RVColumn
-                      label=""
-                      dataKey="locked"
-                      width={width * 0.05}
-                      className={'tableColumn'}
-                      cellRenderer={this._renderLockCell}
-                    />
-                    <RVColumn
-                      label={<Trans>X</Trans>}
-                      dataKey="x"
-                      width={width * 0.1}
-                      className={'tableColumn'}
-                    />
-                    <RVColumn
-                      label={<Trans>Y</Trans>}
-                      dataKey="y"
-                      width={width * 0.1}
-                      className={'tableColumn'}
-                    />
-                    <RVColumn
-                      label={<Trans>Angle</Trans>}
-                      dataKey="angle"
-                      width={width * 0.1}
-                      className={'tableColumn'}
-                    />
-                    <RVColumn
-                      label={<Trans>Layer</Trans>}
-                      dataKey="layer"
-                      width={width * 0.2}
-                      className={'tableColumn'}
-                    />
-                    <RVColumn
-                      label={<Trans>Z Order</Trans>}
-                      dataKey="zOrder"
-                      width={width * 0.1}
-                      className={'tableColumn'}
-                    />
-                  </RVTable>
-                )}
-              </AutoSizer>
-            </div>
-            <SearchBar
+      <div style={styles.container}>
+        <Line>
+          <Column expand noOverflowParent>
+            <CompactSearchBar
               value={searchText}
               onChange={searchText =>
                 this.setState({
@@ -290,11 +323,129 @@ export default class InstancesList extends Component<Props, State> {
                 })
               }
               onRequestSearch={this._selectFirstInstance}
-              ref={this._searchBar}
+              placeholder={t`Search instances`}
             />
-          </div>
-        )}
-      </ThemeConsumer>
+          </Column>
+        </Line>
+        <div
+          style={styles.tableContainer}
+          onKeyDown={this._keyboardShortcuts.onKeyDown}
+          onKeyUp={this._keyboardShortcuts.onKeyUp}
+        >
+          <AutoSizer>
+            {({ height, width }) => (
+              <RVTable
+                ref={table => (this.table = table)}
+                key={tableKey}
+                headerHeight={30}
+                height={height}
+                className={`gd-table`}
+                headerClassName={'tableHeaderColumn'}
+                headerStyle={{
+                  backgroundColor: 'var(--table-header-background-color)',
+                }}
+                rowCount={this.renderedRows.length}
+                rowGetter={this._rowGetter}
+                rowHeight={32}
+                onRowClick={this._onRowClick}
+                rowClassName={this._rowClassName}
+                sort={this._sort}
+                sortBy={sortBy}
+                sortDirection={sortDirection}
+                width={Math.max(width, minimumWidths.table)}
+              >
+                <RVColumn
+                  label={<Trans>Object name</Trans>}
+                  dataKey="name"
+                  width={Math.max(width * 0.35, minimumWidths.objectName)}
+                  className={'tableColumn'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label={<Trans>X</Trans>}
+                  dataKey="x"
+                  width={Math.max(width * 0.1, minimumWidths.numberProperty)}
+                  className={'tableColumn tableColumnSecondary'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label={<Trans>Y</Trans>}
+                  dataKey="y"
+                  width={Math.max(width * 0.1, minimumWidths.numberProperty)}
+                  className={'tableColumn tableColumnSecondary'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label={<Trans>Z</Trans>}
+                  dataKey="zOrder"
+                  width={Math.max(width * 0.1, minimumWidths.numberProperty)}
+                  className={'tableColumn tableColumnSecondary'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label={
+                    <RotateZ
+                      titleAccess="Rotation (Z)"
+                      style={{ width: 18, height: 18, display: 'block' }}
+                    />
+                  }
+                  dataKey="angle"
+                  width={Math.max(width * 0.1, minimumWidths.numberProperty)}
+                  className={'tableColumn tableColumnSecondary'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label={
+                    <Layers
+                      titleAccess="Layer"
+                      style={{ width: 18, height: 18, display: 'block' }}
+                    />
+                  }
+                  dataKey="layer"
+                  width={Math.max(width * 0.2, minimumWidths.layerName)}
+                  className={'tableColumn tableColumnSecondary'}
+                  headerRenderer={renderSortableHeader}
+                />
+                <RVColumn
+                  label=""
+                  dataKey="hidden"
+                  width={Math.max(width * 0.05, minimumWidths.numberProperty)}
+                  className={'tableColumn'}
+                  cellRenderer={this._renderVisibilityCell}
+                />
+                <RVColumn
+                  label=""
+                  dataKey="locked"
+                  width={Math.max(width * 0.05, minimumWidths.numberProperty)}
+                  className={'tableColumn'}
+                  cellRenderer={this._renderLockCell}
+                />
+              </RVTable>
+            )}
+          </AutoSizer>
+        </div>
+      </div>
     );
   }
 }
+
+const InstancesListWithErrorBoundary: React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<InstancesListInterface>,
+}> = React.forwardRef<Props, InstancesListInterface>((props, ref) => {
+  const forceUpdate = useForceUpdate();
+  React.useImperativeHandle(ref, () => ({
+    forceUpdate,
+  }));
+
+  return (
+    <ErrorBoundary
+      componentTitle={<Trans>Instances list</Trans>}
+      scope="scene-editor-instances-list"
+    >
+      <InstancesList {...props} />
+    </ErrorBoundary>
+  );
+});
+
+export default InstancesListWithErrorBoundary;

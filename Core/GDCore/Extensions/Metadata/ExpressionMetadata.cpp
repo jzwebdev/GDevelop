@@ -5,6 +5,7 @@
  */
 #include "ExpressionMetadata.h"
 #include "GDCore/CommonTools.h"
+#include "GDCore/Extensions/PlatformExtension.h"
 #include "GDCore/String.h"
 
 namespace gd {
@@ -23,7 +24,8 @@ ExpressionMetadata::ExpressionMetadata(const gd::String& returnType_,
       shown(true),
       smallIconFilename(smallicon_),
       extensionNamespace(extensionNamespace_),
-      isPrivate(false) {
+      isPrivate(false),
+      relevantContext("Any") {
 }
 
 ExpressionMetadata& ExpressionMetadata::SetHidden() {
@@ -36,39 +38,40 @@ gd::ExpressionMetadata& ExpressionMetadata::AddParameter(
     const gd::String& description,
     const gd::String& supplementaryInformation,
     bool parameterIsOptional) {
-  gd::ParameterMetadata info;
-  info.type = type;
-  info.description = description;
-  info.codeOnly = false;
-  info.optional = parameterIsOptional;
-  info.supplementaryInformation =
+  parameters.AddNewParameter("")
+  .SetType(type)
+  .SetDescription(description)
+  .SetCodeOnly(false)
+  .SetOptional(parameterIsOptional)
+  .SetExtraInfo(
       // For objects/behavior, the supplementary information
       // parameter is an object/behavior type...
-      (gd::ParameterMetadata::IsObject(type) ||
-       gd::ParameterMetadata::IsBehavior(type))
-          ? (supplementaryInformation.empty()
-                 ? ""
-                 : extensionNamespace +
-                       supplementaryInformation  //... so prefix it with the extension
-                                           // namespace.
-             )
-          : supplementaryInformation;  // Otherwise don't change anything
+      ((gd::ParameterMetadata::IsObject(type) ||
+        gd::ParameterMetadata::IsBehavior(type))
+               // Prefix with the namespace if it's not already there.
+               && (supplementaryInformation.find(
+                       PlatformExtension::GetNamespaceSeparator()) == gd::String::npos)
+           ? (supplementaryInformation.empty()
+                  ? ""
+                  : extensionNamespace + supplementaryInformation)
+           : supplementaryInformation));
 
   // TODO: Assert against supplementaryInformation === "emsc" (when running with
   // Emscripten), and warn about a missing argument when calling addParameter.
 
-  parameters.push_back(info);
   return *this;
 }
 
-gd::ExpressionMetadata& ExpressionMetadata::AddCodeOnlyParameter(
-    const gd::String& type, const gd::String& supplementaryInformation) {
-  gd::ParameterMetadata info;
-  info.type = type;
-  info.codeOnly = true;
-  info.supplementaryInformation = supplementaryInformation;
+gd::ExpressionMetadata &ExpressionMetadata::AddCodeOnlyParameter(
+    const gd::String &type, const gd::String &supplementaryInformation) {
+  parameters.AddNewParameter("").SetType(type).SetCodeOnly().SetExtraInfo(
+      supplementaryInformation);
+  return *this;
+}
 
-  parameters.push_back(info);
+gd::ExpressionMetadata& ExpressionMetadata::SetRequiresBaseObjectCapability(
+    const gd::String& capability) {
+  requiredBaseObjectCapability = capability;
   return *this;
 }
 

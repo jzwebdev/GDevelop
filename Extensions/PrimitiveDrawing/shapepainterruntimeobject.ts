@@ -3,7 +3,10 @@
  *  2013 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
-  /** Represents a color in RGB Format */
+  /**
+   * Represents a color in RGB Format
+   * @category Objects > Shape Painter
+   */
   export type RGBColor = {
     /** The Red component of the color, from 0 to 255. */
     r: integer;
@@ -13,12 +16,20 @@ namespace gdjs {
     b: integer;
   };
 
-  /** Initial properties for a for {@link gdjs.ShapePainterRuntimeObject}. */
+  /**
+   * @category Objects > Shape Painter
+   */
+  export type Antialiasing = 'none' | 'low' | 'medium' | 'high';
+
+  /**
+   * Initial properties for a for {@link gdjs.ShapePainterRuntimeObject}.
+   * @category Objects > Shape Painter
+   */
   export type ShapePainterObjectDataType = {
-    /** The color (in RGB format) of the inner part of the painted shape */
-    fillColor: RGBColor;
-    /** The color (in RGB format) of the outline of the painted shape */
-    outlineColor: RGBColor;
+    /** The color of the inner part of the painted shape */
+    fillColor: RGBColor | string;
+    /** The color of the outline of the painted shape */
+    outlineColor: RGBColor | string;
     /** The opacity of the inner part of the painted shape, from 0 to 255 */
     fillOpacity: float;
     /** The opacity of the outline of the painted shape, from 0 to 255 */
@@ -29,14 +40,40 @@ namespace gdjs {
     absoluteCoordinates: boolean;
     /** Clear the previous render before the next draw? */
     clearBetweenFrames: boolean;
+    /** The type of anti-aliasing to apply at rendering. */
+    antialiasing: Antialiasing;
   };
 
+  /** @category Objects > Shape Painter */
   export type ShapePainterObjectData = ObjectData & ShapePainterObjectDataType;
+
+  type ShapePainterNetworkSyncDataType = {
+    cbf: boolean; // clearBetweenFrames
+    aa: Antialiasing; // antialiasing
+    ac: boolean; // absoluteCoordinates
+    fc: integer; // fillColor
+    oc: integer; // outlineColor
+    os: float; // outlineSize
+    fo: float; // fillOpacity
+    oo: float; // outlineOpacity
+    scaleX: number;
+    scaleY: number;
+    ifx: boolean; // isFlippedX
+    ify: boolean; // isFlippedY
+  };
+
+  /** @category Objects > Shape Painter */
+  export type ShapePainterNetworkSyncData = ObjectNetworkSyncData &
+    ShapePainterNetworkSyncDataType;
 
   /**
    * The ShapePainterRuntimeObject allows to draw graphics shapes on screen.
+   * @category Objects > Shape Painter
    */
-  export class ShapePainterRuntimeObject extends gdjs.RuntimeObject {
+  export class ShapePainterRuntimeObject
+    extends gdjs.RuntimeObject
+    implements gdjs.Resizable, gdjs.Scalable, gdjs.Flippable
+  {
     _scaleX: number = 1;
     _scaleY: number = 1;
     _blendMode: number = 0;
@@ -52,43 +89,52 @@ namespace gdjs {
     _outlineSize: float;
     _useAbsoluteCoordinates: boolean;
     _clearBetweenFrames: boolean;
+    _antialiasing: Antialiasing;
     _renderer: gdjs.ShapePainterRuntimeObjectRenderer;
 
     private static readonly _pointForTransformation: FloatPoint = [0, 0];
 
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The container the object belongs to.
      * @param shapePainterObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      shapePainterObjectData: ShapePainterObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      shapePainterObjectData: ShapePainterObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, shapePainterObjectData);
-      this._fillColor = parseInt(
-        gdjs.rgbToHex(
-          shapePainterObjectData.fillColor.r,
-          shapePainterObjectData.fillColor.g,
-          shapePainterObjectData.fillColor.b
-        ),
-        16
-      );
-      this._outlineColor = parseInt(
-        gdjs.rgbToHex(
-          shapePainterObjectData.outlineColor.r,
-          shapePainterObjectData.outlineColor.g,
-          shapePainterObjectData.outlineColor.b
-        ),
-        16
-      );
+      super(instanceContainer, shapePainterObjectData, instanceData);
+      this._fillColor =
+        typeof shapePainterObjectData.fillColor === 'string'
+          ? gdjs.rgbOrHexStringToNumber(shapePainterObjectData.fillColor)
+          : parseInt(
+              gdjs.rgbToHex(
+                shapePainterObjectData.fillColor.r,
+                shapePainterObjectData.fillColor.g,
+                shapePainterObjectData.fillColor.b
+              ),
+              16
+            );
+      this._outlineColor =
+        typeof shapePainterObjectData.outlineColor === 'string'
+          ? gdjs.rgbOrHexStringToNumber(shapePainterObjectData.outlineColor)
+          : parseInt(
+              gdjs.rgbToHex(
+                shapePainterObjectData.outlineColor.r,
+                shapePainterObjectData.outlineColor.g,
+                shapePainterObjectData.outlineColor.b
+              ),
+              16
+            );
       this._fillOpacity = shapePainterObjectData.fillOpacity;
       this._outlineOpacity = shapePainterObjectData.outlineOpacity;
       this._outlineSize = shapePainterObjectData.outlineSize;
       this._useAbsoluteCoordinates = shapePainterObjectData.absoluteCoordinates;
       this._clearBetweenFrames = shapePainterObjectData.clearBetweenFrames;
+      this._antialiasing = shapePainterObjectData.antialiasing;
       this._renderer = new gdjs.ShapePainterRuntimeObjectRenderer(
         this,
-        runtimeScene
+        instanceContainer
       );
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
@@ -103,10 +149,17 @@ namespace gdjs {
       oldObjectData: ShapePainterObjectData,
       newObjectData: ShapePainterObjectData
     ): boolean {
+      if (typeof newObjectData.fillColor === 'string') {
+        if (oldObjectData.fillColor !== newObjectData.fillColor) {
+          this.setFillColor(newObjectData.fillColor);
+        }
+      }
       if (
-        oldObjectData.fillColor.r !== newObjectData.fillColor.r ||
-        oldObjectData.fillColor.g !== newObjectData.fillColor.g ||
-        oldObjectData.fillColor.b !== newObjectData.fillColor.b
+        typeof oldObjectData.fillColor !== 'string' &&
+        typeof newObjectData.fillColor !== 'string' &&
+        (oldObjectData.fillColor.r !== newObjectData.fillColor.r ||
+          oldObjectData.fillColor.g !== newObjectData.fillColor.g ||
+          oldObjectData.fillColor.b !== newObjectData.fillColor.b)
       ) {
         this.setFillColor(
           '' +
@@ -117,10 +170,17 @@ namespace gdjs {
             newObjectData.fillColor.b
         );
       }
+      if (typeof newObjectData.outlineColor === 'string') {
+        if (oldObjectData.outlineColor !== newObjectData.outlineColor) {
+          this.setOutlineColor(newObjectData.outlineColor);
+        }
+      }
       if (
-        oldObjectData.outlineColor.r !== newObjectData.outlineColor.r ||
-        oldObjectData.outlineColor.g !== newObjectData.outlineColor.g ||
-        oldObjectData.outlineColor.b !== newObjectData.outlineColor.b
+        typeof oldObjectData.outlineColor !== 'string' &&
+        typeof newObjectData.outlineColor !== 'string' &&
+        (oldObjectData.outlineColor.r !== newObjectData.outlineColor.r ||
+          oldObjectData.outlineColor.g !== newObjectData.outlineColor.g ||
+          oldObjectData.outlineColor.b !== newObjectData.outlineColor.b)
       ) {
         this.setOutlineColor(
           '' +
@@ -155,15 +215,97 @@ namespace gdjs {
       ) {
         this._clearBetweenFrames = newObjectData.clearBetweenFrames;
       }
+      if (oldObjectData.antialiasing !== newObjectData.antialiasing) {
+        this.setAntialiasing(newObjectData.antialiasing);
+      }
+
       return true;
     }
 
-    stepBehaviorsPreEvents(runtimeScene: gdjs.RuntimeScene) {
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): ShapePainterNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        cbf: this._clearBetweenFrames,
+        aa: this._antialiasing,
+        ac: this._useAbsoluteCoordinates,
+        fc: this._fillColor,
+        oc: this._outlineColor,
+        os: this._outlineSize,
+        fo: this._fillOpacity,
+        oo: this._outlineOpacity,
+        scaleX: this.getScaleX(),
+        scaleY: this.getScaleY(),
+        ifx: this._flippedX,
+        ify: this._flippedY,
+      };
+    }
+
+    updateFromNetworkSyncData(
+      networkSyncData: ShapePainterNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      if (networkSyncData.cbf !== undefined) {
+        this._clearBetweenFrames = networkSyncData.cbf;
+      }
+      if (networkSyncData.aa !== undefined) {
+        this.setAntialiasing(networkSyncData.aa);
+      }
+      if (networkSyncData.ac !== undefined) {
+        this.setCoordinatesRelative(!networkSyncData.ac);
+      }
+      if (networkSyncData.fc !== undefined) {
+        this._fillColor = networkSyncData.fc;
+      }
+      if (networkSyncData.oc !== undefined) {
+        this._outlineColor = networkSyncData.oc;
+      }
+      if (networkSyncData.os !== undefined) {
+        this.setOutlineSize(networkSyncData.os);
+      }
+      if (networkSyncData.fo !== undefined) {
+        this.setFillOpacity(networkSyncData.fo);
+      }
+      if (networkSyncData.oo !== undefined) {
+        this.setOutlineOpacity(networkSyncData.oo);
+      }
+      if (networkSyncData.scaleX !== undefined) {
+        this.setScaleX(networkSyncData.scaleX);
+      }
+      if (networkSyncData.scaleY !== undefined) {
+        this.setScaleY(networkSyncData.scaleY);
+      }
+      if (networkSyncData.ifx !== undefined) {
+        this.flipX(networkSyncData.ifx);
+      }
+      if (networkSyncData.ify !== undefined) {
+        this.flipY(networkSyncData.ify);
+      }
+    }
+
+    /**
+     * Initialize the extra parameters that could be set for an instance.
+     * @param initialInstanceData The extra parameters
+     */
+    extraInitializationFromInitialInstance(initialInstanceData: InstanceData) {
+      this.flipX(!!initialInstanceData.flippedX);
+      this.flipY(!!initialInstanceData.flippedY);
+    }
+
+    stepBehaviorsPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {
       //We redefine stepBehaviorsPreEvents just to clear the graphics before running events.
       if (this._clearBetweenFrames) {
         this.clear();
       }
-      super.stepBehaviorsPreEvents(runtimeScene);
+      super.stepBehaviorsPreEvents(instanceContainer);
+    }
+
+    onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
     }
 
     /**
@@ -197,6 +339,22 @@ namespace gdjs {
       this._renderer.drawEllipse(centerX, centerY, width, height);
     }
 
+    drawFilletRectangle(
+      startX1: float,
+      startY1: float,
+      endX2: float,
+      endY2: float,
+      fillet: float
+    ) {
+      this._renderer.drawFilletRectangle(
+        startX1,
+        startY1,
+        endX2,
+        endY2,
+        fillet
+      );
+    }
+
     drawRoundedRectangle(
       startX1: float,
       startY1: float,
@@ -210,6 +368,56 @@ namespace gdjs {
         endX2,
         endY2,
         radius
+      );
+    }
+
+    drawChamferRectangle(
+      startX1: float,
+      startY1: float,
+      endX2: float,
+      endY2: float,
+      chamfer: float
+    ) {
+      this._renderer.drawChamferRectangle(
+        startX1,
+        startY1,
+        endX2,
+        endY2,
+        chamfer
+      );
+    }
+
+    drawTorus(
+      centerX: float,
+      centerY: float,
+      innerRadius: float,
+      outerRadius: float,
+      startArc: float,
+      endArc: float
+    ) {
+      this._renderer.drawTorus(
+        centerX,
+        centerY,
+        innerRadius,
+        outerRadius,
+        startArc,
+        endArc
+      );
+    }
+
+    drawRegularPolygon(
+      centerX: float,
+      centerY: float,
+      sides: float,
+      radius: float,
+      rotation: float
+    ) {
+      this._renderer.drawRegularPolygon(
+        centerX,
+        centerY,
+        sides,
+        radius,
+        rotation
       );
     }
 
@@ -337,6 +545,19 @@ namespace gdjs {
       return this._clearBetweenFrames;
     }
 
+    setAntialiasing(value: Antialiasing): void {
+      this._antialiasing = value;
+      this._renderer.updateAntialiasing();
+    }
+
+    getAntialiasing(): Antialiasing {
+      return this._antialiasing;
+    }
+
+    checkAntialiasing(valueToCompare: Antialiasing): boolean {
+      return this._antialiasing === valueToCompare;
+    }
+
     setCoordinatesRelative(value: boolean): void {
       this._useAbsoluteCoordinates = !value;
     }
@@ -345,23 +566,8 @@ namespace gdjs {
       return !this._useAbsoluteCoordinates;
     }
 
-    /**
-     *
-     * @param rgbColor semicolon separated decimal values
-     */
-    setFillColor(rgbColor: string): void {
-      const colors = rgbColor.split(';');
-      if (colors.length < 3) {
-        return;
-      }
-      this._fillColor = parseInt(
-        gdjs.rgbToHex(
-          parseInt(colors[0], 10),
-          parseInt(colors[1], 10),
-          parseInt(colors[2], 10)
-        ),
-        16
-      );
+    setFillColor(color: string): void {
+      this._fillColor = gdjs.rgbOrHexStringToNumber(color);
     }
 
     getFillColorR(): integer {
@@ -374,23 +580,8 @@ namespace gdjs {
       return gdjs.hexNumberToRGB(this._fillColor).b;
     }
 
-    /**
-     *
-     * @param rgbColor semicolon separated decimal values
-     */
     setOutlineColor(rgbColor: string): void {
-      const colors = rgbColor.split(';');
-      if (colors.length < 3) {
-        return;
-      }
-      this._outlineColor = parseInt(
-        gdjs.rgbToHex(
-          parseInt(colors[0], 10),
-          parseInt(colors[1], 10),
-          parseInt(colors[2], 10)
-        ),
-        16
-      );
+      this._outlineColor = gdjs.rgbOrHexStringToNumber(rgbColor);
       this._renderer.updateOutline();
     }
 
@@ -468,13 +659,13 @@ namespace gdjs {
       }
       super.setAngle(angle);
       this._renderer.updateAngle();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
      * The center of rotation is defined relatively
      * to the drawing origin (the object position).
-     * This avoid the center to move on the drawing
+     * This avoids the center to move on the drawing
      * when new shapes push the bounds.
      *
      * When no custom center is defined, it will move
@@ -536,11 +727,6 @@ namespace gdjs {
       );
     }
 
-    /**
-     * Change the width of the object. This changes the scale on X axis of the object.
-     *
-     * @param newWidth The new width of the object, in pixels.
-     */
     setWidth(newWidth: float): void {
       const unscaledWidth = this._renderer.getUnscaledWidth();
       if (unscaledWidth !== 0) {
@@ -548,16 +734,16 @@ namespace gdjs {
       }
     }
 
-    /**
-     * Change the height of the object. This changes the scale on Y axis of the object.
-     *
-     * @param newHeight The new height of the object, in pixels.
-     */
     setHeight(newHeight: float): void {
       const unscaledHeight = this._renderer.getUnscaledHeight();
       if (unscaledHeight !== 0) {
         this.setScaleY(newHeight / unscaledHeight);
       }
+    }
+
+    setSize(newWidth: float, newHeight: float): void {
+      this.setWidth(newWidth);
+      this.setHeight(newHeight);
     }
 
     /**
@@ -584,7 +770,7 @@ namespace gdjs {
       }
       this._scaleX = newScale * (this._flippedX ? -1 : 1);
       this._renderer.updateScaleX();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -601,7 +787,7 @@ namespace gdjs {
       }
       this._scaleY = newScale * (this._flippedY ? -1 : 1);
       this._renderer.updateScaleY();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     flipX(enable: boolean): void {
@@ -609,7 +795,7 @@ namespace gdjs {
         this._scaleX *= -1;
         this._flippedX = enable;
         this._renderer.updateScaleX();
-        this.hitBoxesDirty = true;
+        this.invalidateHitboxes();
       }
     }
 
@@ -618,7 +804,7 @@ namespace gdjs {
         this._scaleY *= -1;
         this._flippedY = enable;
         this._renderer.updateScaleY();
-        this.hitBoxesDirty = true;
+        this.invalidateHitboxes();
       }
     }
 
@@ -660,7 +846,7 @@ namespace gdjs {
     }
 
     invalidateBounds() {
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     getDrawableX(): float {
@@ -679,7 +865,7 @@ namespace gdjs {
       return this._renderer.getHeight();
     }
 
-    updatePreRender(runtimeScene: gdjs.RuntimeScene): void {
+    updatePreRender(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       this._renderer.updatePreRender();
     }
 
@@ -741,7 +927,7 @@ namespace gdjs {
       rectangle[3][0] = left;
       rectangle[3][1] = bottom;
 
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     updateHitBoxes(): void {
@@ -752,8 +938,8 @@ namespace gdjs {
       const centerY = this.getCenterY();
       const vertices = this.hitBoxes[0].vertices;
       if (this._customCollisionMask) {
-        const customCollisionMaskVertices = this._customCollisionMask[0]
-          .vertices;
+        const customCollisionMaskVertices =
+          this._customCollisionMask[0].vertices;
         for (let i = 0; i < 4; i++) {
           const point = this.transformToScene(
             customCollisionMaskVertices[i][0],

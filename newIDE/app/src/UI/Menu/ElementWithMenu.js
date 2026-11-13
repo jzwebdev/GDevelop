@@ -2,11 +2,12 @@
 import * as React from 'react';
 import { type I18n as I18nType } from '@lingui/core';
 import ReactDOM from 'react-dom';
-import ContextMenu from './ContextMenu';
+import ContextMenu, { type ContextMenuInterface } from './ContextMenu';
 import { type MenuItemTemplate } from './Menu.flow';
 
 type Props = {|
-  element: React$Element<any>,
+  // $FlowFixMe[prop-missing]
+  element: React.Element<any>,
   buildMenuTemplate: (i18n: I18nType) => Array<MenuItemTemplate>,
   openMenuWithSecondaryClick?: boolean,
   passExtraProps?: boolean,
@@ -19,15 +20,27 @@ type State = {||};
  */
 
 export default class ElementWithMenu extends React.Component<Props, State> {
-  _contextMenu: ?ContextMenu;
+  _contextMenu: ?ContextMenuInterface;
   _wrappedElement: ?any;
 
-  open = () => {
+  open = (event?: Event) => {
+    // Prevent the default behavior, notably the browser context menu
+    // on the web version, which is otherwise not prevented because
+    // `stopPropagation` stops the event before it reaches the global
+    // `contextmenu` handler set up by `Window.setUpContextMenu`.
+    // $FlowFixMe[method-unbinding]
+    if (event && event.preventDefault) event.preventDefault();
+    // $FlowFixMe[method-unbinding]
+    if (event && event.stopPropagation) event.stopPropagation();
     const { _contextMenu } = this;
     if (!_contextMenu) return;
 
     const node = ReactDOM.findDOMNode(this._wrappedElement);
-    if (node instanceof HTMLElement) {
+    // Use nodeType check instead of `instanceof HTMLElement` because
+    // in a cross-window portal the node's constructor comes from the
+    // child window, not the main window.
+    if (node && node.nodeType === 1) {
+      // $FlowFixMe[prop-missing] - nodeType 1 guarantees Element.
       const dimensions = node.getBoundingClientRect();
 
       _contextMenu.open(
@@ -37,7 +50,7 @@ export default class ElementWithMenu extends React.Component<Props, State> {
     }
   };
 
-  render() {
+  render(): any {
     const {
       element,
       buildMenuTemplate,
@@ -50,7 +63,8 @@ export default class ElementWithMenu extends React.Component<Props, State> {
       <React.Fragment>
         {React.cloneElement(element, {
           onContextMenu: this.open,
-          // $FlowFixMe - Flow complaining about using too much spread operators
+          // $FlowFixMe[incompatible-type] - Flow complaining about using too much spread operators
+          // $FlowFixMe[exponential-spread]
           ...(openMenuWithSecondaryClick ? {} : { onClick: this.open }),
           ref: wrappedElement => (this._wrappedElement = wrappedElement),
           ...(passExtraProps ? otherProps : {}),

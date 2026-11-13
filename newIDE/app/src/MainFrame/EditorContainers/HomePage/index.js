@@ -1,550 +1,755 @@
 // @flow
 import * as React from 'react';
 import { I18n } from '@lingui/react';
-import { type I18n as I18nType } from '@lingui/core';
-import { Trans, t } from '@lingui/macro';
-import Language from '@material-ui/icons/Language';
-import ForumIcon from '@material-ui/icons/Forum';
-import HelpIcon from '@material-ui/icons/Help';
-import AddCircleOutline from '@material-ui/icons/AddCircleOutline';
-
-import FlatButton from '../../../UI/FlatButton';
-import IconButton from '../../../UI/IconButton';
-import { Line, Spacer } from '../../../UI/Grid';
-import RaisedButton from '../../../UI/RaisedButton';
-import Carousel from '../../../UI/Carousel';
-import { ResponsiveLineStackLayout } from '../../../UI/Layout';
-import Window from '../../../Utils/Window';
-import { TutorialContext } from '../../../Tutorial/TutorialContext';
-
 import { type RenderEditorContainerPropsWithRef } from '../BaseEditor';
-import ScrollBackground from './ScrollBackground';
-import { GamesShowcaseContext } from '../../../GamesShowcase/GamesShowcaseContext';
-import { type ShowcasedGame } from '../../../Utils/GDevelopServices/Game';
-import ShowcasedGameDialog from '../../../GamesShowcase/ShowcasedGameDialog';
-import { type ExampleShortHeader } from '../../../Utils/GDevelopServices/Example';
-import { type Tutorial } from '../../../Utils/GDevelopServices/Tutorial';
-import { ExampleStoreContext } from '../../../AssetStore/ExampleStore/ExampleStoreContext';
-import UserChip from '../../../UI/User/UserChip';
-import AuthenticatedUserContext from '../../../Profile/AuthenticatedUserContext';
-import { useResponsiveWindowWidth } from '../../../UI/Reponsive/ResponsiveWindowMeasurer';
-import { ExampleDialog } from '../../../AssetStore/ExampleStore/ExampleDialog';
-import optionalRequire from '../../../Utils/OptionalRequire';
-import { findEmptyPathInDefaultFolder } from '../../../ProjectCreation/LocalPathFinder';
-import ProjectPreCreationDialog from '../../../ProjectCreation/ProjectPreCreationDialog';
 import {
-  type OnCreateFromExampleShortHeaderFunction,
-  type OnCreateBlankFunction,
-  type OnOpenProjectAfterCreationFunction,
-} from '../../../ProjectCreation/CreateProjectDialog';
-import RaisedButtonWithSplitMenu from '../../../UI/RaisedButtonWithSplitMenu';
+  type SceneEventsOutsideEditorChanges,
+  type InstancesOutsideEditorChanges,
+  type ObjectsOutsideEditorChanges,
+  type ObjectGroupsOutsideEditorChanges,
+  type WillDeleteObjectChanges,
+  type ExtensionsOutsideEditorChanges,
+} from '../../../EditorFunctions/OutsideEditorChanges';
+import {
+  type FileMetadataAndStorageProviderName,
+  type FileMetadata,
+  type StorageProvider,
+} from '../../../ProjectsStorage';
+import LearnSection from './LearnSection';
+import { type LearnCategory } from './LearnSection/Utils';
+import PlaySection from './PlaySection';
+import CreateSection from './CreateSection';
+import StoreSection from './StoreSection';
+import { TutorialContext } from '../../../Tutorial/TutorialContext';
+import { ExampleStoreContext } from '../../../AssetStore/ExampleStore/ExampleStoreContext';
+import { HomePageHeader } from './HomePageHeader';
+import { HomePageMenu, type HomeTab } from './HomePageMenu';
+import AuthenticatedUserContext from '../../../Profile/AuthenticatedUserContext';
+import { type ExampleShortHeader } from '../../../Utils/GDevelopServices/Example';
+import { type ResourceManagementProps } from '../../../ResourcesList/ResourceSource';
+import { AssetStoreContext } from '../../../AssetStore/AssetStoreContext';
+import TeamSection from './TeamSection';
+import TeamProvider from '../../../Profile/Team/TeamProvider';
+import { useResponsiveWindowSize } from '../../../UI/Responsive/ResponsiveWindowMeasurer';
+import { type PrivateGameTemplateListingData } from '../../../Utils/GDevelopServices/Shop';
+import { PrivateGameTemplateStoreContext } from '../../../AssetStore/PrivateGameTemplates/PrivateGameTemplateStoreContext';
+import RouterContext, { type RouteArguments } from '../../RouterContext';
+import { type GameDetailsTab } from '../../../GameDashboard';
+import { canUseClassroomFeature } from '../../../Utils/GDevelopServices/Usage';
+import EducationMarketingSection from './EducationMarketingSection';
+import useEducationForm from './UseEducationForm';
+import {
+  type ExampleProjectSetup,
+  type NewProjectSetup,
+} from '../../../ProjectCreation/NewProjectSetupDialog';
+import { type ObjectWithContext } from '../../../ObjectsList/EnumerateObjects';
+import { type GamesList } from '../../../GameDashboard/UseGamesList';
+import { type GamesPlatformFrameTools } from './PlaySection/UseGamesPlatformFrame';
+import { type CourseChapter } from '../../../Utils/GDevelopServices/Asset';
+import useCourses from './UseCourses';
 import PreferencesContext from '../../Preferences/PreferencesContext';
-import { type FileMetadataAndStorageProviderName } from '../../../ProjectsStorage';
-import generateName from '../../../Utils/ProjectNameGenerator';
-import { sendTutorialOpened } from '../../../Utils/Analytics/EventSender';
-import { hasPendingNotifications } from '../../../Utils/Notification';
+import { BundleStoreContext } from '../../../AssetStore/Bundles/BundleStoreContext';
+import {
+  setEditorHotReloadNeeded,
+  type HotReloadSteps,
+} from '../../../EmbeddedGame/EmbeddedGameFrame';
+import { type CreateProjectResult } from '../../../Utils/UseCreateProject';
+import { CreditsPackageStoreContext } from '../../../AssetStore/CreditsPackages/CreditsPackageStoreContext';
+import { type OpenAskAiOptions } from '../../../AiGeneration/Utils';
+import ClaimableProductsDialogContainer from '../../../AssetStore/ClaimableProducts/ClaimableProductsDialogContainer';
 
-const electron = optionalRequire('electron');
-const app = electron ? electron.remote.app : null;
+const noop = () => {};
+
+const getRequestedTab = (routeArguments: RouteArguments): HomeTab | null => {
+  if (
+    routeArguments['initial-dialog'] === 'asset-store' || // Compatibility with old links
+    routeArguments['initial-dialog'] === 'store' // New way of opening the store
+  ) {
+    return 'shop';
+  } else if (
+    [
+      'games-dashboard',
+      'build', // Compatibility with old links
+      'create',
+    ].includes(routeArguments['initial-dialog'])
+  ) {
+    return 'create';
+  } else if (routeArguments['initial-dialog'] === 'education') {
+    return 'team-view';
+  } else if (routeArguments['initial-dialog'] === 'play') {
+    return 'play';
+  } else if (routeArguments['initial-dialog'] === 'learn') {
+    return 'learn';
+  }
+
+  return null;
+};
 
 const styles = {
   container: {
     display: 'flex',
-    flexDirection: 'column',
+    flexDirection: 'row-reverse',
+    marginTop: 0,
+    marginBottom: 0,
+    flex: 1,
+    minHeight: 0,
     width: '100%',
   },
-  content: {
+  mobileContainer: {
     display: 'flex',
     flexDirection: 'column',
     flex: 1,
-    maxWidth: 1200,
-    marginTop: 10,
-    marginBottom: 20,
-    padding: 0,
-    alignSelf: 'center',
     width: '100%',
+  },
+  scrollableContainer: {
+    display: 'flex',
+    position: 'relative',
+    marginLeft: 0,
+    marginRight: 0,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    flex: 1,
+    height: '100%',
+    minWidth: 0,
+    overflowY: 'auto',
   },
 };
 
 type Props = {|
   project: ?gdProject,
+  fileMetadata: ?FileMetadata,
 
   isActive: boolean,
   projectItemName: ?string,
   project: ?gdProject,
   setToolbar: (?React.Node) => void,
+  setGamesPlatformFrameShown: ({| shown: boolean, isMobile: boolean |}) => void,
+  storageProviders: Array<StorageProvider>,
+  storageProvider: ?StorageProvider,
+
+  // Games
+  gamesList: GamesList,
+
+  // Games platform
+  gamesPlatformFrameTools: GamesPlatformFrameTools,
 
   // Project opening
   canOpen: boolean,
-  onOpen: () => void,
-  onOpenRecentFile: (file: FileMetadataAndStorageProviderName) => void,
-  onOpenExamples: () => void,
-  onOpenProjectManager: () => void,
-  onCloseProject: () => Promise<void>,
+  onChooseProject: () => void,
+  onOpenRecentFile: (file: FileMetadataAndStorageProviderName) => Promise<void>,
+  onSelectExampleShortHeader: ExampleShortHeader => void,
+  onSelectPrivateGameTemplateListingData: PrivateGameTemplateListingData => void,
+  onOpenPrivateGameTemplateListingData: (
+    privateGameTemplateListingData: PrivateGameTemplateListingData
+  ) => void,
+  onOpenVersionHistory: () => void,
+  askToCloseProject: () => Promise<boolean>,
+  closeProject: () => Promise<void>,
 
   // Other dialogs opening:
-  onOpenTutorials: () => void,
-  onOpenGamesShowcase: () => void,
-  onOpenHelpFinder: () => void,
   onOpenLanguageDialog: () => void,
   onOpenProfile: () => void,
+  selectInAppTutorial: (tutorialId: string) => void,
+  onOpenPreferences: () => void,
+  onOpenAbout: () => void,
+  onOpenAskAi: (?OpenAskAiOptions) => void,
+  onCloseAskAi: () => void,
 
   // Project creation
-  onCreateFromExampleShortHeader: OnCreateFromExampleShortHeaderFunction,
-  onCreateBlank: OnCreateBlankFunction,
-  onOpenProjectAfterCreation: OnOpenProjectAfterCreationFunction,
+  onOpenNewProjectSetupDialog: () => void,
+  onCreateProjectFromExample: (
+    exampleProjectSetup: ExampleProjectSetup
+  ) => Promise<CreateProjectResult>,
+  onOpenTemplateFromTutorial: (tutorialId: string) => Promise<void>,
+  onOpenTemplateFromCourseChapter: (
+    CourseChapter,
+    templateId?: string
+  ) => Promise<void>,
+  onCreateEmptyProject: (
+    newProjectSetup: NewProjectSetup
+  ) => Promise<CreateProjectResult>,
+
+  // Asset store
+  onWillInstallExtension: (extensionNames: Array<string>) => void,
+  onExtensionInstalled: (extensionNames: Array<string>) => void,
+
+  // Project save
+  onSave: (options?: {|
+    skipNewVersionWarning: boolean,
+  |}) => Promise<?FileMetadata>,
+  canSave: boolean,
+
+  resourceManagementProps: ResourceManagementProps,
+  onOpenLayout: (
+    sceneName: string,
+    options: {|
+      openEventsEditor: boolean,
+      openSceneEditor: boolean,
+      focusWhenOpened:
+        | 'scene-or-events-otherwise'
+        | 'scene'
+        | 'events'
+        | 'none',
+    |}
+  ) => void,
+
+  gameEditorMode: 'embedded-game' | 'instances-editor',
 |};
 
-type HomePageEditorInterface = {|
+export type HomePageEditorInterface = {|
   getProject: () => void,
   updateToolbar: () => void,
   forceUpdateEditor: () => void,
+  onEventsBasedObjectChildrenEdited: (
+    eventsBasedObject: gdEventsBasedObject,
+    options?: {| editedObject?: ?gdObject, hasResourceChanged?: boolean |}
+  ) => void,
+  onSceneObjectEdited: (
+    scene: gdLayout,
+    objectWithContext: ObjectWithContext,
+    hasResourceChanged?: boolean
+  ) => void,
+  onSceneObjectsDeleted: (scene: gdLayout) => void,
+  onSceneEventsModifiedOutsideEditor: (
+    scene: SceneEventsOutsideEditorChanges
+  ) => void,
+  notifyChangesToInGameEditor: (hotReloadSteps: HotReloadSteps) => void,
+  switchInGameEditorIfNoHotReloadIsNeeded: () => void,
+  onInstancesModifiedOutsideEditor: (
+    changes: InstancesOutsideEditorChanges
+  ) => void,
+  onObjectsModifiedOutsideEditor: (
+    changes: ObjectsOutsideEditorChanges
+  ) => void,
+  onWillDeleteObject: (changes: WillDeleteObjectChanges) => void,
+  onObjectGroupsModifiedOutsideEditor: (
+    changes: ObjectGroupsOutsideEditorChanges
+  ) => void,
+  onExtensionsModifiedOutsideEditor: (
+    changes: ExtensionsOutsideEditorChanges
+  ) => void,
+  selectAllInsideEditor: () => void,
 |};
 
-const prepareTutorials = (tutorials: Array<Tutorial>) =>
-  tutorials.slice(0, 16).map(tutorial => {
-    const { link, ...tutorialWithoutLink } = tutorial;
-    return {
-      ...tutorialWithoutLink,
-      onClick: () => {
-        sendTutorialOpened(tutorial.id);
-        Window.openExternalURL(link);
-      },
-    };
-  });
-
-const betweenCarouselSpacerCount = 6;
-
-const renderBetweenCarouselSpace = (offset: number = 0) =>
-  Array(betweenCarouselSpacerCount)
-    .fill(0)
-    .map((e, index) => <Spacer key={`spacer${index + offset}`} />);
-
-export const HomePage = React.memo<Props>(
+export const HomePage: React.ComponentType<Props> = React.memo<Props>(
   React.forwardRef<Props, HomePageEditorInterface>(
     (
       {
         project,
+        fileMetadata,
         canOpen,
-        onOpen,
+        onChooseProject,
         onOpenRecentFile,
-        onCreateFromExampleShortHeader,
-        onCreateBlank,
-        onOpenProjectAfterCreation,
-        onOpenExamples,
-        onOpenProjectManager,
-        onCloseProject,
-        onOpenTutorials,
-        onOpenGamesShowcase,
-        onOpenHelpFinder,
+        onOpenNewProjectSetupDialog,
+        onSelectExampleShortHeader,
+        onSelectPrivateGameTemplateListingData,
+        onOpenPrivateGameTemplateListingData,
+        onOpenVersionHistory,
         onOpenLanguageDialog,
         onOpenProfile,
+        onCreateProjectFromExample,
+        onCreateEmptyProject,
         setToolbar,
+        setGamesPlatformFrameShown,
+        selectInAppTutorial,
+        onOpenPreferences,
+        onOpenAbout,
+        onOpenAskAi,
+        onCloseAskAi,
+        onOpenLayout,
+        isActive,
+        storageProviders,
+        storageProvider,
+        onSave,
+        canSave,
+        resourceManagementProps,
+        askToCloseProject,
+        closeProject,
+        onOpenTemplateFromTutorial,
+        onOpenTemplateFromCourseChapter,
+        gamesList,
+        gamesPlatformFrameTools,
+        onWillInstallExtension,
+        onExtensionInstalled,
+        gameEditorMode,
       }: Props,
       ref
     ) => {
-      const getProject = () => {
-        return undefined;
-      };
-
-      const updateToolbar = () => {
-        if (setToolbar) setToolbar(null);
-      };
-
-      const forceUpdateEditor = () => {
-        // No updates to be done
-      };
-
-      React.useImperativeHandle(ref, () => ({
-        getProject,
-        updateToolbar,
-        forceUpdateEditor,
-      }));
-
-      const windowWidth = useResponsiveWindowWidth();
-      const [newProjectName, setNewProjectName] = React.useState<string>('');
       const authenticatedUser = React.useContext(AuthenticatedUserContext);
-      const { getRecentProjectFiles } = React.useContext(PreferencesContext);
       const {
-        tutorials,
-        fetchTutorials,
-        error: tutorialLoadingError,
-      } = React.useContext(TutorialContext);
+        authenticated,
+        onCloudProjectsChanged,
+        onOpenLoginDialog,
+        limits,
+      } = authenticatedUser;
       const {
-        allShowcasedGames: showcasedGames,
-        fetchShowcasedGamesAndFilters,
-        error: showcaseLoadingError,
-      } = React.useContext(GamesShowcaseContext);
+        startTimeoutToUnloadIframe,
+        loadIframeOrRemoveTimeout,
+      } = gamesPlatformFrameTools;
+      const { fetchTutorials } = React.useContext(TutorialContext);
+      const { fetchExamplesAndFilters } = React.useContext(ExampleStoreContext);
       const {
-        allExamples: examples,
-        fetchExamplesAndFilters,
-        error: exampleLoadingError,
-      } = React.useContext(ExampleStoreContext);
+        fetchGameTemplates,
+        shop: { setInitialGameTemplateUserFriendlySlug },
+      } = React.useContext(PrivateGameTemplateStoreContext);
+      const { fetchCreditsPackages } = React.useContext(
+        CreditsPackageStoreContext
+      );
+      const [openedGameId, setOpenedGameId] = React.useState<?string>(null);
+      const {
+        games,
+        fetchGames,
+        gamesFetchingError,
+        onGameUpdated,
+      } = gamesList;
+      const [
+        gameDetailsCurrentTab,
+        setGameDetailsCurrentTab,
+      ] = React.useState<GameDetailsTab>('details');
+      const { routeArguments, removeRouteArguments } = React.useContext(
+        RouterContext
+      );
+      const {
+        educationForm,
+        onChangeEducationForm,
+        onSendEducationForm,
+        educationFormError,
+        educationFormStatus,
+        onResetEducationForm,
+      } = useEducationForm({ authenticatedUser });
+      const {
+        courses,
+        selectedCourse,
+        getCourseChapters,
+        onSelectCourse,
+        areCoursesFetched,
+        onCompleteTask,
+        isTaskCompleted,
+        getChapterCompletion,
+        getCourseCompletion,
+        onBuyCourseWithCredits,
+        onBuyCourse,
+        purchasingCourseListingData,
+        setPurchasingCourseListingData,
+      } = useCourses();
+      const [learnCategory, setLearnCategory] = React.useState<LearnCategory>(
+        null
+      );
 
+      const { isMobile } = useResponsiveWindowSize();
+      const {
+        values: { showCreateSectionByDefault },
+      } = React.useContext(PreferencesContext);
+      const tabRequestedAtOpening = React.useRef<HomeTab | null>(
+        getRequestedTab(routeArguments)
+      );
+      const initialTab = tabRequestedAtOpening.current
+        ? tabRequestedAtOpening.current
+        : showCreateSectionByDefault
+        ? 'create'
+        : 'learn';
+
+      const [activeTab, setActiveTab] = React.useState<HomeTab>(initialTab);
+
+      const { setInitialPackUserFriendlySlug } = React.useContext(
+        AssetStoreContext
+      );
+      const {
+        fetchBundles,
+        shop: {
+          setInitialBundleUserFriendlySlug: setInitialBundleUserFriendlySlugForShop,
+          setInitialBundleCategory: setInitialBundleCategoryForShop,
+        },
+      } = React.useContext(BundleStoreContext);
+      const [
+        initialBundleUserFriendlySlugForLearn,
+        setInitialBundleUserFriendlySlugForLearn,
+      ] = React.useState<?string>(null);
+      const [
+        initialBundleCategoryForLearn,
+        setInitialBundleCategoryForLearn,
+      ] = React.useState<?string>(null);
+      const openedGame = React.useMemo(
+        () =>
+          !openedGameId || !games
+            ? null
+            : games.find(game => game.id === openedGameId),
+        [games, openedGameId]
+      );
+
+      // Open the store and a pack or game template if asked to do so, either at
+      // app opening, either when the route changes (when clicking on an announcement
+      // that redirects to the asset store for instance).
       React.useEffect(
         () => {
-          fetchShowcasedGamesAndFilters();
-          fetchExamplesAndFilters();
-          fetchTutorials();
+          const requestedTab = getRequestedTab(routeArguments);
+
+          if (!requestedTab) return;
+
+          setActiveTab(requestedTab);
+          if (requestedTab === 'create' && routeArguments['new-project']) {
+            onOpenNewProjectSetupDialog();
+            removeRouteArguments(['new-project']);
+          } else if (requestedTab === 'shop') {
+            if (routeArguments['asset-pack']) {
+              setInitialPackUserFriendlySlug(routeArguments['asset-pack']);
+            }
+            if (routeArguments['game-template']) {
+              setInitialGameTemplateUserFriendlySlug(
+                routeArguments['game-template']
+              );
+            }
+            if (routeArguments['bundle']) {
+              setInitialBundleUserFriendlySlugForShop(routeArguments['bundle']);
+            }
+            if (routeArguments['bundle-category']) {
+              setInitialBundleCategoryForShop(
+                routeArguments['bundle-category']
+              );
+            }
+            // Remove the arguments so that the asset store is not opened again.
+            removeRouteArguments([
+              'asset-pack',
+              'game-template',
+              'bundle',
+              'bundle-category',
+            ]);
+            // $FlowFixMe[invalid-compare]
+          } else if (requestedTab === 'manage') {
+            const gameId = routeArguments['game-id'];
+            if (gameId) {
+              if (games && games.find(game => game.id === gameId)) {
+                setOpenedGameId(gameId);
+                if (routeArguments['games-dashboard-tab']) {
+                  setGameDetailsCurrentTab(
+                    // $FlowIgnore - We are confident the argument is one of the possible tab.
+                    // $FlowFixMe[incompatible-type]
+                    routeArguments['games-dashboard-tab']
+                  );
+                  removeRouteArguments(['games-dashboard-tab']);
+                }
+              }
+            }
+          } else if (requestedTab === 'learn') {
+            if (routeArguments['course-id']) {
+              if (!areCoursesFetched) {
+                // Do not process requested tab before courses are ready.
+                return;
+              }
+              onSelectCourse(routeArguments['course-id']);
+            }
+            if (routeArguments['bundle']) {
+              setInitialBundleUserFriendlySlugForLearn(
+                routeArguments['bundle']
+              );
+            }
+            if (routeArguments['bundle-category']) {
+              setInitialBundleCategoryForLearn(
+                routeArguments['bundle-category']
+              );
+            }
+            removeRouteArguments(['course-id', 'bundle', 'bundle-category']);
+          }
+
+          removeRouteArguments(['initial-dialog']);
         },
         [
-          fetchExamplesAndFilters,
-          fetchShowcasedGamesAndFilters,
-          fetchTutorials,
-          getRecentProjectFiles,
+          routeArguments,
+          onSelectCourse,
+          removeRouteArguments,
+          setInitialPackUserFriendlySlug,
+          setInitialGameTemplateUserFriendlySlug,
+          setInitialBundleUserFriendlySlugForShop,
+          setInitialBundleCategoryForShop,
+          games,
+          areCoursesFetched,
+          onOpenNewProjectSetupDialog,
         ]
       );
 
-      const [outputPath, setOutputPath] = React.useState<string>('');
-      const [
-        preCreationDialogOpen,
-        setPreCreationDialogOpen,
-      ] = React.useState<boolean>(false);
-      const [isOpening, setIsOpening] = React.useState<boolean>(false);
-      const [
-        selectedShowcasedGame,
-        setSelectedShowcasedGame,
-      ] = React.useState<?ShowcasedGame>(null);
-      const [
-        selectedExample,
-        setSelectedExample,
-      ] = React.useState<?ExampleShortHeader>(null);
-
-      const buildRecentProjectFilesMenuTemplate = React.useCallback(
-        (i18n: I18nType) => {
-          const recentFiles = getRecentProjectFiles();
-          if (!recentFiles.length) {
-            return [
-              {
-                label: i18n._(t`No project opened recently`),
-                disabled: true,
-              },
-            ];
-          }
-
-          return recentFiles.map(file => ({
-            label: file.fileMetadata.fileIdentifier,
-            click: () => onOpenRecentFile(file),
-          }));
+      // Load everything when the user opens the home page, to avoid future loading times.
+      React.useEffect(
+        () => {
+          fetchExamplesAndFilters();
+          fetchGameTemplates();
+          fetchTutorials();
+          fetchBundles();
+          fetchCreditsPackages();
         },
-        [getRecentProjectFiles, onOpenRecentFile]
+        [
+          fetchExamplesAndFilters,
+          fetchTutorials,
+          fetchGameTemplates,
+          fetchBundles,
+          fetchCreditsPackages,
+        ]
       );
 
-      const prepareExamples = React.useCallback(
-        (examples: Array<ExampleShortHeader>) =>
-          examples
-            .filter(
-              example =>
-                example.previewImageUrls.length &&
-                example.tags.includes('Starter')
-            )
-            .slice(0, 16)
-            .map(example => ({
-              id: example.id,
-              title: example.name,
-              thumbnailUrl:
-                example.previewImageUrls.find(url =>
-                  url.endsWith('preview.png')
-                ) || example.previewImageUrls[0],
-              onClick: () => setSelectedExample(example),
-            })),
-        []
+      // Fetch user cloud projects when home page becomes active
+      React.useEffect(
+        () => {
+          if (isActive && authenticated) {
+            onCloudProjectsChanged();
+          }
+        },
+        [isActive, authenticated, onCloudProjectsChanged]
       );
 
-      const prepareShowcasedGames = React.useCallback(
-        (games: Array<ShowcasedGame>) =>
-          games.slice(0, 16).map(game => ({
-            id: game.title,
-            title: game.title,
-            thumbnailUrl: game.thumbnailUrl,
-            onClick: () => setSelectedShowcasedGame(game),
-          })),
-        []
+      // Refresh games list (as one could have been modified using the game dashboard
+      // in the project manager) when navigating to the "Create" tab.
+      React.useEffect(
+        () => {
+          if (isActive && activeTab === 'create' && authenticated) {
+            fetchGames();
+          }
+        },
+        [isActive, activeTab, authenticated, fetchGames]
       );
 
-      const openPreCreationDialog = React.useCallback((open: boolean) => {
-        if (open) {
-          setOutputPath(app ? findEmptyPathInDefaultFolder(app) : '');
-          setNewProjectName(generateName());
-        }
-        setPreCreationDialogOpen(open);
+      const getProject = React.useCallback(() => {
+        return undefined;
       }, []);
 
-      const createProject = async (i18n: I18nType) => {
-        setIsOpening(true);
+      const updateToolbar = React.useCallback(
+        () => {
+          // $FlowFixMe[constant-condition]
+          if (setToolbar) {
+            setToolbar(
+              <HomePageHeader
+                hasProject={!!project}
+                onOpenLanguageDialog={onOpenLanguageDialog}
+                onOpenProfile={onOpenProfile}
+                onOpenVersionHistory={onOpenVersionHistory}
+                onSave={onSave}
+                canSave={canSave}
+              />
+            );
+          }
+        },
+        [
+          setToolbar,
+          onOpenLanguageDialog,
+          onOpenProfile,
+          onOpenVersionHistory,
+          project,
+          onSave,
+          canSave,
+        ]
+      );
 
-        try {
-          let projectMetadata;
-
-          if (selectedExample) {
-            projectMetadata = await onCreateFromExampleShortHeader({
-              i18n,
-              outputPath,
-              projectName: newProjectName,
-              exampleShortHeader: selectedExample,
-            });
+      // Ensure the toolbar is up to date when the active tab changes.
+      // Use a layout effect to ensure titlebar/toolbar are updated at the same time
+      // as the rest of the interface (same React render).
+      React.useLayoutEffect(
+        () => {
+          // Hide the toolbars when on mobile in the "play" tab.
+          if (activeTab === 'play') {
+            setGamesPlatformFrameShown({ shown: true, isMobile });
           } else {
-            projectMetadata = await onCreateBlank({
-              i18n,
-              outputPath,
-              projectName: newProjectName,
-            });
+            setGamesPlatformFrameShown({ shown: false, isMobile });
+            updateToolbar();
           }
 
-          if (!projectMetadata) return;
+          // Ensure we show it again when the tab changes.
+          return () => {
+            setGamesPlatformFrameShown({ shown: false, isMobile });
+          };
+        },
+        [updateToolbar, activeTab, setGamesPlatformFrameShown, isMobile]
+      );
 
-          openPreCreationDialog(false);
-          setSelectedExample(null);
-          onOpenProjectAfterCreation({ ...projectMetadata });
-        } finally {
-          setIsOpening(false);
-        }
-      };
+      // $FlowFixMe[incompatible-type]
+      React.useImperativeHandle(ref, () => ({
+        getProject,
+        updateToolbar,
+        forceUpdateEditor: noop,
+        onEventsBasedObjectChildrenEdited: noop,
+        onSceneObjectEdited: noop,
+        onSceneObjectsDeleted: noop,
+        onSceneEventsModifiedOutsideEditor: noop,
+        notifyChangesToInGameEditor: setEditorHotReloadNeeded,
+        switchInGameEditorIfNoHotReloadIsNeeded: noop,
+        onInstancesModifiedOutsideEditor: noop,
+        onObjectsModifiedOutsideEditor: noop,
+        onWillDeleteObject: noop,
+        onObjectGroupsModifiedOutsideEditor: noop,
+        onExtensionsModifiedOutsideEditor: noop,
+        selectAllInsideEditor: noop,
+      }));
+
+      // As the homepage is never unmounted, we need to ensure the games platform
+      // iframe is unloaded & loaded from here,
+      // allowing to handle when the user navigates to another tab.
+      React.useEffect(
+        () => {
+          if (!isActive) {
+            // This happens when the user navigates to another tab. (ex: Scene or Events)
+            startTimeoutToUnloadIframe();
+            return;
+          }
+
+          if (activeTab === 'play') {
+            // This happens when the user navigates to the "Play" tab,
+            // - From another Home Tab.
+            // - From another tab (ex: Scene or Events).
+            loadIframeOrRemoveTimeout();
+          } else {
+            // This happens when the user navigates to another Home Tab.
+            startTimeoutToUnloadIframe();
+          }
+        },
+        [
+          isActive,
+          startTimeoutToUnloadIframe,
+          loadIframeOrRemoveTimeout,
+          activeTab,
+        ]
+      );
+
+      const premiumCourse = courses
+        ? courses.find(course => course.id === 'premium-course')
+        : null;
 
       return (
         <I18n>
           {({ i18n }) => (
-            <>
-              <ScrollBackground>
-                <div style={styles.container}>
-                  <div style={styles.content}>
-                    <div
-                      style={{
-                        margin: `0px ${windowWidth === 'small' ? 15 : 35}px`,
+            <TeamProvider>
+              <div style={isMobile ? styles.mobileContainer : styles.container}>
+                <div style={styles.scrollableContainer}>
+                  {activeTab === 'create' && (
+                    <CreateSection
+                      project={project}
+                      currentFileMetadata={fileMetadata}
+                      onOpenProject={onOpenRecentFile}
+                      storageProviders={storageProviders}
+                      storageProvider={storageProvider}
+                      resourceManagementProps={resourceManagementProps}
+                      onCreateEmptyProject={onCreateEmptyProject}
+                      onOpenLayout={onOpenLayout}
+                      onWillInstallExtension={onWillInstallExtension}
+                      onExtensionInstalled={onExtensionInstalled}
+                      onCloseAskAi={onCloseAskAi}
+                      onOpenAskAi={onOpenAskAi}
+                      closeProject={closeProject}
+                      games={games}
+                      onRefreshGames={fetchGames}
+                      onGameUpdated={onGameUpdated}
+                      gamesFetchingError={gamesFetchingError}
+                      openedGame={openedGame}
+                      setOpenedGameId={setOpenedGameId}
+                      currentTab={gameDetailsCurrentTab}
+                      setCurrentTab={setGameDetailsCurrentTab}
+                      canOpen={canOpen}
+                      onOpenProfile={onOpenProfile}
+                      askToCloseProject={askToCloseProject}
+                      onCreateProjectFromExample={onCreateProjectFromExample}
+                      onSelectExampleShortHeader={onSelectExampleShortHeader}
+                      onSelectPrivateGameTemplateListingData={
+                        onSelectPrivateGameTemplateListingData
+                      }
+                      i18n={i18n}
+                      onOpenNewProjectSetupDialog={onOpenNewProjectSetupDialog}
+                      onChooseProject={onChooseProject}
+                      onSaveProject={onSave}
+                      canSaveProject={canSave}
+                    />
+                  )}
+                  {activeTab === 'learn' && (
+                    <LearnSection
+                      selectInAppTutorial={selectInAppTutorial}
+                      onOpenTemplateFromTutorial={onOpenTemplateFromTutorial}
+                      onOpenTemplateFromCourseChapter={
+                        onOpenTemplateFromCourseChapter
+                      }
+                      selectedCategory={learnCategory}
+                      onSelectCategory={setLearnCategory}
+                      onSelectCourse={onSelectCourse}
+                      courses={courses}
+                      previewedCourse={premiumCourse}
+                      course={selectedCourse}
+                      getCourseChapters={getCourseChapters}
+                      onCompleteCourseTask={onCompleteTask}
+                      isCourseTaskCompleted={isTaskCompleted}
+                      getCourseChapterCompletion={getChapterCompletion}
+                      getCourseCompletion={getCourseCompletion}
+                      onBuyCourseWithCredits={onBuyCourseWithCredits}
+                      onBuyCourse={onBuyCourse}
+                      purchasingCourseListingData={purchasingCourseListingData}
+                      setPurchasingCourseListingData={
+                        setPurchasingCourseListingData
+                      }
+                      onOpenAskAi={onOpenAskAi}
+                      onOpenNewProjectSetupDialog={onOpenNewProjectSetupDialog}
+                      onSelectPrivateGameTemplateListingData={
+                        onSelectPrivateGameTemplateListingData
+                      }
+                      onSelectExampleShortHeader={onSelectExampleShortHeader}
+                      clearInitialBundleValues={() => {
+                        setInitialBundleUserFriendlySlugForLearn(null);
+                        setInitialBundleCategoryForLearn(null);
                       }}
-                    >
-                      <ResponsiveLineStackLayout justifyContent="space-between">
-                        <UserChip
-                          profile={authenticatedUser.profile}
-                          onClick={onOpenProfile}
-                          displayNotificationBadge={hasPendingNotifications(
-                            authenticatedUser
-                          )}
-                        />
-                        <ResponsiveLineStackLayout
-                          justifyContent="flex-end"
-                          noColumnMargin
-                        >
-                          {!project && (
-                            <FlatButton
-                              label={<Trans>Create a blank project</Trans>}
-                              onClick={() => {
-                                openPreCreationDialog(true);
-                              }}
-                              icon={<AddCircleOutline />}
-                            />
-                          )}
-                          {!project && canOpen && (
-                            <RaisedButtonWithSplitMenu
-                              label={<Trans>Open a project</Trans>}
-                              onClick={onOpen}
-                              primary
-                              buildMenuTemplate={
-                                buildRecentProjectFilesMenuTemplate
-                              }
-                            />
-                          )}
-                          {!!project && (
-                            <>
-                              <RaisedButton
-                                label={<Trans>Open Project Manager</Trans>}
-                                onClick={onOpenProjectManager}
-                                primary
-                              />
-                              <Spacer />
-                              <FlatButton
-                                label={<Trans>Close project</Trans>}
-                                onClick={() => {
-                                  onCloseProject();
-                                }}
-                              />
-                            </>
-                          )}
-                        </ResponsiveLineStackLayout>
-                      </ResponsiveLineStackLayout>
-                    </div>
-                    <Carousel
-                      title={<Trans>Start from an example</Trans>}
-                      items={examples ? prepareExamples(examples) : null}
-                      displayItemTitles
-                      onBrowseAllClick={onOpenExamples}
-                      error={
-                        exampleLoadingError && (
-                          <>
-                            <Trans>
-                              An error ocurred while loading examples.
-                            </Trans>{' '}
-                            <Trans>
-                              Please check your internet connection or try again
-                              later.
-                            </Trans>
-                          </>
-                        )
+                      initialBundleUserFriendlySlug={
+                        initialBundleUserFriendlySlugForLearn
                       }
+                      initialBundleCategory={initialBundleCategoryForLearn}
                     />
-                    {renderBetweenCarouselSpace()}
-                    <Carousel
-                      title={<Trans>Our latest tutorials</Trans>}
-                      items={tutorials ? prepareTutorials(tutorials) : null}
-                      displayItemTitles={false}
-                      onBrowseAllClick={onOpenTutorials}
-                      error={
-                        tutorialLoadingError && (
-                          <>
-                            <Trans>
-                              An error ocurred while loading tutorials.
-                            </Trans>{' '}
-                            <Trans>
-                              Please check your internet connection or try again
-                              later.
-                            </Trans>
-                          </>
-                        )
-                      }
+                  )}
+                  {activeTab === 'play' && (
+                    <PlaySection
+                      gamesPlatformFrameTools={gamesPlatformFrameTools}
                     />
-                    {renderBetweenCarouselSpace(betweenCarouselSpacerCount)}
-                    <Carousel
-                      title={<Trans>Games Showcase</Trans>}
-                      items={
-                        showcasedGames
-                          ? prepareShowcasedGames(showcasedGames)
-                          : null
+                  )}
+                  {activeTab === 'shop' && (
+                    <StoreSection
+                      project={project}
+                      resourceManagementProps={resourceManagementProps}
+                      onOpenPrivateGameTemplateListingData={
+                        onOpenPrivateGameTemplateListingData
                       }
-                      displayItemTitles
-                      onBrowseAllClick={onOpenGamesShowcase}
-                      error={
-                        showcaseLoadingError && (
-                          <>
-                            <Trans>
-                              An error ocurred while loading showcased games.
-                            </Trans>{' '}
-                            <Trans>
-                              Please check your internet connection or try again
-                              later.
-                            </Trans>
-                          </>
-                        )
-                      }
+                      onOpenProfile={onOpenProfile}
+                      onWillInstallExtension={onWillInstallExtension}
+                      onExtensionInstalled={onExtensionInstalled}
+                      onCourseOpen={(courseId: string) => {
+                        onSelectCourse(courseId);
+                        setActiveTab('learn');
+                      }}
+                      courses={courses}
+                      getCourseCompletion={getCourseCompletion}
                     />
-                  </div>
-                  <Line noMargin>
-                    <ResponsiveLineStackLayout
-                      alignItems="center"
-                      justifyContent="space-between"
-                      expand
-                    >
-                      <ResponsiveLineStackLayout
-                        noMargin
-                        justifyContent="center"
-                      >
-                        <FlatButton
-                          icon={<ForumIcon />}
-                          label={<Trans>Community Forums</Trans>}
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://forum.gdevelop-app.com'
-                            )
-                          }
-                        />
-                        <FlatButton
-                          icon={<HelpIcon />}
-                          label={<Trans>Help and documentation</Trans>}
-                          onClick={onOpenHelpFinder}
-                        />
-                      </ResponsiveLineStackLayout>
-                      <Line
-                        noMargin
-                        alignItems="center"
-                        justifyContent="center"
-                      >
-                        <IconButton
-                          className="icon-youtube"
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://www.youtube.com/c/GDevelopApp'
-                            )
-                          }
-                          tooltip={t`Tutorials on YouTube`}
-                        />
-                        <IconButton
-                          className="icon-discord"
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://discord.gg/gdevelop'
-                            )
-                          }
-                          tooltip={t`GDevelop on Discord`}
-                        />
-                        <IconButton
-                          className="icon-reddit"
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://www.reddit.com/r/gdevelop'
-                            )
-                          }
-                          tooltip={t`GDevelop on Reddit`}
-                        />
-                        <IconButton
-                          className="icon-twitter"
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://twitter.com/GDevelopApp'
-                            )
-                          }
-                          tooltip={t`GDevelop on Twitter`}
-                        />
-                        <IconButton
-                          className="icon-facebook"
-                          onClick={() =>
-                            Window.openExternalURL(
-                              'https://www.facebook.com/GDevelopApp'
-                            )
-                          }
-                          tooltip={t`GDevelop on Facebook`}
-                        />
-                        <FlatButton
-                          label={i18n.language}
-                          onClick={onOpenLanguageDialog}
-                          icon={<Language />}
-                        />
-                      </Line>
-                    </ResponsiveLineStackLayout>
-                  </Line>
+                  )}
+                  {activeTab === 'team-view' &&
+                    (canUseClassroomFeature(limits) ? (
+                      <TeamSection
+                        project={project}
+                        onOpenRecentFile={onOpenRecentFile}
+                        storageProviders={storageProviders}
+                        currentFileMetadata={fileMetadata}
+                        onOpenTeachingResources={() => {
+                          setLearnCategory('education-curriculum');
+                          setActiveTab('learn');
+                        }}
+                      />
+                    ) : (
+                      <EducationMarketingSection
+                        form={educationForm}
+                        onChangeForm={onChangeEducationForm}
+                        onSendForm={onSendEducationForm}
+                        formError={educationFormError}
+                        formStatus={educationFormStatus}
+                        onResetForm={onResetEducationForm}
+                        onLogin={onOpenLoginDialog}
+                      />
+                    ))}
                 </div>
-              </ScrollBackground>
-              {selectedShowcasedGame && (
-                <ShowcasedGameDialog
-                  open
-                  onClose={() => setSelectedShowcasedGame(null)}
-                  showcasedGame={selectedShowcasedGame}
+                <HomePageMenu
+                  activeTab={activeTab}
+                  setActiveTab={setActiveTab}
+                  onOpenPreferences={onOpenPreferences}
+                  onOpenAbout={onOpenAbout}
                 />
-              )}
-              {selectedExample && (
-                <ExampleDialog
-                  isOpening={isOpening}
-                  onClose={() => setSelectedExample(null)}
-                  exampleShortHeader={selectedExample}
-                  onOpen={() => {
-                    openPreCreationDialog(true);
-                  }}
-                />
-              )}
-              {preCreationDialogOpen && (
-                <ProjectPreCreationDialog
-                  open
-                  isOpening={isOpening}
-                  onClose={() => openPreCreationDialog(false)}
-                  onCreate={() => createProject(i18n)}
-                  onClickGenerateProjectName={() =>
-                    setNewProjectName(generateName())
-                  }
-                  outputPath={electron ? outputPath : undefined}
-                  onChangeOutputPath={electron ? setOutputPath : undefined}
-                  projectName={newProjectName}
-                  onChangeProjectName={setNewProjectName}
-                />
-              )}
-            </>
+              </div>
+              <ClaimableProductsDialogContainer isActive={isActive} />
+            </TeamProvider>
           )}
         </I18n>
       );
@@ -557,26 +762,53 @@ export const HomePage = React.memo<Props>(
 
 export const renderHomePageContainer = (
   props: RenderEditorContainerPropsWithRef
-) => (
+): React.MixedElement => (
+  // $FlowFixMe[incompatible-type]
   <HomePage
     ref={props.ref}
     project={props.project}
+    fileMetadata={props.fileMetadata}
     isActive={props.isActive}
     projectItemName={props.projectItemName}
     setToolbar={props.setToolbar}
+    setGamesPlatformFrameShown={props.setGamesPlatformFrameShown}
     canOpen={props.canOpen}
-    onOpen={props.onOpen}
+    onChooseProject={props.onChooseProject}
     onOpenRecentFile={props.onOpenRecentFile}
-    onOpenExamples={props.onOpenExamples}
-    onCreateFromExampleShortHeader={props.onCreateFromExampleShortHeader}
-    onCreateBlank={props.onCreateBlank}
-    onOpenProjectAfterCreation={props.onOpenProjectAfterCreation}
-    onOpenProjectManager={props.onOpenProjectManager}
-    onCloseProject={props.onCloseProject}
-    onOpenTutorials={props.onOpenTutorials}
-    onOpenGamesShowcase={props.onOpenGamesShowcase}
-    onOpenHelpFinder={props.onOpenHelpFinder}
+    onSelectExampleShortHeader={props.onSelectExampleShortHeader}
+    onSelectPrivateGameTemplateListingData={
+      props.onSelectPrivateGameTemplateListingData
+    }
+    onOpenPrivateGameTemplateListingData={
+      props.onOpenPrivateGameTemplateListingData
+    }
+    onOpenNewProjectSetupDialog={props.onOpenNewProjectSetupDialog}
+    onOpenVersionHistory={props.onOpenVersionHistory}
+    onOpenTemplateFromTutorial={props.onOpenTemplateFromTutorial}
+    onOpenTemplateFromCourseChapter={props.onOpenTemplateFromCourseChapter}
     onOpenLanguageDialog={props.onOpenLanguageDialog}
     onOpenProfile={props.onOpenProfile}
+    onCreateProjectFromExample={props.onCreateProjectFromExample}
+    onCreateEmptyProject={props.onCreateEmptyProject}
+    askToCloseProject={props.askToCloseProject}
+    closeProject={props.closeProject}
+    selectInAppTutorial={props.selectInAppTutorial}
+    onOpenPreferences={props.onOpenPreferences}
+    onOpenAbout={props.onOpenAbout}
+    onOpenAskAi={props.onOpenAskAi}
+    onCloseAskAi={props.onCloseAskAi}
+    onOpenLayout={props.onOpenLayout}
+    storageProviders={
+      (props.extraEditorProps && props.extraEditorProps.storageProviders) || []
+    }
+    storageProvider={props.storageProvider}
+    onSave={props.onSave}
+    canSave={props.canSave}
+    resourceManagementProps={props.resourceManagementProps}
+    gamesList={props.gamesList}
+    gamesPlatformFrameTools={props.gamesPlatformFrameTools}
+    onWillInstallExtension={props.onWillInstallExtension}
+    onExtensionInstalled={props.onExtensionInstalled}
+    gameEditorMode={props.gameEditorMode}
   />
 );

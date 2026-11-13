@@ -3,37 +3,94 @@
  *  2013-2016 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
-  /** Base parameters for gdjs.TextRuntimeObject */
+  /**
+   * Base parameters for gdjs.TextRuntimeObject
+   * @category Objects > Text
+   */
   export type TextObjectDataType = {
-    /** The size of the characters */
-    characterSize: number;
-    /** The font name */
-    font: string;
-    /** Is Bold? */
-    bold: boolean;
-    /** Is Italic? */
-    italic: boolean;
-    /** Is Underlined? */
-    underlined: boolean;
-    /** The text color in an RGB representation */
-    color: {
-      /** The Red level from 0 to 255 */
-      r: number;
-      /** The Green level from 0 to 255 */
-      g: number;
-      /** The Blue level from 0 to 255 */
-      b: number;
+    content: {
+      /** The size of the characters */
+      characterSize: number;
+      /** The font name */
+      font: string;
+      /** Is Bold? */
+      bold: boolean;
+      /** Is Italic? */
+      italic: boolean;
+      /** Is Underlined? */
+      underlined: boolean;
+      /** The text color in an RGB representation */
+      color: string;
+      /** The text of the object */
+      text: string;
+      textAlignment: string;
+      verticalTextAlignment: string;
+      /** The line height */
+      lineHeight: float;
+
+      isOutlineEnabled: boolean;
+      outlineThickness: float;
+      /** The outline color in an RGB representation */
+      outlineColor: string;
+      isShadowEnabled: boolean;
+      /** The shadow color in an RGB representation */
+      shadowColor: string;
+      shadowOpacity: float;
+      shadowDistance: float;
+      shadowAngle: float;
+      shadowBlurRadius: float;
     };
-    /** The text of the object */
-    string: string;
   };
 
+  /**
+   * @category Objects > Text
+   */
   export type TextObjectData = ObjectData & TextObjectDataType;
 
   /**
-   * Displays a text.
+   * @category Objects > Text
    */
-  export class TextRuntimeObject extends gdjs.RuntimeObject {
+  export type TextObjectNetworkSyncDataType = {
+    str: string;
+    o: float;
+    cs: number;
+    fn: string;
+    b: boolean;
+    i: boolean;
+    u: boolean;
+    c: number[];
+    scale: number;
+    ta: string;
+    vta: string;
+    wrap: boolean;
+    wrapw: float;
+    oena: boolean;
+    ot: float;
+    oc: number[];
+    sh: boolean;
+    shc: number[];
+    sho: float;
+    shd: float;
+    sha: float;
+    shb: float;
+    pad: integer;
+    lh: float;
+  };
+
+  /**
+   * @category Objects > Text
+   */
+  export type TextObjectNetworkSyncData = ObjectNetworkSyncData &
+    TextObjectNetworkSyncDataType;
+
+  /**
+   * Displays a text.
+   * @category Objects > Text
+   */
+  export class TextRuntimeObject
+    extends gdjs.RuntimeObject
+    implements gdjs.TextContainer, gdjs.OpacityHandler
+  {
     _characterSize: number;
     _fontName: string;
     _bold: boolean;
@@ -44,16 +101,25 @@ namespace gdjs {
     _gradient: Array<Array<integer>> = [];
     _gradientType: string = '';
     opacity: float = 255;
-    _textAlign: string = 'left';
+    _textAlign: string;
+    _verticalTextAlignment: string;
     _wrapping: boolean = false;
-    _wrappingWidth: float = 1;
-    _outlineThickness: number = 0;
-    _outlineColor: integer[] = [255, 255, 255];
-    _shadow: boolean = false;
-    _shadowColor: integer[] = [0, 0, 0];
-    _shadowDistance: number = 1;
-    _shadowBlur: integer = 1;
-    _shadowAngle: float = 0;
+    // A wrapping of 1 makes games crash on Firefox
+    _wrappingWidth: float = 100;
+
+    _isOutlineEnabled: boolean;
+    _outlineThickness: float;
+    _outlineColor: integer[];
+
+    _shadow: boolean;
+    _shadowColor: integer[];
+    _shadowOpacity: float;
+    _shadowDistance: float;
+    _shadowAngle: float;
+    _shadowBlur: float;
+
+    _lineHeight: float;
+
     _padding: integer = 5;
     _str: string;
     _renderer: gdjs.TextRuntimeObjectRenderer;
@@ -63,119 +129,277 @@ namespace gdjs {
     _scaleY: number = 1;
 
     /**
-     * @param runtimeScene The scene the object belongs to.
+     * @param instanceContainer The container the object belongs to.
      * @param textObjectData The initial properties of the object
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
-      textObjectData: TextObjectData
+      instanceContainer: gdjs.RuntimeInstanceContainer,
+      textObjectData: TextObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, textObjectData);
-      this._characterSize = Math.max(1, textObjectData.characterSize);
-      this._fontName = textObjectData.font;
-      this._bold = textObjectData.bold;
-      this._italic = textObjectData.italic;
-      this._underlined = textObjectData.underlined;
-      this._color = [
-        textObjectData.color.r,
-        textObjectData.color.g,
-        textObjectData.color.b,
-      ];
-      this._str = textObjectData.string;
-      this._renderer = new gdjs.TextRuntimeObjectRenderer(this, runtimeScene);
+      super(instanceContainer, textObjectData, instanceData);
+      const content = textObjectData.content;
+      this._characterSize = Math.max(1, content.characterSize);
+      this._fontName = content.font;
+      this._bold = content.bold;
+      this._italic = content.italic;
+      this._underlined = content.underlined;
+      this._color = gdjs.rgbOrHexToRGBColor(content.color);
+      this._str = content.text;
+      this._textAlign = content.textAlignment || 'left';
+      this._verticalTextAlignment = content.verticalTextAlignment || 'top';
+
+      this._isOutlineEnabled = content.isOutlineEnabled;
+      this._outlineThickness = content.outlineThickness;
+      this._outlineColor = gdjs.rgbOrHexToRGBColor(content.outlineColor);
+
+      this._shadow = content.isShadowEnabled;
+      this._shadowColor = gdjs.rgbOrHexToRGBColor(content.shadowColor);
+      this._shadowOpacity = content.shadowOpacity;
+      this._shadowDistance = content.shadowDistance;
+      this._shadowBlur = content.shadowBlurRadius;
+      this._shadowAngle = content.shadowAngle;
+      this._lineHeight = content.lineHeight || 0;
+
+      this._renderer = new gdjs.TextRuntimeObjectRenderer(
+        this,
+        instanceContainer
+      );
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
       this.onCreated();
     }
 
-    updateFromObjectData(
+    override updateFromObjectData(
       oldObjectData: TextObjectData,
       newObjectData: TextObjectData
     ): boolean {
-      if (oldObjectData.characterSize !== newObjectData.characterSize) {
-        this.setCharacterSize(newObjectData.characterSize);
+      const oldContent = oldObjectData.content;
+      const newContent = newObjectData.content;
+      if (oldContent.characterSize !== newContent.characterSize) {
+        this.setCharacterSize(newContent.characterSize);
       }
-      if (oldObjectData.font !== newObjectData.font) {
-        this.setFontName(newObjectData.font);
+      if (oldContent.font !== newContent.font) {
+        this.setFontName(newContent.font);
       }
-      if (oldObjectData.bold !== newObjectData.bold) {
-        this.setBold(newObjectData.bold);
+      if (oldContent.bold !== newContent.bold) {
+        this.setBold(newContent.bold);
       }
-      if (oldObjectData.italic !== newObjectData.italic) {
-        this.setItalic(newObjectData.italic);
+      if (oldContent.italic !== newContent.italic) {
+        this.setItalic(newContent.italic);
+      }
+      if (oldContent.color !== newContent.color) {
+        this.setColor(newContent.color);
+      }
+      if (oldContent.text !== newContent.text) {
+        this.setText(newContent.text);
+      }
+      if (oldContent.textAlignment !== newContent.textAlignment) {
+        this.setTextAlignment(newContent.textAlignment);
       }
       if (
-        oldObjectData.color.r !== newObjectData.color.r ||
-        oldObjectData.color.g !== newObjectData.color.g ||
-        oldObjectData.color.b !== newObjectData.color.b
+        oldContent.verticalTextAlignment !== newContent.verticalTextAlignment
       ) {
-        this.setColor(
-          '' +
-            newObjectData.color.r +
-            ';' +
-            newObjectData.color.g +
-            ';' +
-            newObjectData.color.b
-        );
+        this.setVerticalTextAlignment(newContent.verticalTextAlignment);
       }
-      if (oldObjectData.string !== newObjectData.string) {
-        this.setString(newObjectData.string);
+      if (oldContent.isOutlineEnabled !== newContent.isOutlineEnabled) {
+        this.setOutlineEnabled(newContent.isOutlineEnabled);
       }
-      if (oldObjectData.underlined !== newObjectData.underlined) {
+      if (oldContent.outlineThickness !== newContent.outlineThickness) {
+        this.setOutlineThickness(newContent.outlineThickness);
+      }
+      if (oldContent.outlineColor !== newContent.outlineColor) {
+        this.setOutlineColor(newContent.outlineColor);
+      }
+      if (oldContent.isShadowEnabled !== newContent.isShadowEnabled) {
+        this.showShadow(newContent.isShadowEnabled);
+      }
+      if (oldContent.shadowColor !== newContent.shadowColor) {
+        this.setShadowColor(newContent.shadowColor);
+      }
+      if (oldContent.shadowOpacity !== newContent.shadowOpacity) {
+        this.setShadowOpacity(newContent.shadowOpacity);
+      }
+      if (oldContent.shadowDistance !== newContent.shadowDistance) {
+        this.setShadowDistance(newContent.shadowDistance);
+      }
+      if (oldContent.shadowAngle !== newContent.shadowAngle) {
+        this.setShadowAngle(newContent.shadowAngle);
+      }
+      if (oldContent.shadowBlurRadius !== newContent.shadowBlurRadius) {
+        this.setShadowBlurRadius(newContent.shadowBlurRadius);
+      }
+      if ((oldContent.lineHeight || 0) !== (newContent.lineHeight || 0)) {
+        this.setLineHeight(newContent.lineHeight || 0);
+      }
+      if (oldContent.underlined !== newContent.underlined) {
         return false;
       }
+
       return true;
     }
 
-    getRendererObject() {
+    override getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): TextObjectNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        str: this._str,
+        o: this.opacity,
+        cs: this._characterSize,
+        fn: this._fontName,
+        b: this._bold,
+        i: this._italic,
+        u: this._underlined,
+        c: this._color,
+        scale: this.getScale(),
+        ta: this._textAlign,
+        vta: this._verticalTextAlignment,
+        wrap: this._wrapping,
+        wrapw: this._wrappingWidth,
+        oena: this._isOutlineEnabled,
+        ot: this._outlineThickness,
+        oc: this._outlineColor,
+        sh: this._shadow,
+        shc: this._shadowColor,
+        sho: this._shadowOpacity,
+        shd: this._shadowDistance,
+        sha: this._shadowAngle,
+        shb: this._shadowBlur,
+        lh: this._lineHeight,
+        pad: this._padding,
+      };
+    }
+
+    override updateFromNetworkSyncData(
+      networkSyncData: TextObjectNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+      if (networkSyncData.str !== undefined) {
+        this.setText(networkSyncData.str);
+      }
+      if (networkSyncData.o !== undefined) {
+        this.setOpacity(networkSyncData.o);
+      }
+      if (networkSyncData.cs !== undefined) {
+        this.setCharacterSize(networkSyncData.cs);
+      }
+      if (networkSyncData.fn !== undefined) {
+        this.setFontName(networkSyncData.fn);
+      }
+      if (networkSyncData.b !== undefined) {
+        this.setBold(networkSyncData.b);
+      }
+      if (networkSyncData.i !== undefined) {
+        this.setItalic(networkSyncData.i);
+      }
+      if (networkSyncData.u !== undefined) {
+        this._underlined = networkSyncData.u;
+      }
+      if (networkSyncData.c !== undefined) {
+        this._color = networkSyncData.c;
+      }
+      if (networkSyncData.scale !== undefined) {
+        this.setScale(networkSyncData.scale);
+      }
+      if (networkSyncData.ta !== undefined) {
+        this.setTextAlignment(networkSyncData.ta);
+      }
+      if (networkSyncData.vta !== undefined) {
+        this.setVerticalTextAlignment(networkSyncData.vta);
+      }
+      if (networkSyncData.wrap !== undefined) {
+        this.setWrapping(networkSyncData.wrap);
+      }
+      if (networkSyncData.wrapw !== undefined) {
+        this.setWrappingWidth(networkSyncData.wrapw);
+      }
+      if (networkSyncData.oena !== undefined) {
+        this.setOutlineEnabled(networkSyncData.oena);
+      }
+      if (networkSyncData.ot !== undefined) {
+        this.setOutlineThickness(networkSyncData.ot);
+      }
+      if (networkSyncData.oc !== undefined) {
+        this._outlineColor = networkSyncData.oc;
+      }
+      if (networkSyncData.sh !== undefined) {
+        this.showShadow(networkSyncData.sh);
+      }
+      if (networkSyncData.shc !== undefined) {
+        this._shadowColor = networkSyncData.shc;
+      }
+      if (networkSyncData.sho !== undefined) {
+        this.setShadowOpacity(networkSyncData.sho);
+      }
+      if (networkSyncData.shd !== undefined) {
+        this.setShadowDistance(networkSyncData.shd);
+      }
+      if (networkSyncData.sha !== undefined) {
+        this.setShadowAngle(networkSyncData.sha);
+      }
+      if (networkSyncData.shb !== undefined) {
+        this.setShadowBlurRadius(networkSyncData.shb);
+      }
+      if (networkSyncData.lh !== undefined) {
+        this.setLineHeight(networkSyncData.lh);
+      }
+      if (networkSyncData.pad !== undefined) {
+        this.setPadding(networkSyncData.pad);
+      }
+    }
+
+    override getRendererObject() {
       return this._renderer.getRendererObject();
     }
 
-    update(runtimeScene: gdjs.RuntimeScene): void {
+    override updatePreRender(
+      instanceContainer: gdjs.RuntimeInstanceContainer
+    ): void {
       this._renderer.ensureUpToDate();
     }
 
-    /**
-     * Initialize the extra parameters that could be set for an instance.
-     */
-    extraInitializationFromInitialInstance(initialInstanceData: InstanceData) {
+    override onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
+    }
+
+    override extraInitializationFromInitialInstance(
+      initialInstanceData: InstanceData
+    ) {
       if (initialInstanceData.customSize) {
-        this.setWrapping(true);
         this.setWrappingWidth(initialInstanceData.width);
+        this.setWrapping(true);
       } else {
         this.setWrapping(false);
       }
+      this.setOpacity(
+        initialInstanceData.opacity === undefined
+          ? 255
+          : initialInstanceData.opacity
+      );
     }
 
     /**
      * Update the rendered object position.
      */
     private _updateTextPosition() {
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
       this._renderer.updatePosition();
     }
 
-    /**
-     * Set object position on X axis.
-     */
-    setX(x): void {
+    override setX(x: float): void {
       super.setX(x);
       this._updateTextPosition();
     }
 
-    /**
-     * Set object position on Y axis.
-     */
-    setY(y): void {
+    override setY(y: float): void {
       super.setY(y);
       this._updateTextPosition();
     }
 
-    /**
-     * Set the angle of the object.
-     * @param angle The new angle of the object
-     */
-    setAngle(angle: float): void {
+    override setAngle(angle: float): void {
       super.setAngle(angle);
       this._renderer.updateAngle();
     }
@@ -183,7 +407,7 @@ namespace gdjs {
     /**
      * Set object opacity.
      */
-    setOpacity(opacity): void {
+    setOpacity(opacity: float): void {
       if (opacity < 0) {
         opacity = 0;
       }
@@ -203,20 +427,37 @@ namespace gdjs {
 
     /**
      * Get the string displayed by the object.
+     * @deprecated use `getText` instead
      */
     getString(): string {
+      return this.getText();
+    }
+
+    /**
+     * Set the string displayed by the object.
+     * @param text The new text
+     * @deprecated use `setText` instead
+     */
+    setString(text: string): void {
+      this.setText(text);
+    }
+
+    /**
+     * Get the string displayed by the object.
+     */
+    getText(): string {
       return this._str;
     }
 
     /**
      * Set the string displayed by the object.
-     * @param str The new text
+     * @param text The new text
      */
-    setString(str: string): void {
-      if (str === this._str) {
+    setText(text: string): void {
+      if (text === this._str) {
         return;
       }
-      this._str = str;
+      this._str = text;
       this._renderer.updateString();
       this._updateTextPosition();
     }
@@ -241,6 +482,22 @@ namespace gdjs {
     }
 
     /**
+     * Get the line height of the text.
+     */
+    getLineHeight(): float {
+      return this._lineHeight;
+    }
+
+    /**
+     * Set the line height of the text.
+     * @param value The new line height for the text.
+     */
+    setLineHeight(value: float): void {
+      this._lineHeight = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
      * Set the name of the resource to use for the font.
      * @param fontResourceName The name of the font resource.
      */
@@ -260,7 +517,7 @@ namespace gdjs {
      * Set bold for the object text.
      * @param enable {boolean} true to have a bold text, false otherwise.
      */
-    setBold(enable): void {
+    setBold(enable: boolean): void {
       this._bold = enable;
       this._renderer.updateStyle();
     }
@@ -276,7 +533,7 @@ namespace gdjs {
      * Set italic for the object text.
      * @param enable {boolean} true to have an italic text, false otherwise.
      */
-    setItalic(enable): void {
+    setItalic(enable: boolean): void {
       this._italic = enable;
       this._renderer.updateStyle();
     }
@@ -284,22 +541,36 @@ namespace gdjs {
     /**
      * Get width of the text.
      */
-    getWidth(): float {
-      return this._renderer.getWidth();
+    override getWidth(): float {
+      return this._wrapping ? this._wrappingWidth : this._renderer.getWidth();
     }
 
     /**
      * Get height of the text.
      */
-    getHeight(): float {
+    override getHeight(): float {
       return this._renderer.getHeight();
     }
 
     /**
-     * Get scale of the text.
+     * Get the scale of the object (or the arithmetic mean of the X and Y scale in case they are different).
+     *
+     * @return the scale of the object (or the arithmetic mean of the X and Y scale in case they are different).
+     * @deprecated Use `getScale` instead.
+     */
+    getScaleMean(): float {
+      return (Math.abs(this._scaleX) + Math.abs(this._scaleY)) / 2.0;
+    }
+
+    /**
+     * Get the scale of the object (or the geometric mean of the X and Y scale in case they are different).
+     *
+     * @return the scale of the object (or the geometric mean of the X and Y scale in case they are different).
      */
     getScale(): float {
-      return (Math.abs(this._scaleX) + Math.abs(this._scaleY)) / 2.0;
+      const scaleX = Math.abs(this._scaleX);
+      const scaleY = Math.abs(this._scaleY);
+      return scaleX === scaleY ? scaleX : Math.sqrt(scaleX * scaleY);
     }
 
     /**
@@ -326,7 +597,7 @@ namespace gdjs {
       this._scaleX = newScale;
       this._scaleY = newScale;
       this._renderer.setScale(newScale);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -338,7 +609,7 @@ namespace gdjs {
 
       this._scaleX = newScale;
       this._renderer.setScaleX(newScale);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -350,21 +621,15 @@ namespace gdjs {
 
       this._scaleY = newScale;
       this._renderer.setScaleY(newScale);
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
      * Change the text color.
-     * @param color color as a "R;G;B" string, for example: "255;0;0"
+     * @param rgbOrHexColor color as a "R;G;B" string, for example: "255;0;0"
      */
-    setColor(str: string): void {
-      const color = str.split(';');
-      if (color.length < 3) {
-        return;
-      }
-      this._color[0] = parseInt(color[0], 10);
-      this._color[1] = parseInt(color[1], 10);
-      this._color[2] = parseInt(color[2], 10);
+    setColor(rgbOrHexColor: string): void {
+      this._color = gdjs.rgbOrHexToRGBColor(rgbOrHexColor);
       this._useGradient = false;
       this._renderer.updateStyle();
     }
@@ -375,6 +640,23 @@ namespace gdjs {
      */
     getColor(): string {
       return this._color[0] + ';' + this._color[1] + ';' + this._color[2];
+    }
+
+    /**
+     * Set the text alignment on Y axis for multiline text objects.
+     * @param alignment The text alignment.
+     */
+    setVerticalTextAlignment(alignment: string): void {
+      this._verticalTextAlignment = alignment;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the text alignment on Y axis of text object.
+     * @return The text alignment.
+     */
+    getVerticalTextAlignment(): string {
+      return this._verticalTextAlignment;
     }
 
     /**
@@ -410,7 +692,7 @@ namespace gdjs {
 
       this._wrapping = enable;
       this._renderer.updateStyle();
-      this.hitBoxesDirty = true;
+      this.invalidateHitboxes();
     }
 
     /**
@@ -428,54 +710,188 @@ namespace gdjs {
       if (width <= 1) {
         width = 1;
       }
-      if (this._wrappingWidth === width) return;
-
+      if (this._wrappingWidth === width) {
+        return;
+      }
       this._wrappingWidth = width;
-      this._renderer.updateStyle();
-      this.hitBoxesDirty = true;
+
+      if (this._wrapping) {
+        this._renderer.updateStyle();
+        this.invalidateHitboxes();
+      }
+    }
+
+    override setWidth(width: float): void {
+      this.setWrappingWidth(width);
+    }
+
+    override getDrawableY(): float {
+      return (
+        this.getY() -
+        (this._verticalTextAlignment === 'center'
+          ? this.getHeight() / 2
+          : this._verticalTextAlignment === 'bottom'
+            ? this.getHeight()
+            : 0)
+      );
     }
 
     /**
      * Set the outline for the text object.
-     * @param str color as a "R;G;B" string, for example: "255;0;0"
+     * @param rgbOrHexColor color as a "R;G;B" string, for example: "255;0;0"
      * @param thickness thickness of the outline (0 = disabled)
+     * @deprecated Prefer independent setters.
      */
-    setOutline(str: string, thickness: number): void {
-      const color = str.split(';');
-      if (color.length < 3) {
-        return;
-      }
-      this._outlineColor[0] = parseInt(color[0], 10);
-      this._outlineColor[1] = parseInt(color[1], 10);
-      this._outlineColor[2] = parseInt(color[2], 10);
+    setOutline(rgbOrHexColor: string, thickness: number): void {
+      this._outlineColor = gdjs.rgbOrHexToRGBColor(rgbOrHexColor);
       this._outlineThickness = thickness;
+      this._renderer.updateStyle();
+    }
+
+    isOutlineEnabled(): boolean {
+      return this._isOutlineEnabled;
+    }
+
+    setOutlineEnabled(enable: boolean): void {
+      this._isOutlineEnabled = enable;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the outline thickness of the text object.
+     * @return the outline thickness
+     */
+    getOutlineThickness(): number {
+      return this._outlineThickness;
+    }
+
+    /**
+     * Set the outline thickness of the text object.
+     * @param value the outline thickness
+     */
+    setOutlineThickness(value: float): void {
+      this._outlineThickness = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Set the shadow color of the text object.
+     * @param color the shadow color as a "R;G;B" string, for example: "255;0;0"
+     */
+    setOutlineColor(color: string): void {
+      this._outlineColor = gdjs.rgbOrHexToRGBColor(color);
       this._renderer.updateStyle();
     }
 
     /**
      * Set the shadow for the text object.
-     * @param str color as a "R;G;B" string, for example: "255;0;0"
+     * @param rgbOrHexColor color as a "R;G;B" string, for example: "255;0;0"
      * @param distance distance between the shadow and the text, in pixels.
-     * @param blur amout of shadow blur, in pixels.
+     * @param blur amount of shadow blur, in pixels.
      * @param angle shadow offset direction, in degrees.
+     * @deprecated Prefer independent setters.
      */
     setShadow(
-      str: string,
+      rgbOrHexColor: string,
       distance: number,
       blur: integer,
       angle: float
     ): void {
-      const color = str.split(';');
-      if (color.length < 3) {
-        return;
-      }
-      this._shadowColor[0] = parseInt(color[0], 10);
-      this._shadowColor[1] = parseInt(color[1], 10);
-      this._shadowColor[2] = parseInt(color[2], 10);
+      this._shadowColor = gdjs.rgbOrHexToRGBColor(rgbOrHexColor);
       this._shadowDistance = distance;
       this._shadowBlur = blur;
       this._shadowAngle = angle;
       this._shadow = true;
+      this._renderer.updateStyle();
+    }
+
+    isShadowEnabled(): boolean {
+      return this._shadow;
+    }
+
+    /**
+     * Show the shadow of the text object.
+     * @param enable true to show the shadow, false to hide it
+     */
+    showShadow(enable: boolean): void {
+      this._shadow = enable;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the shadow opacity of the text object.
+     * @return the opacity (0 - 255)
+     */
+    getShadowOpacity(): number {
+      return this._shadowOpacity;
+    }
+
+    /**
+     * Set the shadow opacity of the text object.
+     * @param value the opacity (0 - 255)
+     */
+    setShadowOpacity(value: float): void {
+      this._shadowOpacity = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the shadow offset distance of the text object.
+     * @return the shadow offset distance
+     */
+    getShadowDistance(): number {
+      return this._shadowDistance;
+    }
+
+    /**
+     * Set the shadow offset distance of the text object.
+     * @param value the shadow offset distance
+     */
+    setShadowDistance(value: float): void {
+      this._shadowDistance = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the shadow offset angle of the text object.
+     * @return the shadow offset angle in degrees
+     */
+    getShadowAngle(): number {
+      return this._shadowAngle;
+    }
+
+    /**
+     * Set the shadow offset angle of the text object.
+     * @param value the shadow offset angle in degrees
+     */
+    setShadowAngle(value: float): void {
+      this._shadowAngle = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Get the shadow blur radius of the text object.
+     * @return the shadow blur radius
+     */
+    getShadowBlurRadius(): number {
+      return this._shadowBlur;
+    }
+
+    /**
+     * Set the shadow blur radius of the text object.
+     * @param value the shadow blur radius
+     */
+    setShadowBlurRadius(value: float): void {
+      this._shadowBlur = value;
+      this._renderer.updateStyle();
+    }
+
+    /**
+     * Set the shadow color of the text object.
+     * @param color the shadow color as a "R;G;B" string, for example: "255;0;0"
+     */
+    setShadowColor(color: string): void {
+      this._shadowColor = gdjs.rgbOrHexToRGBColor(color);
       this._renderer.updateStyle();
     }
 
@@ -494,50 +910,21 @@ namespace gdjs {
       strThirdColor: string,
       strFourthColor: string
     ): void {
-      const colorFirst = strFirstColor.split(';');
-      const colorSecond = strSecondColor.split(';');
-      const colorThird = strThirdColor.split(';');
-      const colorFourth = strFourthColor.split(';');
       this._gradient = [];
-      if (colorFirst.length == 3) {
-        this._gradient.push([
-          parseInt(colorFirst[0], 10),
-          parseInt(colorFirst[1], 10),
-          parseInt(colorFirst[2], 10),
-        ]);
+      if (strFirstColor) {
+        this._gradient.push(gdjs.rgbOrHexToRGBColor(strFirstColor));
       }
-      if (colorSecond.length == 3) {
-        this._gradient.push([
-          parseInt(colorSecond[0], 10),
-          parseInt(colorSecond[1], 10),
-          parseInt(colorSecond[2], 10),
-        ]);
+      if (strSecondColor) {
+        this._gradient.push(gdjs.rgbOrHexToRGBColor(strSecondColor));
       }
-      if (colorThird.length == 3) {
-        this._gradient.push([
-          parseInt(colorThird[0], 10),
-          parseInt(colorThird[1], 10),
-          parseInt(colorThird[2], 10),
-        ]);
+      if (strThirdColor) {
+        this._gradient.push(gdjs.rgbOrHexToRGBColor(strThirdColor));
       }
-      if (colorFourth.length == 3) {
-        this._gradient.push([
-          parseInt(colorFourth[0], 10),
-          parseInt(colorFourth[1], 10),
-          parseInt(colorFourth[2], 10),
-        ]);
+      if (strFourthColor) {
+        this._gradient.push(gdjs.rgbOrHexToRGBColor(strFourthColor));
       }
       this._gradientType = strGradientType;
       this._useGradient = this._gradient.length > 1 ? true : false;
-      this._renderer.updateStyle();
-    }
-
-    /**
-     * Show the shadow of the text object.
-     * @param enable true to show the shadow, false to hide it
-     */
-    showShadow(enable: boolean): void {
-      this._shadow = enable;
       this._renderer.updateStyle();
     }
 

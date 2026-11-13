@@ -7,16 +7,17 @@ const gd: libGDevelop = global.gd;
 export default class InstancesSelection {
   selection: Array<gdInitialInstance> = [];
 
-  hasSelectedInstances() {
+  hasSelectedInstances(): any {
     return !!this.getSelectedInstances().length;
   }
 
-  getSelectedInstances() {
+  getSelectedInstances(): Array<gdInitialInstance> {
     return this.selection;
   }
 
-  isInstanceSelected(instance: gdInitialInstance) {
+  isInstanceSelected(instance: gdInitialInstance): any {
     for (var i = 0; i < this.selection.length; i++) {
+      // $FlowFixMe[incompatible-exact]
       if (gd.compare(this.selection[i], instance)) return true;
     }
 
@@ -27,34 +28,52 @@ export default class InstancesSelection {
     this.selection.length = 0;
   }
 
-  selectInstance(
+  selectInstance({
+    instance,
+    multiSelect,
+    layersLocks = null,
+    ignoreSeal = false,
+  }: {|
     instance: gdInitialInstance,
-    multiselect: boolean,
-    layersVisibility: ?{ [string]: boolean } = null
-  ) {
+    multiSelect: boolean,
+    layersLocks: ?{ [string]: boolean },
+    ignoreSeal?: boolean,
+  |}) {
+    if (!ignoreSeal && instance.isSealed()) return;
     if (this.isInstanceSelected(instance)) {
-      if (multiselect) this.unselectInstance(instance);
+      if (multiSelect) this.unselectInstance(instance);
 
       return;
     }
 
-    if (!multiselect) this.clearSelection();
+    if (!multiSelect) this.clearSelection();
 
-    if (!layersVisibility || layersVisibility[instance.getLayer()]) {
+    if (!layersLocks || !layersLocks[instance.getLayer()]) {
       this.selection.push(instance);
     }
   }
 
-  selectInstances(
+  selectInstances({
+    instances,
+    multiSelect,
+    layersLocks = null,
+    ignoreSeal = false,
+  }: {|
     instances: Array<gdInitialInstance>,
-    multiselect: boolean,
-    layersVisibility: ?{ [string]: boolean } = null
-  ) {
-    if (!multiselect) this.clearSelection();
+    multiSelect: boolean,
+    layersLocks: ?{ [string]: boolean },
+    ignoreSeal?: boolean,
+  |}) {
+    if (!multiSelect) this.clearSelection();
 
-    instances.forEach(instance =>
-      this.selectInstance(instance, true, layersVisibility)
-    );
+    instances.forEach(instance => {
+      this.selectInstance({
+        instance,
+        multiSelect: true,
+        layersLocks,
+        ignoreSeal,
+      });
+    });
   }
 
   unselectInstance(instance: gdInitialInstance) {
@@ -81,6 +100,28 @@ export default class InstancesSelection {
   unselectInstancesOnLayer(layerName: string) {
     for (let i = 0; i < this.selection.length; ) {
       if (this.selection[i].getLayer() === layerName) {
+        this.selection.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  cleanNonExistingInstances(instancesContainer: gdInitialInstancesContainer) {
+    const allExistingInstancePointers = new Set<number>();
+    const functor = new gd.InitialInstanceJSFunctor();
+    // $FlowFixMe[incompatible-type] - typing is not correct.
+    // $FlowFixMe[cannot-write]
+    functor.invoke = (instancePtr: number) => {
+      allExistingInstancePointers.add(instancePtr);
+    };
+    // $FlowFixMe[incompatible-type]
+    instancesContainer.iterateOverInstances(functor);
+    functor.delete();
+
+    for (let i = 0; i < this.selection.length; ) {
+      const instance = this.selection[i];
+      if (!allExistingInstancePointers.has(instance.ptr)) {
         this.selection.splice(i, 1);
       } else {
         i++;

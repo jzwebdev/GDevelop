@@ -1,56 +1,96 @@
+// @flow
 import { mapVector, mapFor } from '../../../../Utils/MapFor';
 import every from 'lodash/every';
-const gd = global.gd;
+
+const gd: libGDevelop = global.gd;
 
 /**
  * Return the specified animation, direction and sprite for a SpriteObject.
  * Returns null for these elements if the specified choice is not valid.
- * @param {*} object
- * @param {*} animationIndex
- * @param {*} directionIndex
- * @param {*} spriteIndex
  */
 export const getCurrentElements = (
-  object,
-  animationIndex,
-  directionIndex,
-  spriteIndex
-) => {
-  const hasValidAnimation = animationIndex < object.getAnimationsCount();
+  animations: gdSpriteAnimationList,
+  animationIndex: number,
+  directionIndex: number,
+  spriteIndex: number
+):
+  | { animation: null, direction: null, sprite: null }
+  | { animation: gdAnimation, direction: null, sprite: null }
+  | {
+      animation: gdAnimation,
+      direction: gdDirection,
+      sprite: gdSprite | null,
+    } => {
+  const hasValidAnimation = animationIndex < animations.getAnimationsCount();
   const animation = hasValidAnimation
-    ? object.getAnimation(animationIndex)
+    ? animations.getAnimation(animationIndex)
     : null;
-  const hasValidDirection =
-    !!animation && directionIndex < animation.getDirectionsCount();
+  if (!animation) {
+    return {
+      animation: null,
+      direction: null,
+      sprite: null,
+    };
+  }
+
+  const hasValidDirection = directionIndex < animation.getDirectionsCount();
   const direction = hasValidDirection
     ? animation.getDirection(directionIndex)
     : null;
-  const hasValidSprite =
-    !!direction && spriteIndex < direction.getSpritesCount();
+  if (!direction) {
+    return {
+      animation,
+      direction: null,
+      sprite: null,
+    };
+  }
+
+  const hasValidSprite = spriteIndex < direction.getSpritesCount();
   const sprite = hasValidSprite ? direction.getSprite(spriteIndex) : null;
 
   return {
-    hasValidAnimation,
     animation,
-    hasValidDirection,
     direction,
-    hasValidSprite,
     sprite,
   };
 };
 
-/**
- * Return all the point names
- * @param {*} object
- */
-export const getAllPointNames = object => {
-  const allPointNames = new Set();
+export const getTotalSpritesCount = (
+  animations: gdSpriteAnimationList
+): number => {
+  let totalSpritesCount = 0;
   for (
     let animationIndex = 0;
-    animationIndex < object.getAnimationsCount();
+    animationIndex < animations.getAnimationsCount();
     animationIndex++
   ) {
-    const animation = object.getAnimation(animationIndex);
+    const animation = animations.getAnimation(animationIndex);
+    for (
+      let directionIndex = 0;
+      directionIndex < animation.getDirectionsCount();
+      directionIndex++
+    ) {
+      const direction = animation.getDirection(directionIndex);
+      totalSpritesCount += direction.getSpritesCount();
+    }
+  }
+
+  return totalSpritesCount;
+};
+
+/**
+ * Return all the point names
+ */
+export const getAllPointNames = (
+  animations: gdSpriteAnimationList
+): Array<any> => {
+  const allPointNames = new Set<string>();
+  for (
+    let animationIndex = 0;
+    animationIndex < animations.getAnimationsCount();
+    animationIndex++
+  ) {
+    const animation = animations.getAnimation(animationIndex);
     for (
       let directionIndex = 0;
       directionIndex < animation.getDirectionsCount();
@@ -75,13 +115,19 @@ export const getAllPointNames = object => {
   return [...allPointNames];
 };
 
-export const copyPoint = (originalPoint, destinationPoint) => {
+export const copyPoint = (
+  originalPoint: gdPoint,
+  destinationPoint: gdPoint
+) => {
   destinationPoint.setX(originalPoint.getX());
   destinationPoint.setY(originalPoint.getY());
   destinationPoint.setName(originalPoint.getName());
 };
 
-export const copySpritePoints = (originalSprite, destinationSprite) => {
+export const copySpritePoints = (
+  originalSprite: gdSprite,
+  destinationSprite: gdSprite
+) => {
   if (originalSprite.ptr === destinationSprite.ptr) return;
 
   copyPoint(originalSprite.getCenter(), destinationSprite.getCenter());
@@ -96,7 +142,10 @@ export const copySpritePoints = (originalSprite, destinationSprite) => {
   });
 };
 
-export const copyAnimationsSpritePoints = (originalSprite, animation) => {
+export const copyAnimationsSpritePoints = (
+  originalSprite: gdSprite,
+  animation: gdAnimation
+) => {
   mapFor(0, animation.getDirectionsCount(), i => {
     const direction = animation.getDirection(i);
 
@@ -107,7 +156,10 @@ export const copyAnimationsSpritePoints = (originalSprite, animation) => {
   });
 };
 
-export const isSamePoint = (point1, point2) => {
+export const isSamePoint = (
+  point1: gdPoint,
+  point2: gdPoint
+): false | boolean => {
   return (
     point1.getX() === point2.getX() &&
     point1.getY() === point2.getY() &&
@@ -115,7 +167,10 @@ export const isSamePoint = (point1, point2) => {
   );
 };
 
-export const haveSamePoints = (sprite1, sprite2) => {
+export const haveSamePoints = (
+  sprite1: gdSprite,
+  sprite2: gdSprite
+): any | boolean => {
   if (!isSamePoint(sprite1.getCenter(), sprite2.getCenter())) return false;
   if (!isSamePoint(sprite1.getOrigin(), sprite2.getOrigin())) return false;
   if (sprite1.isDefaultCenterPoint() !== sprite2.isDefaultCenterPoint())
@@ -140,9 +195,9 @@ export const haveSamePoints = (sprite1, sprite2) => {
 };
 
 export const allDirectionSpritesHaveSamePointsAs = (
-  originalSprite,
-  direction
-) => {
+  originalSprite: gdSprite,
+  direction: gdDirection
+): any => {
   return every(
     mapFor(0, direction.getSpritesCount(), j => {
       const sprite = direction.getSprite(j);
@@ -151,7 +206,10 @@ export const allDirectionSpritesHaveSamePointsAs = (
   );
 };
 
-export const allSpritesHaveSamePointsAs = (originalSprite, animation) => {
+export const allAnimationSpritesHaveSamePointsAs = (
+  originalSprite: gdSprite,
+  animation: gdAnimation
+): any => {
   return every(
     mapFor(0, animation.getDirectionsCount(), i => {
       const direction = animation.getDirection(i);
@@ -160,11 +218,26 @@ export const allSpritesHaveSamePointsAs = (originalSprite, animation) => {
   );
 };
 
-export const copySpritePolygons = (originalSprite, destinationSprite) => {
+export const allObjectSpritesHaveSamePointsAs = (
+  originalSprite: gdSprite,
+  animations: gdSpriteAnimationList
+): any => {
+  return every(
+    mapFor(0, animations.getAnimationsCount(), i => {
+      const animation = animations.getAnimation(i);
+      return allAnimationSpritesHaveSamePointsAs(originalSprite, animation);
+    })
+  );
+};
+
+export const copySpritePolygons = (
+  originalSprite: gdSprite,
+  destinationSprite: gdSprite
+) => {
   if (originalSprite.ptr === destinationSprite.ptr) return;
 
-  destinationSprite.setCollisionMaskAutomatic(
-    originalSprite.isCollisionMaskAutomatic()
+  destinationSprite.setFullImageCollisionMask(
+    originalSprite.isFullImageCollisionMask()
   );
 
   destinationSprite.getCustomCollisionMask().clear();
@@ -174,8 +247,8 @@ export const copySpritePolygons = (originalSprite, destinationSprite) => {
 };
 
 export const copyAnimationsSpriteCollisionMasks = (
-  originalSprite,
-  animation
+  originalSprite: gdSprite,
+  animation: gdAnimation
 ) => {
   mapFor(0, animation.getDirectionsCount(), i => {
     const direction = animation.getDirection(i);
@@ -187,7 +260,10 @@ export const copyAnimationsSpriteCollisionMasks = (
   });
 };
 
-export const isSamePolygon = (polygon1, polygon2) => {
+export const isSamePolygon = (
+  polygon1: gdPolygon2d,
+  polygon2: gdPolygon2d
+): any | boolean => {
   const polygon1Vertices = polygon1.getVertices();
   const polygon2Vertices = polygon2.getVertices();
 
@@ -203,11 +279,14 @@ export const isSamePolygon = (polygon1, polygon2) => {
   );
 };
 
-export const haveSameCollisionMasks = (sprite1, sprite2) => {
-  if (sprite1.isCollisionMaskAutomatic() !== sprite2.isCollisionMaskAutomatic())
+export const haveSameCollisionMasks = (
+  sprite1: gdSprite,
+  sprite2: gdSprite
+): any | boolean => {
+  if (sprite1.isFullImageCollisionMask() !== sprite2.isFullImageCollisionMask())
     return false;
 
-  if (sprite1.isCollisionMaskAutomatic() && sprite2.isCollisionMaskAutomatic())
+  if (sprite1.isFullImageCollisionMask() && sprite2.isFullImageCollisionMask())
     return true;
 
   const sprite1CollisionMask = sprite1.getCustomCollisionMask();
@@ -223,9 +302,9 @@ export const haveSameCollisionMasks = (sprite1, sprite2) => {
 };
 
 export const allDirectionSpritesHaveSameCollisionMasksAs = (
-  originalSprite,
-  direction
-) => {
+  originalSprite: gdSprite,
+  direction: gdDirection
+): any => {
   return every(
     mapFor(0, direction.getSpritesCount(), j => {
       const sprite = direction.getSprite(j);
@@ -234,10 +313,10 @@ export const allDirectionSpritesHaveSameCollisionMasksAs = (
   );
 };
 
-export const allSpritesHaveSameCollisionMasksAs = (
-  originalSprite,
-  animation
-) => {
+export const allAnimationSpritesHaveSameCollisionMasksAs = (
+  originalSprite: gdSprite,
+  animation: gdAnimation
+): any => {
   return every(
     mapFor(0, animation.getDirectionsCount(), i => {
       const direction = animation.getDirection(i);
@@ -249,53 +328,136 @@ export const allSpritesHaveSameCollisionMasksAs = (
   );
 };
 
-export const deleteSpritesFromAnimation = (animation, spritePtrs) => {
-  mapFor(0, animation.getDirectionsCount(), i => {
-    const direction = animation.getDirection(i);
+export const allObjectSpritesHaveSameCollisionMaskAs = (
+  originalSprite: gdSprite,
+  animations: gdSpriteAnimationList
+): any => {
+  return every(
+    mapFor(0, animations.getAnimationsCount(), i => {
+      const animation = animations.getAnimation(i);
+      return allAnimationSpritesHaveSameCollisionMasksAs(
+        originalSprite,
+        animation
+      );
+    })
+  );
+};
 
-    const spritesToDelete = mapFor(0, direction.getSpritesCount(), j => {
-      const sprite = direction.getSprite(j);
+export const isFirstSpriteUsingFullImageCollisionMask = (
+  animations: gdSpriteAnimationList
+): boolean => {
+  const firstSprite = getCurrentElements(animations, 0, 0, 0).sprite;
+  return firstSprite ? firstSprite.isFullImageCollisionMask() : false;
+};
 
-      return !!spritePtrs[sprite.ptr];
-    });
+const sortDescending = (indexes: Array<number>): Array<number> =>
+  [...indexes].sort((a, b) => b - a);
 
-    // Iterate from the end to the beginning to avoid invalidating indexes.
-    for (
-      let spriteIndex = direction.getSpritesCount() - 1;
-      spriteIndex >= 0;
-      spriteIndex--
-    ) {
-      if (spritesToDelete[spriteIndex]) direction.removeSprite(spriteIndex);
-    }
+export const deleteSpritesByIndexes = (
+  direction: gdDirection,
+  spriteIndexes: Array<number>
+) => {
+  // Iterate from the end to the beginning to avoid invalidating indexes.
+  sortDescending(spriteIndexes).forEach(spriteIndex => {
+    direction.removeSprite(spriteIndex);
   });
 };
 
-export const duplicateSpritesInAnimation = (animation, spritePtrs) => {
-  mapFor(0, animation.getDirectionsCount(), i => {
-    const direction = animation.getDirection(i);
+export const duplicateSpritesByIndexes = (
+  direction: gdDirection,
+  spriteIndexes: Array<number>
+) => {
+  // Iterate from the end to the beginning to avoid invalidating indexes.
+  sortDescending(spriteIndexes).forEach(spriteIndex => {
+    const spriteToDuplicate = direction.getSprite(spriteIndex);
+    const newSprite = new gd.Sprite();
+    newSprite.setImageName(spriteToDuplicate.getImageName());
+    copySpritePoints(spriteToDuplicate, newSprite);
+    copySpritePolygons(spriteToDuplicate, newSprite);
 
-    const spritesToDuplicate = mapFor(0, direction.getSpritesCount(), j => {
-      const sprite = direction.getSprite(j);
+    // Insert the copy just before the duplicated sprite.
+    direction.addSprite(newSprite);
+    direction.moveSprite(direction.getSpritesCount() - 1, spriteIndex);
+    newSprite.delete();
+  });
+};
 
-      return !!spritePtrs[sprite.ptr];
-    });
+/**
+ * Return the new index of the item at `index` after the item at `oldIndex`
+ * was moved to `newIndex` (as done by `gd.Direction.moveSprite`).
+ */
+export const getSpriteIndexAfterMove = (
+  index: number,
+  oldIndex: number,
+  newIndex: number
+): number => {
+  if (index === oldIndex) return newIndex;
+  if (oldIndex < index && index <= newIndex) return index - 1;
+  if (newIndex <= index && index < oldIndex) return index + 1;
+  return index;
+};
 
-    // Iterate from the end to the beginning to avoid invalidating indexes.
+export const hasAnyFrame = (animations: gdSpriteAnimationList): boolean => {
+  for (
+    let animationIndex = 0;
+    animationIndex < animations.getAnimationsCount();
+    animationIndex++
+  ) {
+    const animation = animations.getAnimation(animationIndex);
     for (
-      let spriteIndex = direction.getSpritesCount() - 1;
-      spriteIndex >= 0;
-      spriteIndex--
+      let directionIndex = 0;
+      directionIndex < animation.getDirectionsCount();
+      directionIndex++
     ) {
-      if (spritesToDuplicate[spriteIndex]) {
-        const spriteToDuplicate = direction.getSprite(spriteIndex);
-        const newSprite = new gd.Sprite();
-        newSprite.setImageName(spriteToDuplicate.getImageName());
-        copySpritePoints(spriteToDuplicate, newSprite);
-        copySpritePolygons(spriteToDuplicate, newSprite);
+      const direction = animation.getDirection(directionIndex);
+      if (direction.getSpritesCount() > 0) return true;
+    }
+  }
+  return false;
+};
 
-        direction.addSprite(newSprite);
-        direction.moveSprite(direction.getSpritesCount() - 1, spriteIndex);
+export const getFirstAnimationFrame = (
+  animations: gdSpriteAnimationList
+): gdSprite | null => {
+  if (animations.getAnimationsCount() === 0) {
+    return null;
+  }
+  const firstAnimation = animations.getAnimation(0);
+  if (firstAnimation.getDirectionsCount() === 0) {
+    return null;
+  }
+  const firstDirection = firstAnimation.getDirection(0);
+  if (firstDirection.getSpritesCount() === 0) {
+    return null;
+  }
+  return firstDirection.getSprite(0);
+};
+
+export const setCollisionMaskOnAllFrames = (
+  animations: gdSpriteAnimationList,
+  collisionMask: gdVectorPolygon2d | null
+) => {
+  for (
+    let animationIndex = 0;
+    animationIndex < animations.getAnimationsCount();
+    animationIndex++
+  ) {
+    const animation = animations.getAnimation(animationIndex);
+    for (
+      let directionIndex = 0;
+      directionIndex < animation.getDirectionsCount();
+      directionIndex++
+    ) {
+      const direction = animation.getDirection(directionIndex);
+      for (
+        let spriteIndex = 0;
+        spriteIndex < direction.getSpritesCount();
+        spriteIndex++
+      ) {
+        const sprite = direction.getSprite(spriteIndex);
+        sprite.setFullImageCollisionMask(!collisionMask);
+        if (collisionMask) sprite.setCustomCollisionMask(collisionMask);
       }
     }
-  });
+  }
 };

@@ -1,96 +1,137 @@
 // @flow
-import { Trans } from '@lingui/macro';
 import * as React from 'react';
 import { type ParameterInlineRendererProps } from './ParameterInlineRenderer.flow';
 import VariableField, { renderVariableWithIcon } from './VariableField';
-import VariablesEditorDialog from '../../VariablesList/VariablesEditorDialog';
-import { type ParameterFieldProps } from './ParameterFieldCommons';
-import EventsRootVariablesFinder from '../../Utils/EventsRootVariablesFinder';
+import SceneVariablesDialog from '../../VariablesList/SceneVariablesDialog';
+import { type VariableDialogOpeningProps } from '../../VariablesList/VariablesEditorDialog';
+import {
+  type ParameterFieldProps,
+  type ParameterFieldInterface,
+  type FieldFocusFunction,
+} from './ParameterFieldCommons';
+import GlobalAndSceneVariablesDialog from '../../VariablesList/GlobalAndSceneVariablesDialog';
 
-type State = {|
-  editorOpen: boolean,
-|};
+const gd: libGDevelop = global.gd;
 
-export default class SceneVariableField extends React.Component<
-  ParameterFieldProps,
-  State
-> {
-  _field: ?VariableField;
-  state = {
-    editorOpen: false,
-  };
+export default (React.forwardRef<ParameterFieldProps, ParameterFieldInterface>(
+  function SceneVariableField(props: ParameterFieldProps, ref) {
+    const field = React.useRef<?ParameterFieldInterface>(null);
+    const [
+      variableEditorOpen,
+      setVariableEditorOpen,
+    ] = React.useState<VariableDialogOpeningProps | null>(null);
+    const focus: FieldFocusFunction = options => {
+      if (field.current) field.current.focus(options);
+    };
+    React.useImperativeHandle(ref, () => ({
+      focus,
+    }));
 
-  focus() {
-    if (this._field) this._field.focus();
-  }
+    const {
+      project,
+      scope,
+      projectScopedContainersAccessor,
+      value,
+      onChange,
+    } = props;
+    const { layout, eventsFunctionsExtension } = scope;
 
-  render() {
-    const { project, scope } = this.props;
-    const { layout } = scope;
+    const variablesContainers = React.useMemo(
+      () => {
+        return layout
+          ? [layout.getVariables()]
+          : eventsFunctionsExtension
+          ? [eventsFunctionsExtension.getSceneVariables()]
+          : [];
+      },
+      [eventsFunctionsExtension, layout]
+    );
 
-    const onComputeAllVariableNames = () =>
-      project && layout
-        ? EventsRootVariablesFinder.findAllLayoutVariables(
-            project.getCurrentPlatform(),
-            project,
-            layout
-          )
-        : [];
+    const onVariableEditorApply = React.useCallback(
+      (selectedVariableName: string | null) => {
+        if (selectedVariableName && selectedVariableName.startsWith(value)) {
+          onChange(selectedVariableName);
+        }
+        setVariableEditorOpen(null);
+      },
+      [onChange, value]
+    );
 
     return (
       <React.Fragment>
         <VariableField
-          variablesContainer={layout ? layout.getVariables() : null}
-          onComputeAllVariableNames={onComputeAllVariableNames}
-          parameterMetadata={this.props.parameterMetadata}
-          value={this.props.value}
-          onChange={this.props.onChange}
-          isInline={this.props.isInline}
-          onRequestClose={this.props.onRequestClose}
-          onApply={this.props.onApply}
-          ref={field => (this._field = field)}
-          onOpenDialog={() => this.setState({ editorOpen: true })}
-          globalObjectsContainer={this.props.globalObjectsContainer}
-          objectsContainer={this.props.objectsContainer}
+          variablesContainers={variablesContainers}
+          parameterMetadata={props.parameterMetadata}
+          expressionType={'scenevar'}
+          value={props.value}
+          onChange={props.onChange}
+          isInline={props.isInline}
+          onRequestClose={props.onRequestClose}
+          onApply={props.onApply}
+          ref={field}
+          openVariableEditorDialog={setVariableEditorOpen}
+          globalObjectsContainer={props.globalObjectsContainer}
+          objectsContainer={props.objectsContainer}
+          project={project}
+          projectScopedContainersAccessor={projectScopedContainersAccessor}
           scope={scope}
+          id={
+            props.parameterIndex !== undefined
+              ? `parameter-${props.parameterIndex}-scene-variable-field`
+              : undefined
+          }
+          getVariableSourceFromIdentifier={getVariableSourceFromIdentifier}
+          editEventsFunctionParameter={null}
+          openEventsBasedEntityPropertyEditorDialog={null}
+          instructionMetadata={props.instructionMetadata}
+          expression={props.expression}
+          expressionMetadata={props.expressionMetadata}
+          parameterIndex={props.parameterIndex}
+          resourceManagementProps={props.resourceManagementProps}
+          parameterRenderingService={props.parameterRenderingService}
         />
-        {this.state.editorOpen && layout && (
-          <VariablesEditorDialog
-            title={<Trans>Scene Variables</Trans>}
+        {variableEditorOpen && layout && project && (
+          <SceneVariablesDialog
+            project={project}
+            layout={layout}
             open
-            variablesContainer={layout.getVariables()}
-            onCancel={() => this.setState({ editorOpen: false })}
-            onApply={() => {
-              this.setState({ editorOpen: false });
-              if (this._field) this._field.updateAutocompletions();
-            }}
-            emptyExplanationMessage={
-              <Trans>
-                Scene variables can be used to store any value or text during
-                the game.
-              </Trans>
-            }
-            emptyExplanationSecondMessage={
-              <Trans>
-                For example, you can have a variable called Score representing
-                the current score of the player.
-              </Trans>
-            }
-            helpPagePath={'/all-features/variables/scene-variables'}
-            onComputeAllVariableNames={onComputeAllVariableNames}
+            onCancel={() => setVariableEditorOpen(null)}
+            onApply={onVariableEditorApply}
+            initiallySelectedVariable={variableEditorOpen}
+            hotReloadPreviewButtonProps={null}
+            isListLocked={false}
+          />
+        )}
+        {variableEditorOpen && eventsFunctionsExtension && !layout && (
+          <GlobalAndSceneVariablesDialog
+            projectScopedContainersAccessor={projectScopedContainersAccessor}
+            open
+            onCancel={() => setVariableEditorOpen(null)}
+            onApply={onVariableEditorApply}
+            isGlobalTabInitiallyOpen={false}
+            initiallySelectedVariable={variableEditorOpen}
+            hotReloadPreviewButtonProps={null}
+            isListLocked={false}
           />
         )}
       </React.Fragment>
     );
   }
-}
+): React.ComponentType<{
+  ...ParameterFieldProps,
+  +ref?: React.RefSetter<ParameterFieldInterface>,
+}>);
+
+const getVariableSourceFromIdentifier = (
+  identifier: string,
+  projectScopedContainers: gdProjectScopedContainers
+): VariablesContainer_SourceType => gd.VariablesContainer.Scene;
 
 export const renderInlineSceneVariable = (
   props: ParameterInlineRendererProps
-) => {
-  return renderVariableWithIcon(
+): any =>
+  renderVariableWithIcon(
     props,
-    'res/types/scenevar.png',
-    'scene variable'
+    'scene variable',
+    getVariableSourceFromIdentifier
   );
-};

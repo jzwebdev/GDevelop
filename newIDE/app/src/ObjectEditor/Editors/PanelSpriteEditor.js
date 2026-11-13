@@ -13,27 +13,31 @@ export default class PanelSpriteEditor extends React.Component<
   EditorProps,
   void
 > {
-  render() {
+  render(): any {
     const {
-      object,
+      objectConfiguration,
       project,
-      resourceSources,
-      onChooseResource,
-      resourceExternalEditors,
+      resourceManagementProps,
+      projectScopedContainersAccessor,
+      objectName,
+      renderObjectNameField,
     } = this.props;
-    const panelSpriteObject = gd.asPanelSpriteObject(object);
+    const panelSpriteConfiguration = gd.asPanelSpriteConfiguration(
+      objectConfiguration
+    );
 
     return (
-      <ColumnStackLayout>
+      <ColumnStackLayout noMargin>
+        {renderObjectNameField && renderObjectNameField()}
         <ResourceSelectorWithThumbnail
           project={project}
-          resourceSources={resourceSources}
-          onChooseResource={onChooseResource}
-          resourceExternalEditors={resourceExternalEditors}
+          resourceManagementProps={resourceManagementProps}
+          projectScopedContainersAccessor={projectScopedContainersAccessor}
           resourceKind="image"
-          resourceName={panelSpriteObject.getTexture()}
+          resourceName={panelSpriteConfiguration.getTexture()}
+          defaultNewResourceName={objectName}
           onChange={resourceName => {
-            panelSpriteObject.setTexture(resourceName);
+            panelSpriteConfiguration.setTexture(resourceName);
             this.forceUpdate();
           }}
           floatingLabelText={<Trans>Select an image</Trans>}
@@ -44,21 +48,21 @@ export default class PanelSpriteEditor extends React.Component<
               Repeat borders and center textures (instead of stretching them)
             </Trans>
           }
-          checked={panelSpriteObject.isTiled()}
+          checked={panelSpriteConfiguration.isTiled()}
           onCheck={(e, checked) => {
-            panelSpriteObject.setTiled(checked);
+            panelSpriteConfiguration.setTiled(checked);
             this.forceUpdate();
           }}
         />
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noResponsiveLandscape noMargin>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Top margin</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getTopMargin()}
+            value={panelSpriteConfiguration.getTopMargin()}
             onChange={value => {
-              panelSpriteObject.setTopMargin(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setTopMargin(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
@@ -67,22 +71,24 @@ export default class PanelSpriteEditor extends React.Component<
             floatingLabelText={<Trans>Bottom margin</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getBottomMargin()}
+            value={panelSpriteConfiguration.getBottomMargin()}
             onChange={value => {
-              panelSpriteObject.setBottomMargin(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setBottomMargin(
+                parseInt(value, 10) || 0
+              );
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noResponsiveLandscape noMargin>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Left margin</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getLeftMargin()}
+            value={panelSpriteConfiguration.getLeftMargin()}
             onChange={value => {
-              panelSpriteObject.setLeftMargin(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setLeftMargin(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
@@ -91,22 +97,22 @@ export default class PanelSpriteEditor extends React.Component<
             floatingLabelText={<Trans>Right margin</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getRightMargin()}
+            value={panelSpriteConfiguration.getRightMargin()}
             onChange={value => {
-              panelSpriteObject.setRightMargin(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setRightMargin(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
         </ResponsiveLineStackLayout>
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noResponsiveLandscape noMargin>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Default width (in pixels)</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getWidth()}
+            value={panelSpriteConfiguration.getWidth()}
             onChange={value => {
-              panelSpriteObject.setWidth(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setWidth(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
@@ -115,9 +121,9 @@ export default class PanelSpriteEditor extends React.Component<
             floatingLabelText={<Trans>Default height (in pixels)</Trans>}
             fullWidth
             type="number"
-            value={panelSpriteObject.getHeight()}
+            value={panelSpriteConfiguration.getHeight()}
             onChange={value => {
-              panelSpriteObject.setHeight(parseInt(value, 10) || 0);
+              panelSpriteConfiguration.setHeight(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />

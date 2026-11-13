@@ -4,15 +4,29 @@ import {
   type RenderEditorContainerProps,
   type RenderEditorContainerPropsWithRef,
 } from './BaseEditor';
+import {
+  type SceneEventsOutsideEditorChanges,
+  type InstancesOutsideEditorChanges,
+  type ObjectsOutsideEditorChanges,
+  type ObjectGroupsOutsideEditorChanges,
+  type WillDeleteObjectChanges,
+  type ExtensionsOutsideEditorChanges,
+} from '../../EditorFunctions/OutsideEditorChanges';
 import ResourcesEditor from '../../ResourcesEditor';
+import { type ObjectWithContext } from '../../ObjectsList/EnumerateObjects';
+import {
+  setEditorHotReloadNeeded,
+  type HotReloadSteps,
+} from '../../EmbeddedGame/EmbeddedGameFrame';
 
 export class ResourcesEditorContainer extends React.Component<RenderEditorContainerProps> {
   editor: ?ResourcesEditor;
 
-  shouldComponentUpdate(nextProps: RenderEditorContainerProps) {
-    // Prevent any update to the editor if the editor is not active,
-    // and so not visible to the user.
-    return nextProps.isActive;
+  shouldComponentUpdate(nextProps: RenderEditorContainerProps): any {
+    // We stop updates when the component is inactive.
+    // If it's active, was active or becoming active again we let update propagate.
+    // Especially important to note that when becoming inactive, a "last" update is allowed.
+    return this.props.isActive || nextProps.isActive;
   }
 
   getProject(): ?gdProject {
@@ -24,14 +38,84 @@ export class ResourcesEditorContainer extends React.Component<RenderEditorContai
   }
 
   updateToolbar() {
-    if (this.editor) this.editor.updateToolbar();
+    if (this.editor) {
+      this.editor.updateToolbar();
+    } else {
+      // Clear the toolbar if the editor is not ready yet to avoid showing stale toolbar
+      // from the previous editor (e.g., HomePage)
+      this.props.setToolbar(null);
+    }
   }
 
   forceUpdateEditor() {
     // No updates to be done.
   }
 
-  render() {
+  onEventsBasedObjectChildrenEdited(
+    eventsBasedObject: gdEventsBasedObject,
+    options?: {| editedObject?: ?gdObject, hasResourceChanged?: boolean |}
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectEdited(
+    scene: gdLayout,
+    objectWithContext: ObjectWithContext,
+    hasResourceChanged?: boolean
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectsDeleted(scene: gdLayout) {
+    // No thing to be done.
+  }
+
+  onSceneEventsModifiedOutsideEditor(changes: SceneEventsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  selectAllInsideEditor() {
+    // No thing to be done.
+  }
+
+  notifyChangesToInGameEditor(hotReloadSteps: HotReloadSteps) {
+    setEditorHotReloadNeeded(hotReloadSteps);
+  }
+
+  switchInGameEditorIfNoHotReloadIsNeeded() {}
+
+  onInstancesModifiedOutsideEditor(changes: InstancesOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectsModifiedOutsideEditor(changes: ObjectsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onWillDeleteObject(changes: WillDeleteObjectChanges) {
+    // No thing to be done.
+  }
+
+  onExtensionsModifiedOutsideEditor(changes: ExtensionsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectGroupsModifiedOutsideEditor(
+    changes: ObjectGroupsOutsideEditorChanges
+  ) {
+    // No thing to be done.
+  }
+
+  componentDidUpdate(prevProps: RenderEditorContainerProps) {
+    if (
+      this.editor &&
+      this.props.isActive &&
+      prevProps.isActive !== this.props.isActive
+    )
+      this.editor.refreshResourcesList();
+  }
+
+  render(): any {
     const { project } = this.props;
     if (!project) return null;
 
@@ -40,10 +124,11 @@ export class ResourcesEditorContainer extends React.Component<RenderEditorContai
         setToolbar={this.props.setToolbar}
         onDeleteResource={this.props.onDeleteResource}
         onRenameResource={this.props.onRenameResource}
-        resourceSources={this.props.resourceSources}
-        onChooseResource={this.props.onChooseResource}
+        resourceManagementProps={this.props.resourceManagementProps}
         ref={editor => (this.editor = editor)}
+        fileMetadata={this.props.fileMetadata}
         project={project}
+        storageProvider={this.props.storageProvider}
       />
     );
   }
@@ -51,4 +136,4 @@ export class ResourcesEditorContainer extends React.Component<RenderEditorContai
 
 export const renderResourcesEditorContainer = (
   props: RenderEditorContainerPropsWithRef
-) => <ResourcesEditorContainer {...props} />;
+): React.Node => <ResourcesEditorContainer {...props} />;

@@ -6,7 +6,8 @@ import Button from '@material-ui/core/Button';
 import PreferencesContext, {
   type AlertMessageIdentifier,
 } from '../../MainFrame/Preferences/PreferencesContext';
-import { useScreenType } from '../Reponsive/ScreenTypeMeasurer';
+import { useScreenType } from '../Responsive/ScreenTypeMeasurer';
+import InAppTutorialContext from '../../InAppTutorial/InAppTutorialContext';
 
 type Props = {|
   identifier: AlertMessageIdentifier,
@@ -20,11 +21,14 @@ const DismissableInfoBar = ({
   show,
   touchScreenMessage,
   message,
-}: Props) => {
+}: Props): null | React.Node => {
+  const { currentlyRunningInAppTutorial } = React.useContext(
+    InAppTutorialContext
+  );
   const preferences = React.useContext(PreferencesContext);
   const screenType = useScreenType();
 
-  return (
+  return !!currentlyRunningInAppTutorial ? null : (
     <Snackbar
       open={show && !preferences.values.hiddenAlertMessages[identifier]}
       message={
@@ -34,8 +38,7 @@ const DismissableInfoBar = ({
       }
       action={
         <Button
-          key="undo"
-          color="primary"
+          color="secondary"
           size="small"
           onClick={() => {
             preferences.showAlertMessage(identifier, false);

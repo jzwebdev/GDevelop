@@ -5,55 +5,23 @@ import { t } from '@lingui/macro';
 import { I18n } from '@lingui/react';
 import { type I18n as I18nType } from '@lingui/core';
 
-import TextField from '../../UI/TextField';
-import { ColumnStackLayout, TextFieldWithButtonLayout } from '../../UI/Layout';
-import SemiControlledTextField from '../../UI/SemiControlledTextField';
-import RaisedButton from '../../UI/RaisedButton';
-import FlatButton from '../../UI/FlatButton';
-import { ResourceStore } from '../../AssetStore/ResourceStore';
-import Dialog from '../../UI/Dialog';
-
+import { ColumnStackLayout } from '../../UI/Layout';
 import useForceUpdate from '../../Utils/UseForceUpdate';
 import {
   getHelpLink,
   isRelativePathToDocumentationRoot,
   isDocumentationAbsoluteUrl,
 } from '../../Utils/HelpLink';
-import axios from 'axios';
-import { useIsMounted } from '../../Utils/UseIsMounted';
-import { showErrorBox } from '../../UI/Messages/MessageBox';
-import { UsersAutocomplete } from '../../Utils/UsersAutocomplete';
-
-const downloadSvgAsBase64 = async (url: string): Promise<string> => {
-  try {
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-
-    const image = btoa(
-      new Uint8Array(response.data).reduce(
-        (data, byte) => data + String.fromCharCode(byte),
-        ''
-      )
-    );
-    if (image.length > 100 * 1024) {
-      throw new Error(
-        `Icon is too big (size after base64 conversion: ${image.length})`
-      );
-    }
-
-    const contentType = response.headers
-      ? response.headers['content-type'].toLowerCase()
-      : '';
-    if (contentType !== 'image/svg+xml')
-      throw new Error(
-        `Wrong content type. Got: "${contentType}", expected "image/svg+xml"`
-      );
-
-    return `data:${contentType};base64,${image}`;
-  } catch (err) {
-    console.error('Unable to import the icon.', err);
-    throw err;
-  }
-};
+import { UsersAutocomplete } from '../../Profile/UsersAutocomplete';
+import SelectOption from '../../UI/SelectOption';
+import SemiControlledAutoComplete from '../../UI/SemiControlledAutoComplete';
+import { CompactIconField } from './CompactIconField';
+import CompactPropertiesEditorRowField from '../../CompactPropertiesEditor/CompactPropertiesEditorRowField';
+import CompactTextField from '../../UI/CompactTextField';
+import { CompactTextAreaField } from '../../UI/CompactTextAreaField';
+import CompactSemiControlledTextField from '../../UI/CompactSemiControlledTextField';
+import CompactSelectField from '../../UI/CompactSelectField';
+import { MarkdownText } from '../../UI/MarkdownText';
 
 type HelpPathTextFieldProps = {|
   i18n: I18nType,
@@ -75,26 +43,34 @@ const HelpPathTextField = ({
           )
         : i18n._(t`This is link to a webpage.`)) +
       ` [${i18n._(t`Click here to test the link.`)}](${getHelpLink(helpPath)})`
-    : i18n._(
-        t`This can either be a URL to a web page, or a path starting with a slash that will be opened in the GDevelop wiki. Leave empty if there is no help page, although it's recommended you eventually write one if you distribute the extension.`
-      );
+    : '';
+  const hasError = !!helpPath && !isAbsoluteUrl && !isRelativePath;
 
   return (
-    <TextField
-      floatingLabelText={<Trans>Help page URL</Trans>}
-      value={helpPath}
-      onChange={(e, text) => {
-        onChangeHelpPath(text);
-      }}
-      errorText={
-        !!helpPath && !isAbsoluteUrl && !isRelativePath ? (
-          <Trans>
-            This is not a URL starting with "http://" or "https://".
-          </Trans>
-        ) : null
+    <CompactPropertiesEditorRowField
+      label={i18n._(t`Help page URL`)}
+      markdownDescription={i18n._(
+        t`This can either be a URL to a web page, or a path starting with a slash that will be opened in the GDevelop wiki. Leave empty if there is no help page, although it's recommended you eventually write one if you distribute the extension.`
+      )}
+      field={
+        <ColumnStackLayout noMargin expand>
+          <CompactSemiControlledTextField
+            value={helpPath}
+            onChange={text => {
+              onChangeHelpPath(text);
+            }}
+            errored={hasError}
+            errorText={
+              hasError ? (
+                <Trans>
+                  This is not a URL starting with "http://" or "https://".
+                </Trans>
+              ) : null
+            }
+          />
+          {helperText && !hasError && <MarkdownText source={helperText} />}
+        </ColumnStackLayout>
       }
-      helperMarkdownText={helperText}
-      fullWidth
     />
   );
 };
@@ -109,106 +85,120 @@ export const ExtensionOptionsEditor = ({
   eventsFunctionsExtension,
   onLoadChange,
   isLoading,
-}: Props) => {
+}: Props): React.Node => {
   const forceUpdate = useForceUpdate();
-  const [resourceStoreOpen, setResourceStoreOpen] = React.useState(false);
-  const isMounted = useIsMounted();
 
   return (
     <I18n>
-      {({ i18n }: { i18n: I18nType }) => (
-        <ColumnStackLayout noMargin>
-          <TextField
-            floatingLabelText={<Trans>Name</Trans>}
-            value={eventsFunctionsExtension.getName()}
-            disabled
-            fullWidth
-          />
-          <TextFieldWithButtonLayout
-            renderButton={style => (
-              <RaisedButton
-                onClick={() => {
-                  setResourceStoreOpen(true);
-                }}
-                primary
-                label={<Trans>Choose</Trans>}
-                disabled={isLoading}
-                style={style}
-              />
-            )}
-            renderTextField={() => (
-              <SemiControlledTextField
-                floatingLabelText={<Trans>Icon URL</Trans>}
-                value={eventsFunctionsExtension.getPreviewIconUrl()}
-                onChange={text => {
-                  eventsFunctionsExtension.setPreviewIconUrl(text);
-                }}
+      {({ i18n }) => (
+        <ColumnStackLayout noMargin expand>
+          <CompactPropertiesEditorRowField
+            label={i18n._(t`Name`)}
+            field={
+              <CompactTextField
+                value={eventsFunctionsExtension.getName()}
+                onChange={() => {}}
                 disabled
-                fullWidth
               />
-            )}
+            }
           />
-          <TextField
-            floatingLabelText={<Trans>Name displayed in editor</Trans>}
-            value={eventsFunctionsExtension.getFullName()}
-            onChange={(e, text) => {
-              eventsFunctionsExtension.setFullName(text);
-              forceUpdate();
+          <CompactIconField
+            onLoadChange={onLoadChange}
+            isLoading={isLoading}
+            getPreviewIconUrl={() =>
+              eventsFunctionsExtension.getPreviewIconUrl()
+            }
+            setPreviewIconUrl={value => {
+              eventsFunctionsExtension.setPreviewIconUrl(value);
             }}
-            fullWidth
+            setIconUrl={value => {
+              eventsFunctionsExtension.setIconUrl(value);
+            }}
           />
-          <TextField
-            floatingLabelText={<Trans>Short description</Trans>}
+          <CompactPropertiesEditorRowField
+            label={i18n._(t`Name displayed in editor`)}
+            field={
+              <CompactTextField
+                value={eventsFunctionsExtension.getFullName()}
+                onChange={text => {
+                  eventsFunctionsExtension.setFullName(text);
+                  forceUpdate();
+                }}
+              />
+            }
+          />
+          <CompactTextAreaField
+            label={i18n._(t`Short description`)}
             value={eventsFunctionsExtension.getShortDescription()}
-            onChange={(e, text) => {
+            onChange={text => {
               eventsFunctionsExtension.setShortDescription(text);
               forceUpdate();
             }}
-            multiline
-            fullWidth
             rows={2}
-            rowsMax={2}
           />
-          <TextField
-            floatingLabelText={<Trans>Description (markdown supported)</Trans>}
+          <CompactTextAreaField
+            label={i18n._(t`Description (markdown supported)`)}
             value={eventsFunctionsExtension.getDescription()}
-            onChange={(e, text) => {
+            onChange={text => {
               eventsFunctionsExtension.setDescription(text);
               forceUpdate();
             }}
-            multiline
-            fullWidth
-            rows={5}
-            rowsMax={15}
+            placeholder={i18n._(
+              t`Explain and give some examples of what can be achieved with this extension.`
+            )}
+            rows={6}
           />
-          <TextField
-            floatingLabelText={<Trans>Version</Trans>}
-            value={eventsFunctionsExtension.getVersion()}
-            onChange={(e, text) => {
-              eventsFunctionsExtension.setVersion(text);
-              forceUpdate();
-            }}
-            fullWidth
+          <CompactPropertiesEditorRowField
+            label={i18n._(t`Version`)}
+            field={
+              <CompactTextField
+                value={eventsFunctionsExtension.getVersion()}
+                onChange={text => {
+                  eventsFunctionsExtension.setVersion(text);
+                  forceUpdate();
+                }}
+              />
+            }
           />
-          <SemiControlledTextField
-            floatingLabelText={<Trans>Tags (comma separated)</Trans>}
-            value={eventsFunctionsExtension
-              .getTags()
-              .toJSArray()
-              .join(', ')}
-            onChange={text => {
-              const tags = eventsFunctionsExtension.getTags();
-              tags.clear();
-              text
-                .split(',')
-                .map(tag => tag.trim())
-                .filter(Boolean)
-                .forEach(tag => {
-                  tags.push_back(tag);
-                });
-              forceUpdate();
-            }}
-            fullWidth
+          <CompactPropertiesEditorRowField
+            label={i18n._(t`Dimension`)}
+            field={
+              <CompactSelectField
+                value={eventsFunctionsExtension.getDimension()}
+                onChange={value => {
+                  eventsFunctionsExtension.setDimension(value);
+                  forceUpdate();
+                }}
+              >
+                <SelectOption value="" label={t`Not applicable`} />
+                <SelectOption value="2D" label="2D" />
+                <SelectOption value="3D" label="3D" />
+                <SelectOption value="2D/3D" label="2D/3D" />
+              </CompactSelectField>
+            }
+          />
+          <CompactPropertiesEditorRowField
+            label={i18n._(t`Tags (comma separated)`)}
+            field={
+              <CompactSemiControlledTextField
+                value={eventsFunctionsExtension
+                  .getTags()
+                  .toJSArray()
+                  .join(', ')}
+                onChange={text => {
+                  const tags = eventsFunctionsExtension.getTags();
+                  tags.clear();
+                  text
+                    .split(',')
+                    .map(tag => tag.trim())
+                    .filter(Boolean)
+                    .forEach(tag => {
+                      tags.push_back(tag);
+                    });
+                  forceUpdate();
+                }}
+              />
+            }
           />
           <HelpPathTextField
             i18n={i18n}
@@ -218,8 +208,87 @@ export const ExtensionOptionsEditor = ({
               forceUpdate();
             }}
           />
+          <SemiControlledAutoComplete
+            floatingLabelText={<Trans>Category (shown in the editor)</Trans>}
+            fullWidth
+            value={eventsFunctionsExtension.getCategory()}
+            onChange={category => {
+              eventsFunctionsExtension.setCategory(category);
+              forceUpdate();
+            }}
+            // TODO Sort by translated value.
+            dataSource={[
+              {
+                text: '',
+                value: 'General',
+                translatableValue: 'General',
+              },
+              {
+                text: 'Ads',
+                value: 'Ads',
+                translatableValue: 'Ads',
+              },
+              {
+                text: 'Visual effect',
+                value: 'Visual effect',
+                translatableValue: 'Visual effect',
+              },
+              {
+                text: 'Audio',
+                value: 'Audio',
+                translatableValue: 'Audio',
+              },
+              {
+                text: 'Advanced',
+                value: 'Advanced',
+                translatableValue: 'Advanced',
+              },
+              {
+                text: 'Camera',
+                value: 'Camera',
+                translatableValue: 'Camera',
+              },
+              {
+                text: 'Input',
+                value: 'Input',
+                translatableValue: 'Input',
+              },
+              {
+                text: 'Game mechanic',
+                value: 'Game mechanic',
+                translatableValue: 'Game mechanic',
+              },
+              {
+                text: 'Movement',
+                value: 'Movement',
+                translatableValue: 'Movement',
+              },
+              {
+                text: 'Network',
+                value: 'Network',
+                translatableValue: 'Network',
+              },
+              {
+                text: 'Third-party',
+                value: 'Third-party',
+                translatableValue: 'Third-party',
+              },
+              {
+                text: 'User interface',
+                value: 'User interface',
+                translatableValue: 'User interface',
+              },
+            ]}
+          />
           <UsersAutocomplete
-            userIds={eventsFunctionsExtension.getAuthorIds()}
+            userIds={eventsFunctionsExtension.getAuthorIds().toJSArray()}
+            onChange={userIdAndUsernames => {
+              const projectAuthorIds = eventsFunctionsExtension.getAuthorIds();
+              projectAuthorIds.clear();
+              userIdAndUsernames.forEach(userIdAndUsername =>
+                projectAuthorIds.push_back(userIdAndUsername.userId)
+              );
+            }}
             floatingLabelText={<Trans>Authors</Trans>}
             helperText={
               <Trans>
@@ -229,59 +298,6 @@ export const ExtensionOptionsEditor = ({
               </Trans>
             }
           />
-          {resourceStoreOpen && (
-            <Dialog
-              title={<Trans>Choose an icon for the extension</Trans>}
-              actions={[
-                <FlatButton
-                  key="cancel"
-                  label={<Trans>Cancel</Trans>}
-                  primary={false}
-                  onClick={() => {
-                    setResourceStoreOpen(false);
-                  }}
-                />,
-              ]}
-              cannotBeDismissed={false}
-              open
-              noMargin
-            >
-              <ResourceStore
-                onChoose={resource => {
-                  setResourceStoreOpen(false);
-                  onLoadChange(true);
-                  downloadSvgAsBase64(resource.url)
-                    .then(
-                      base64Svg => {
-                        if (!isMounted.current) return;
-
-                        eventsFunctionsExtension.setPreviewIconUrl(
-                          resource.url
-                        );
-                        eventsFunctionsExtension.setIconUrl(base64Svg);
-                      },
-                      rawError => {
-                        if (!isMounted.current) return;
-
-                        showErrorBox({
-                          message: i18n._(
-                            t`Unable to download the icon. Verify your internet connection or try again later.`
-                          ),
-                          rawError,
-                          errorId: 'icon-download-error',
-                        });
-                      }
-                    )
-                    .then(() => {
-                      if (!isMounted.current) return;
-
-                      onLoadChange(false);
-                    });
-                }}
-                resourceKind={'svg'}
-              />
-            </Dialog>
-          )}
         </ColumnStackLayout>
       )}
     </I18n>

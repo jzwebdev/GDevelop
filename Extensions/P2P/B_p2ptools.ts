@@ -14,13 +14,22 @@ namespace gdjs {
         data: string;
       };
 
-      const isValidNetworkEvent = (event): event is NetworkEvent =>
-        typeof event.eventName === 'string' && typeof event.data === 'string';
+      const isValidNetworkEvent = (event: unknown): event is NetworkEvent =>
+        typeof event === 'object' &&
+        event !== null &&
+        typeof event['eventName'] === 'string' &&
+        typeof event['data'] === 'string';
+
+      export interface IEventData {
+        readonly data: string;
+        readonly sender: string;
+      }
 
       /**
        * The data bound to an event that got triggered.
+       * @category Other extensions > P2P
        */
-      class EventData {
+      export class EventData implements IEventData {
         constructor(data: string, sender: string) {
           this.data = data;
           this.sender = sender;
@@ -37,11 +46,22 @@ namespace gdjs {
         public readonly sender: string = '';
       }
 
+      export interface IEvent {
+        dataloss: boolean;
+
+        isTriggered(): boolean;
+        pushData(newData: IEventData): void;
+        popData(): void;
+        getData(): string;
+        getSender(): string;
+      }
+
       /**
        * An event that can be listened to.
+       * @category Other extensions > P2P
        */
-      class Event {
-        private data: EventData[] = [];
+      export class Event implements IEvent {
+        private readonly data: IEventData[] = [];
         public dataloss = false;
 
         /**
@@ -54,13 +74,13 @@ namespace gdjs {
         /**
          * Add new data, to be called with the event data each time the event is triggered.
          */
-        pushData(newData: EventData) {
+        pushData(newData: IEventData) {
           if (this.dataloss && this.data.length > 0) this.data[0] = newData;
           else this.data.push(newData);
         }
 
         /**
-         * Deleted the last event data, to be called when it is sure the event was processed throughly.
+         * Delete the last event data, to be called when it is sure the event was processed thoroughly.
          */
         popData() {
           this.data.shift();
@@ -99,13 +119,13 @@ namespace gdjs {
       /**
        * All connected p2p clients, keyed by their ID.
        */
-      const connections: Record<string, Peer.DataConnection<NetworkEvent>> = {};
+      const connections = new Map<string, Peer.DataConnection<NetworkEvent>>();
 
       /**
        * Contains a map of events triggered by other p2p clients.
        * It is keyed by the event name.
        */
-      const events: Record<string, Event> = {};
+      const events = new Map<string, IEvent>();
 
       /**
        * True if PeerJS is initialized and ready.
@@ -113,7 +133,7 @@ namespace gdjs {
       let ready = false;
 
       /**
-       * True if an error occured.
+       * True if an error occurred.
        */
       let error = false;
 
@@ -148,7 +168,7 @@ namespace gdjs {
         });
         peer.on('error', (errorMessage) => {
           error = true;
-          lastError = errorMessage;
+          lastError = errorMessage.message;
         });
         peer.on('connection', (connection) => {
           connection.on('open', () => {
@@ -168,7 +188,7 @@ namespace gdjs {
        * @param connection The DataConnection of the peer
        */
       const _onConnection = (connection: Peer.DataConnection<NetworkEvent>) => {
-        connections[connection.peer] = connection;
+        connections.set(connection.peer, connection);
         connection.on('data', (data) => {
           if (isValidNetworkEvent(data))
             getEvent(data.eventName).pushData(
@@ -189,9 +209,10 @@ namespace gdjs {
         // Regularly check for disconnection as the built in way is not reliable.
         (function disconnectChecker() {
           if (
-            connection.peerConnection.connectionState === 'failed' ||
-            connection.peerConnection.connectionState === 'disconnected' ||
-            connection.peerConnection.connectionState === 'closed'
+            connection.peerConnection &&
+            (connection.peerConnection.connectionState === 'failed' ||
+              connection.peerConnection.connectionState === 'disconnected' ||
+              connection.peerConnection.connectionState === 'closed')
           ) {
             _onDisconnect(connection.peer);
           } else {
@@ -205,18 +226,18 @@ namespace gdjs {
        * @param connectionID The ID of the peer that disconnected.
        */
       const _onDisconnect = (connectionID: string) => {
-        if (!connections.hasOwnProperty(connectionID)) return;
+        if (!connections.has(connectionID)) return;
         disconnectedPeers.push(connectionID);
-        delete connections[connectionID];
+        connections.delete(connectionID);
       };
 
       /**
-       * Gets an event from {@link events}
-       * or creates it if it doesn't exist.
+       * Get an event, and creates it if it doesn't exist.
        */
-      export const getEvent = (name: string) => {
-        if (!events.hasOwnProperty(name)) events[name] = new Event();
-        return events[name];
+      export const getEvent = (name: string): IEvent => {
+        let event = events.get(name);
+        if (!event) events.set(name, (event = new Event()));
+        return event;
       };
 
       /**
@@ -236,14 +257,15 @@ namespace gdjs {
        * @param id - The other client's ID.
        */
       export const disconnectFromPeer = (id: string) => {
-        if (connections[id]) connections[id].close();
+        const connection = connections.get(id);
+        if (connection) connection.close();
       };
 
       /**
        * Disconnects from all other p2p clients.
        */
       export const disconnectFromAllPeers = () => {
-        for (const connection of Object.values(connections)) connection.close();
+        for (const connection of connections.values()) connection.close();
       };
 
       /**
@@ -290,8 +312,9 @@ namespace gdjs {
         eventName: string,
         eventData: string
       ) => {
-        if (connections[id]) {
-          connections[id].send({
+        const connection = connections.get(id);
+        if (connection) {
+          connection.send({
             eventName: eventName,
             data: eventData,
           });
@@ -304,7 +327,11 @@ namespace gdjs {
        * @param [eventData] - Additional data to send with the event.
        */
       export const sendDataToAll = (eventName: string, eventData: string) => {
-        for (const id in connections) sendDataTo(id, eventName, eventData);
+        for (const connection of connections.values())
+          connection.send({
+            eventName: eventName,
+            data: eventData,
+          });
       };
 
       /**
@@ -414,6 +441,17 @@ namespace gdjs {
       };
 
       /**
+       * Forces the usage of a relay (TURN) server, to avoid sharing IP addresses with the other peers.
+       * @param shouldUseRelayServer Whether relay-only should be enabled or disabled.
+       */
+      export const forceUseRelayServer = (shouldUseRelayServer: boolean) => {
+        peerConfig.config = peerConfig.config || {};
+        peerConfig.config.iceTransportPolicy = shouldUseRelayServer
+          ? 'relay'
+          : 'all';
+      };
+
+      /**
        * Overrides the default peer ID. Must be called before connecting to a broker.
        * Overriding the ID may have unwanted consequences. Do not use this feature
        * unless you really know what you are doing.
@@ -472,10 +510,17 @@ namespace gdjs {
        */
       export const getConnectedPeer = (): string => connectedPeers[0] || '';
 
+      /**
+       * A JavaScript-only function to get the raw P2P DataConnection.
+       * This can be useful for example when you want to use a binary protocol
+       * instead of GDevelop variables for high-performance networking.
+       */
+      export const getConnectionInstance = (peerID: string) =>
+        connections.get(peerID);
+
       gdjs.callbacksRuntimeScenePostEvents.push(() => {
-        for (const eventName in events) {
-          if (!events.hasOwnProperty(eventName)) continue;
-          events[eventName].popData();
+        for (const event of events.values()) {
+          event.popData();
         }
         if (disconnectedPeers.length > 0) {
           disconnectedPeers.shift();

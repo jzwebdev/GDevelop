@@ -12,10 +12,24 @@ declare interface ProjectData {
   gdVersion: GdVersionData;
   properties: ProjectPropertiesData;
   resources: ResourcesData;
+  usedResources: ResourceReference[];
   objects: ObjectData[];
   variables: RootVariableData[];
   layouts: LayoutData[];
   externalLayouts: ExternalLayoutData[];
+  eventsFunctionsExtensions: EventsFunctionsExtensionData[];
+  activatedByDefaultInEditorBehaviors?: Array<string>;
+  namedEasings?: NamedEasingData[];
+}
+
+declare type NamedEasingData = {
+  name: string;
+  cubicBezier: [number, number, number, number];
+};
+
+declare interface EventsFunctionsVariablesData {
+  name: string;
+  variables: RootVariableData[];
 }
 
 /** Object containing initial properties for all objects extending {@link gdjs.RuntimeObject}. */
@@ -27,9 +41,117 @@ declare type ObjectData = {
   /** The list of default variables. */
   variables: Array<RootVariableData>;
   /** The list of default behaviors. */
-  behaviors: Array<BehaviorData>;
+  behaviors: Array<BehaviorData & any>;
   /** The list of effects. */
   effects: Array<EffectData>;
+  /**
+   * The resources used by this object excluding the one already used by the
+   * scene and/or the project.
+   * This attribute is only set for objects that are preloaded manually.
+   */
+  usedResources?: ResourceReference[];
+};
+
+declare type ObjectGroupData = {
+  name: string;
+  objects: Array<{ name: string }>;
+};
+
+declare type GetNetworkSyncDataOptions = {
+  playerNumber?: number;
+  isHost?: boolean;
+  syncObjectIdentifiers?: boolean;
+  shouldExcludeVariableFromData?: (variable: Variable) => boolean;
+  syncAllBehaviors?: boolean;
+  syncGameVariables?: boolean;
+  syncSceneTimers?: boolean;
+  syncOnceTriggers?: boolean;
+  syncSounds?: boolean;
+  syncTweens?: boolean;
+  syncLayers?: boolean;
+  syncAsyncTasks?: boolean;
+  syncSceneVisualProps?: boolean;
+  syncFullTileMaps?: boolean;
+  syncLinkedObjects?: boolean;
+};
+
+declare type UpdateFromNetworkSyncDataOptions = {
+  clearSceneStack?: boolean;
+  getExcludedObjectNames?: (runtimeScene: RuntimeScene) => Set<string>;
+  preventSoundsStoppingOnStartup?: boolean;
+  clearInputs?: boolean;
+  keepControl?: boolean;
+  ignoreVariableOwnership?: boolean;
+  shouldExcludeVariableFromUpdate?: (variable: Variable) => boolean;
+};
+
+/** Object containing basic properties for all objects synchronizing over the network. */
+declare type BasicObjectNetworkSyncData = {
+  /** The position of the instance on the X axis. */
+  x: number;
+  /** The position of the instance on the Y axis. */
+  y: number;
+  /** The position of the instance on the Z axis. Defined only for 3D games */
+  z?: number;
+  /** The width of the instance */
+  w: number;
+  /** The height of the instance */
+  h: number;
+  /** Z order of the instance */
+  zo: number;
+  /** The angle of the instance. */
+  a: number;
+  /** If the instance is hidden */
+  hid: boolean;
+  /** The layer where the instance lives  */
+  lay: string;
+  /** All the instant forces */
+  if: Array<ForceNetworkSyncData>;
+  /** Permanent force on X */
+  pfx: number;
+  /** Permanent force on Y */
+  pfy: number;
+  /** Name of the object */
+  n?: string;
+  /** The network ID of the instance. */
+  networkId?: string;
+};
+
+/**
+ * Object containing properties, behaviors, variables, effects and timers
+ * for all objects synchronizing over the network.
+ **/
+declare interface ObjectNetworkSyncData extends BasicObjectNetworkSyncData {
+  /** The behaviors of the object */
+  beh: {
+    [behaviorName: string]: any;
+  };
+  /** The variables of the object */
+  var?: VariableNetworkSyncData[];
+  /** The effects of the object */
+  eff?: {
+    [effectName: string]: EffectNetworkSyncData;
+  };
+  /** The timers of the object */
+  tim?: {
+    [timerName: string]: TimerNetworkSyncData;
+  };
+  /** Tweens */
+  tween?: TweenManagerNetworkSyncData;
+}
+
+declare type ForceNetworkSyncData = {
+  x: float;
+  y: float;
+  a: float;
+  l: float;
+  m: number;
+};
+
+declare type TimerNetworkSyncData = {
+  name: string;
+  time: float;
+  paused: boolean;
 };
 
 declare type VariableType =
@@ -46,13 +168,45 @@ declare type VariableData = Readonly<{
   /** The value of the variable. Leave blank for structures. */
   value?: string | float | boolean;
   /** The children of the structure. Leave blank if value is defined. */
-  children?: VariableData[];
+  children?: Array<VariableData | undefined>;
   /** The type of the variable. Defaults to number. */
   type?: VariableType;
+  /**
+   * A unique identifier, stable across saves of the project, used by the
+   * editor to track the variable (for refactoring after renames...).
+   * Unused by the game engine.
+   */
+  persistentUuid?: string;
 }>;
 
 /** A variable child of a container. Those always have a name. */
 declare type RootVariableData = Omit<VariableData, 'name'> & { name: string };
+
+declare type UnnamedVariableNetworkSyncData = {
+  value: string | float | boolean;
+  children?: Array<VariableNetworkSyncData | undefined>;
+  type: VariableType;
+  owner: number | null;
+};
+declare type VariableNetworkSyncData = UnnamedVariableNetworkSyncData & {
+  name: string;
+};
+
+declare type LayerNetworkSyncData = {
+  timeScale: float;
+  defaultZOrder: integer;
+  hidden: boolean;
+  effects: {
+    [effectName: string]: EffectNetworkSyncData;
+  };
+  followBaseLayerCamera: boolean;
+  clearColor: Array<integer>;
+  cameraX: float;
+  cameraY: float;
+  cameraZ: float;
+  cameraRotation: float;
+  cameraZoom: float;
+};
 
 /** Properties to set up a behavior. */
 declare type BehaviorData = {
@@ -60,6 +214,86 @@ declare type BehaviorData = {
   name: string;
   /** The behavior type. Used by GDJS to find the proper behavior to construct. */
   type: string;
+  /**
+   * False if the behavior state must not be synchronized with other players
+   * (for behaviors reacting to the inputs of the player owning the object).
+   * Synchronized if not specified.
+   */
+  isSynchronizedOverNetwork?: boolean;
+};
+
+declare type BehaviorNetworkSyncData = {
+  act: boolean;
+  props: any;
+};
+
+declare type SceneTweenType =
+  | 'layoutValue'
+  | 'layerValue'
+  | 'variable'
+  | 'cameraZoom'
+  | 'cameraRotation'
+  | 'cameraPosition'
+  | 'cameraZ'
+  | 'colorEffectProperty'
+  | 'numberEffectProperty';
+declare type ObjectTweenType =
+  | 'variable'
+  | 'position'
+  | 'positionX'
+  | 'positionY'
+  | 'positionZ'
+  | 'width'
+  | 'height'
+  | 'depth'
+  | 'angle'
+  | 'rotationX'
+  | 'rotationY'
+  | 'scale'
+  | 'scaleXY'
+  | 'scaleX'
+  | 'scaleY'
+  | 'opacity'
+  | 'characterSize'
+  | 'numberEffectProperty'
+  | 'colorEffectProperty'
+  | 'objectColor'
+  | 'objectColorHSL'
+  | 'objectValue';
+
+declare type TweenInformation = {
+  type: SceneTweenType | ObjectTweenType;
+  layerName?: string;
+  variable?: Variable;
+  effectName?: string;
+  propertyName?: string;
+  scaleFromCenterOfObject?: boolean;
+  useHSLColorTransition?: boolean;
+  destroyObjectWhenFinished?: boolean;
+};
+
+declare type TweenInformationNetworkSyncData = Omit<
+  TweenInformation,
+  'variable' // When synced, a variable is replaced by its path
+> & { variablePath?: string[] };
+
+declare type TweenInstanceNetworkSyncData<T> = {
+  initialValue: T;
+  targetedValue: T;
+  elapsedTime: float;
+  totalDuration: float;
+  easingIdentifier: string;
+  interpolationString: 'linear' | 'exponential';
+  isPaused: boolean;
+  tweenInformation: TweenInformationNetworkSyncData;
+};
+
+declare type TweenManagerNetworkSyncData = {
+  tweens: Record<
+    string,
+    | TweenInstanceNetworkSyncData<float>
+    | TweenInstanceNetworkSyncData<Array<float>>
+  >;
 };
 
 declare interface GdVersionData {
@@ -69,7 +303,15 @@ declare interface GdVersionData {
   revision: number;
 }
 
-declare interface LayoutData {
+declare interface InstanceContainerData {
+  variables: RootVariableData[];
+  instances: InstanceData[];
+  objects: ObjectData[];
+  objectsGroups: ObjectGroupData[];
+  layers: LayerData[];
+}
+
+declare interface LayoutData extends InstanceContainerData {
   r: number;
   v: number;
   b: number;
@@ -77,11 +319,125 @@ declare interface LayoutData {
   name: string;
   stopSoundsOnStartup: boolean;
   title: string;
-  variables: RootVariableData[];
+  behaviorsSharedData: BehaviorSharedData[];
+  usedResources: ResourceReference[];
+  resourcesPreloading?: 'at-startup' | 'never' | 'inherit';
+  resourcesUnloading?: 'at-scene-exit' | 'never' | 'inherit';
+  renderer3DWorldScale: float;
+  uiSettings: InstancesEditorSettings;
+}
+
+declare interface InstancesEditorSettings {
+  grid: boolean;
+  gridType: 'rectangular' | 'isometric';
+  gridWidth: float;
+  gridHeight: float;
+  gridDepth?: float;
+  gridOffsetX: float;
+  gridOffsetY: float;
+  gridOffsetZ?: float;
+  gridColor: int;
+  gridAlpha: float;
+  snap: boolean;
+}
+
+declare interface LayoutNetworkSyncData {
+  id: string;
+  var?: VariableNetworkSyncData[];
+  extVar?: {
+    [extensionName: string]: VariableNetworkSyncData[];
+  };
+  time?: TimeManagerSyncData;
+  tween?: TweenManagerNetworkSyncData;
+  once?: OnceTriggersSyncData;
+  layers?: {
+    [layerName: string]: LayerNetworkSyncData;
+  };
+  async?: AsyncTasksManagerNetworkSyncData;
+  color?: integer;
+  linkedObjects?: Array<[string, string]>;
+}
+
+declare interface SceneStackSceneNetworkSyncData {
+  name: string;
+  networkId: string;
+}
+
+declare type SceneStackNetworkSyncData = SceneStackSceneNetworkSyncData[];
+
+declare type SoundSyncData = {
+  loop: boolean;
+  volume: float;
+  rate: float;
+  resourceName: string;
+  seek: float;
+};
+declare type ChannelsSoundSyncData = Record<integer, SoundSyncData>;
+declare type SoundManagerSyncData = {
+  globalVolume: float;
+  cachedSpatialPosition: Record<number, [number, number, number]>;
+  freeSounds: SoundSyncData[];
+  freeMusics: SoundSyncData[];
+  musics: ChannelsSoundSyncData;
+  sounds: ChannelsSoundSyncData;
+};
+
+declare interface GameNetworkSyncData {
+  var?: VariableNetworkSyncData[];
+  ss?: SceneStackNetworkSyncData;
+  extVar?: {
+    [extensionName: string]: VariableNetworkSyncData[];
+  };
+  sm?: SoundManagerSyncData;
+}
+
+declare interface EventsFunctionsExtensionData {
+  name: string;
+  eventsBasedObjects: EventsBasedObjectData[];
+  globalVariables: RootVariableData[];
+  sceneVariables: RootVariableData[];
+  namedEasings?: NamedEasingData[];
+}
+
+declare interface SceneAndExtensionsData {
+  sceneData: LayoutData;
+  usedExtensionsWithVariablesData: EventsFunctionsExtensionData[];
+}
+
+declare interface EventsBasedObjectData
+  extends EventsBasedObjectVariantData,
+    InstanceContainerData {
+  name: string;
+  isInnerAreaFollowingParentSize: boolean;
+  variants: Array<EventsBasedObjectVariantData>;
+  /** Added at runtime to have the default variant with an empty name instead
+   * of the events-based object name. */
+  defaultVariant?: EventsBasedObjectVariantData;
+}
+
+declare interface EventsBasedObjectVariantData extends InstanceContainerData {
+  name: string;
+  // The flat representation of defaultSize.
+  areaMinX: float;
+  areaMinY: float;
+  areaMinZ: float;
+  areaMaxX: float;
+  areaMaxY: float;
+  areaMaxZ: float;
+  /**
+   * A value shared by every object instances.
+   *
+   * @see gdjs.CustomRuntimeObjectInstanceContainer._initialInnerArea
+   **/
+  _initialInnerArea: {
+    min: [float, float, float];
+    max: [float, float, float];
+  } | null;
   instances: InstanceData[];
   objects: ObjectData[];
   layers: LayerData[];
-  behaviorsSharedData: BehaviorSharedData[];
+  usedResources: ResourceReference[];
+  editionSettings: InstancesEditorSettings;
 }
 
 declare interface BehaviorSharedData {
@@ -91,24 +447,47 @@ declare interface BehaviorSharedData {
 
 declare interface ExternalLayoutData {
   name: string;
+  associatedLayout: string;
   instances: InstanceData[];
+  editionSettings: InstancesEditorSettings;
 }
 
-declare interface InstanceData {
+declare interface InstancePersistentUuidData {
   persistentUuid: string;
-  angle: number;
-  customSize: boolean;
-  height: number;
+}
+
+declare interface InstanceData extends InstancePersistentUuidData {
   layer: string;
-  locked: boolean;
+  locked?: boolean;
+  sealed?: boolean;
+  /** True if the instance starts hidden (it can be shown with the "Show" action). */
+  hidden?: boolean;
   name: string;
-  width: number;
+
   x: number;
   y: number;
+  z?: number;
+
+  angle: number;
+  rotationX?: number;
+  rotationY?: number;
+
   zOrder: number;
+  opacity?: number;
+
+  flippedX?: boolean;
+  flippedY?: boolean;
+  flippedZ?: boolean;
+
+  customSize: boolean;
+  width: number;
+  height: number;
+  depth?: number;
+
   numberProperties: InstanceNumberProperty[];
   stringProperties: InstanceStringProperty[];
   initialVariables: RootVariableData[];
+  behaviorOverridings?: Array<BehaviorData & any>;
 }
 
 declare interface InstanceNumberProperty {
@@ -117,19 +496,29 @@ declare interface InstanceNumberProperty {
 }
 declare interface InstanceStringProperty {
   name: string;
-  value: number;
+  value: string;
 }
 
 declare interface LayerData {
   name: string;
+  renderingType?: '' | '2d' | '3d' | '2d+3d';
+  cameraType?: 'perspective' | 'orthographic';
+  defaultCameraBehavior?: 'top-left-anchored-if-never-moved' | 'do-nothing';
   visibility: boolean;
   cameras: CameraData[];
   effects: EffectData[];
+  /** Used by `InGameEditor` to toggle effects */
+  _hiddenEffects?: EffectData[];
   ambientLightColorR: number;
   ambientLightColorG: number;
   ambientLightColorB: number;
+  camera3DFieldOfView?: float;
+  camera3DFarPlaneDistance?: float;
+  camera3DNearPlaneDistance?: float;
+  camera2DPlaneMaxDrawingDistance?: float;
   isLightingLayer: boolean;
   followBaseLayerCamera: boolean;
+  isLocked?: boolean;
 }
 
 declare interface CameraData {
@@ -146,6 +535,7 @@ declare interface CameraData {
 declare interface EffectData {
   effectType: string;
   name: string;
+  disabled?: boolean;
   doubleParameters: {
     [name: string]: number;
   };
@@ -157,6 +547,13 @@ declare interface EffectData {
   };
 }
 
+declare interface EffectNetworkSyncData {
+  ena: boolean;
+  fc: {
+    [name: string]: any;
+  };
+}
+
 declare interface ProjectPropertiesData {
   adaptGameResolutionAtRuntime: boolean;
   folderProject: boolean;
@@ -165,11 +562,14 @@ declare interface ProjectPropertiesData {
   projectFile: string;
   scaleMode: 'linear' | 'nearest';
   pixelsRounding: boolean;
-  sizeOnStartupMode: string;
-  useExternalSourceFiles: boolean;
+  antialiasingMode: 'none' | 'MSAA';
+  antialisingEnabledOnMobile: boolean;
+  sizeOnStartupMode: '' | 'scaleOuter' | 'adaptWidth' | 'adaptHeight';
   version: string;
   name: string;
   author: string;
+  authorIds: string[];
+  authorUsernames: string[];
   windowWidth: number;
   windowHeight: number;
   latestCompilationDirectory: string;
@@ -177,16 +577,32 @@ declare interface ProjectPropertiesData {
   minFPS: number;
   verticalSync: boolean;
   loadingScreen: LoadingScreenData;
+  watermark: WatermarkData;
   currentPlatform: string;
   extensionProperties: Array<ExtensionProperty>;
   useDeprecatedZeroAsDefaultZOrder?: boolean;
+  useDeprecatedZeroAsDefaultStringVariable?: boolean;
   projectUuid?: string;
+  sceneResourcesPreloading?: 'at-startup' | 'never';
+  sceneResourcesUnloading?: 'at-scene-exit' | 'never';
+  areEffectsHiddenInEditor?: boolean;
 }
 
 declare interface ExtensionProperty {
   extension: string;
   property: string;
   value: string;
+}
+
+declare interface WatermarkData {
+  showWatermark: boolean;
+  placement:
+    | 'top-left'
+    | 'top-right'
+    | 'bottom-left'
+    | 'bottom-right'
+    | 'bottom'
+    | 'top';
 }
 
 declare interface LoadingScreenData {
@@ -210,7 +626,6 @@ declare interface ResourcesData {
 }
 
 declare interface ResourceData {
-  alwaysLoaded?: boolean;
   file: string;
   kind: ResourceKind;
   metadata: string;
@@ -220,6 +635,11 @@ declare interface ResourceData {
   disablePreload?: boolean;
   preloadAsSound?: boolean;
   preloadAsMusic?: boolean;
+  preloadInCache?: boolean;
+}
+
+declare interface ResourceReference {
+  name: string;
 }
 
 declare type ResourceKind =
@@ -228,4 +648,11 @@ declare type ResourceKind =
   | 'font'
   | 'video'
   | 'json'
-  | 'bitmapFont';
+  | 'tilemap'
+  | 'tileset'
+  | 'bitmapFont'
+  | 'model3D'
+  | 'atlas'
+  | 'spine'
+  | 'internal-in-game-editor-only-svg'
+  | 'fake-resource-kind-for-testing-only';

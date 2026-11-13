@@ -4,8 +4,8 @@
  * reserved. This project is released under the MIT License.
  */
 
-#ifndef GDCORE_EXTERNALLAYOUT_H
-#define GDCORE_EXTERNALLAYOUT_H
+#pragma once
+
 #include <memory>
 
 #include "GDCore/Project/InitialInstancesContainer.h"
@@ -86,7 +86,7 @@ class GD_CORE_API ExternalLayout {
   /**
    * \brief Unserialize the external layout.
    */
-  void UnserializeFrom(const SerializerElement& element);
+  void UnserializeFrom(gd::Project &project, const SerializerElement& element);
   ///@}
 
  private:
@@ -96,19 +96,5 @@ class GD_CORE_API ExternalLayout {
   gd::String associatedLayout;
 };
 
-/**
- * \brief Functor testing ExternalLayout' name
- */
-struct ExternalLayoutHasName
-    : public std::binary_function<std::unique_ptr<gd::ExternalLayout>,
-                                  gd::String,
-                                  bool> {
-  bool operator()(const std::unique_ptr<gd::ExternalLayout>& externalLayout,
-                  gd::String name) const {
-    return externalLayout->GetName() == name;
-  }
-};
-
 }  // namespace gd
 
-#endif  // GDCORE_EXTERNALLAYOUT_H

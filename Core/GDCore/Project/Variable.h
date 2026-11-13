@@ -4,12 +4,12 @@
  * reserved. This project is released under the MIT License.
  */
 
-#ifndef GDCORE_VARIABLE_H
-#define GDCORE_VARIABLE_H
+#pragma once
+
+#include <cmath>
 #include <map>
 #include <memory>
 #include <vector>
-#include <cmath>
 
 #include "GDCore/String.h"
 namespace gd {
@@ -30,6 +30,10 @@ class GD_CORE_API Variable {
  public:
   static gd::Variable badVariable;
   enum Type {
+    Unknown,
+    /** Used when objects of a group have different types for a variable. */
+    MixedTypes,
+
     // Primitive types
     String,
     Number,
@@ -48,7 +52,7 @@ class GD_CORE_API Variable {
   /**
    * \brief Default constructor creating a variable with 0 as value.
    */
-  Variable() : value(0), type(Type::Number){};
+  Variable() : value(0), type(Type::Number), hasMixedValues(false) {};
   Variable(const Variable&);
   virtual ~Variable(){};
 
@@ -85,6 +89,7 @@ class GD_CORE_API Variable {
   void SetString(const gd::String& newStr) {
     str = newStr;
     type = Type::String;
+    hasMixedValues = false;
   }
 
   /**
@@ -98,8 +103,9 @@ class GD_CORE_API Variable {
   void SetValue(double val) {
     value = val;
     // NaN values are not supported by GDevelop nor the serializer.
-    if(std::isnan(value)) value = 0.0;
+    if (std::isnan(value)) value = 0.0;
     type = Type::Number;
+    hasMixedValues = false;
   }
 
   /**
@@ -113,7 +119,35 @@ class GD_CORE_API Variable {
   void SetBool(bool val) {
     boolVal = val;
     type = Type::Boolean;
+    hasMixedValues = false;
   }
+
+  /**
+   * \brief Return true when objects of a group have different values for a
+   * variable.
+   */
+  bool HasMixedValues() const {
+    return hasMixedValues;
+  }
+
+  /**
+   * \brief Return true when objects of a group have different values for a
+   * variable.
+   */
+  void MarkAsMixedValues();
+
+  /**
+   * \brief Clear the "mixed values" marker on this variable and all its
+   * children (a variable with entirely mixed types is casted back to a
+   * number).
+   *
+   * This marker is only relevant for the temporary variables containers built
+   * by the editor to display the variables shared by several objects (see
+   * `gd::ObjectRefactorer::MergeVariableContainers`). It must never be kept
+   * on a variable stored in a project (object variables, instance
+   * variables...).
+   */
+  void ClearMixedValues();
 
   // Operators are overloaded to allow accessing to variable using a simple
   // int-like semantic.
@@ -166,6 +200,9 @@ class GD_CORE_API Variable {
   bool operator==(const bool val) const { return GetBool() == val; };
   bool operator!=(const bool val) const { return GetBool() != val; };
 
+  bool operator==(const gd::Variable& variable) const;
+  bool operator!=(const gd::Variable& variable) const;
+
   ///@}
 
   /** \name Collection types
@@ -185,9 +222,9 @@ class GD_CORE_API Variable {
    * \brief Get the count of children that the variable has.
    */
   size_t GetChildrenCount() const {
-    return type == Type::Structure
-               ? children.size()
-               : type == Type::Array ? childrenArray.size() : 0;
+    return type == Type::Structure ? children.size()
+           : type == Type::Array   ? childrenArray.size()
+                                   : 0;
   };
 
   /** \name Structure
@@ -291,11 +328,37 @@ class GD_CORE_API Variable {
   void RemoveAtIndex(const size_t index);
 
   /**
+   * \brief Move child in array.
+   */
+  void MoveChildInArray(const size_t oldIndex, const size_t newIndex);
+
+  /**
+   * \brief Insert child in array.
+   */
+  bool InsertAtIndex(const gd::Variable& variable, const size_t index);
+
+  /**
+   * \brief Insert a child in a structure.
+   */
+  bool InsertChild(const gd::String& name, const gd::Variable& variable);
+
+  /**
    * \brief Get the vector containing all the children.
    */
   const std::vector<std::shared_ptr<Variable>>& GetAllChildrenArray() const {
     return childrenArray;
   }
+
+  /**
+   * \brief Set if the children must be folded.
+   */
+  void SetFolded(bool fold = true) { folded = fold; }
+
+  /**
+   * \brief True if the children should be folded in the variables editor.
+   */
+  bool IsFolded() const { return folded; }
+
   ///@}
   ///@}
 
@@ -312,28 +375,58 @@ class GD_CORE_API Variable {
    * \brief Unserialize the variable.
    */
   void UnserializeFrom(const SerializerElement& element);
+
+  /**
+   * \brief Reset the persistent UUID used to recognize
+   * the same variable between serialization.
+   */
+  Variable& ResetPersistentUuid();
+
+  /**
+   * \brief Set the persistent UUID if it is not set already, and do the
+   * same for all the children - contrary to `ResetPersistentUuid`, existing
+   * UUIDs are preserved (so that they stay stable across serializations,
+   * avoiding useless changes in the project file).
+   */
+  Variable& EnsurePersistentUuid();
+
+  /**
+   * \brief Remove the persistent UUID - when the variable no
+   * longer needs to be recognized between serializations.
+   */
+  Variable& ClearPersistentUuid();
+
+  /**
+   * \brief Get the persistent UUID used to recognize
+   * the same variable between serialization.
+   */
+  const gd::String& GetPersistentUuid() const { return persistentUuid; };
   ///@}
 
- private:
   /**
    * \brief Converts a Type to a string.
    */
   static gd::String TypeAsString(Type t);
 
+private:
   /**
    * \brief Converts a string to a Type.
    */
   static Type StringAsType(const gd::String& str);
 
+  bool folded = false;
   mutable Type type;
   mutable gd::String str;
   mutable double value;
-  mutable bool boolVal;
+  mutable bool boolVal = false;
+  mutable bool hasMixedValues;
   mutable std::map<gd::String, std::shared_ptr<Variable>>
       children;  ///< Children, when the variable is considered as a structure.
   mutable std::vector<std::shared_ptr<Variable>>
       childrenArray;  ///< Children, when the variable is considered as an
                       ///< array.
+  mutable gd::String persistentUuid;  ///< A persistent random version 4 UUID,
+                                      ///< useful for computing changesets.
 
   /**
    * Initialize children by copying them from another variable.  Used by
@@ -343,5 +436,3 @@ class GD_CORE_API Variable {
 };
 
 }  // namespace gd
-
-#endif  // GDCORE_VARIABLE_H

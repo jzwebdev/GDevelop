@@ -1,4 +1,5 @@
-// @flow
+//@ts-check
+/// <reference path="../JsExtensionTypes.d.ts" />
 /**
  * This is a declaration of an extension for GDevelop 5.
  *
@@ -12,26 +13,24 @@
  * More information on https://github.com/4ian/GDevelop/blob/master/newIDE/README-extensions.md
  */
 
-/*::
-// Import types to allow Flow to do static type checking on this file.
-// Extensions declaration are typed using Flow (like the editor), but the files
-// for the game engine are checked with TypeScript annotations.
-import { type ObjectsRenderingService, type ObjectsEditorService } from '../JsExtensionTypes.flow.js'
-*/
-
+/** @type {ExtensionModule} */
 module.exports = {
-  createExtension: function (
-    _ /*: (string) => string */,
-    gd /*: libGDevelop */
-  ) {
+  createExtension: function (_, gd) {
     const extension = new gd.PlatformExtension();
-    extension.setExtensionInformation(
-      'MyDummyExtension',
-      _('My Dummy Extension'),
-      _('An example of a declaration of an extension'),
-      'Florian Rival',
-      'MIT'
-    );
+    extension
+      .setExtensionInformation(
+        'MyDummyExtension',
+        _('My Dummy Extension'),
+        _('An example of a declaration of an extension'),
+        'Florian Rival',
+        'MIT'
+      )
+      .setShortDescription(
+        'Example/dummy extension for testing extension declaration patterns.'
+      );
+    extension
+      .addInstructionOrExpressionGroupMetadata(_('My Dummy Extension'))
+      .setIcon('CppPlatform/Extensions/topdownmovementicon.png');
 
     // Register Properties
     extension
@@ -65,7 +64,7 @@ module.exports = {
       .setFullName(_('Dummy effect example'))
       .setDescription(
         _(
-          'This is an example of an effect ("shader") with an [external link to the wiki](http://wiki.compilgames.net/doku.php/gdevelop5/) and **bold letters**.'
+          'This is an example of an effect ("shader") with an [external link to the wiki](https://wiki.gdevelop.io/gdevelop5/) and **bold letters**.'
         )
       )
       .addIncludeFile('Extensions/ExampleJsExtension/dummyeffect.js');
@@ -86,7 +85,7 @@ module.exports = {
       .addExtraInfo('image');
     dummyEffectProperties
       .getOrCreate('someColor')
-      .setValue('#0022FF')
+      .setValue('255;3;62')
       .setLabel(_("Color (won't be used, just for demonstration purpose)"))
       .setType('color')
       .setDescription(_('Another optional description.'));
@@ -106,7 +105,7 @@ module.exports = {
           'This is an example of a condition displayed in the events sheet. Will return true if the number is less than 10 and the length of the text is less than 5.'
         ),
         _('Call the example condition with _PARAM0_ and _PARAM1_'),
-        _('Dummy Extension'),
+        '',
         'res/conditions/camera24.png',
         'res/conditions/camera.png'
       )
@@ -123,7 +122,7 @@ module.exports = {
         'DummyExpression',
         _('Dummy expression example'),
         _('This is an example of an expression'),
-        _('Dummy Extension'),
+        '',
         'res/actions/camera.png'
       )
       .addParameter('expression', _('Maximum'), '', false)
@@ -135,7 +134,7 @@ module.exports = {
         'DummyStrExpression',
         _('Dummy string expression example'),
         _('This is an example of an expression returning a string'),
-        _('Dummy Extension'),
+        '',
         'res/actions/camera.png'
       )
       .getCodeExtraInformation()
@@ -150,7 +149,6 @@ module.exports = {
     // Everything that is stored inside the behavior is in "behaviorContent" and is automatically
     // saved/loaded to JSON.
     var dummyBehavior = new gd.BehaviorJsImplementation();
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehavior.updateProperty = function (
       behaviorContent,
       propertyName,
@@ -167,7 +165,6 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehavior.getProperties = function (behaviorContent) {
       var behaviorProperties = new gd.MapStringPropertyDescriptor();
 
@@ -184,7 +181,6 @@ module.exports = {
 
       return behaviorProperties;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehavior.initializeContent = function (behaviorContent) {
       behaviorContent.setStringAttribute('property1', 'Initial value 1');
       behaviorContent.setBoolAttribute('property2', true);
@@ -194,10 +190,11 @@ module.exports = {
         'DummyBehavior',
         _('Dummy behavior for testing'),
         'DummyBehavior',
-        _('This dummy behavior does nothing'),
+        _('Do nothing.'),
         '',
         'CppPlatform/Extensions/topdownmovementicon.png',
         'DummyBehavior',
+        //@ts-ignore The class hierarchy is incorrect leading to a type error, but this is valid.
         dummyBehavior,
         new gd.BehaviorsSharedData()
       )
@@ -212,7 +209,6 @@ module.exports = {
     // Create a new gd.BehaviorSharedDataJsImplementation object and implement the methods
     // that are called to get and set the properties of the shared data.
     var dummyBehaviorWithSharedData = new gd.BehaviorJsImplementation();
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehaviorWithSharedData.updateProperty = function (
       behaviorContent,
       propertyName,
@@ -225,7 +221,6 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehaviorWithSharedData.getProperties = function (behaviorContent) {
       var behaviorProperties = new gd.MapStringPropertyDescriptor();
 
@@ -235,13 +230,11 @@ module.exports = {
 
       return behaviorProperties;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     dummyBehaviorWithSharedData.initializeContent = function (behaviorContent) {
       behaviorContent.setStringAttribute('property1', 'Initial value 1');
     };
 
     var sharedData = new gd.BehaviorSharedDataJsImplementation();
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     sharedData.updateProperty = function (
       sharedContent,
       propertyName,
@@ -254,7 +247,6 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     sharedData.getProperties = function (sharedContent) {
       var sharedProperties = new gd.MapStringPropertyDescriptor();
 
@@ -264,7 +256,6 @@ module.exports = {
 
       return sharedProperties;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating a behavior
     sharedData.initializeContent = function (behaviorContent) {
       behaviorContent.setStringAttribute(
         'sharedProperty1',
@@ -277,10 +268,11 @@ module.exports = {
         'DummyBehaviorWithSharedData',
         _('Dummy behavior with shared data for testing'),
         'DummyBehaviorWithSharedData',
-        _('This dummy behavior uses shared data and does nothing'),
+        _('Do nothing but use shared data.'),
         '',
         'CppPlatform/Extensions/topdownmovementicon.png',
         'DummyBehaviorWithSharedData',
+        //@ts-ignore The class hierarchy is incorrect leading to a type error, but this is valid.
         dummyBehaviorWithSharedData,
         sharedData
       )
@@ -299,12 +291,9 @@ module.exports = {
     // Everything that is stored inside the object is in "content" and is automatically
     // saved/loaded to JSON.
     var dummyObject = new gd.ObjectJsImplementation();
-    // $FlowExpectedError - ignore Flow warning as we're creating an object
-    dummyObject.updateProperty = function (
-      objectContent,
-      propertyName,
-      newValue
-    ) {
+    dummyObject.updateProperty = function (propertyName, newValue) {
+      const objectContent = this.content;
+
       if (propertyName === 'My first property') {
         objectContent.property1 = newValue;
         return true;
@@ -324,9 +313,9 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating an object
-    dummyObject.getProperties = function (objectContent) {
+    dummyObject.getProperties = function () {
       var objectProperties = new gd.MapStringPropertyDescriptor();
+      const objectContent = this.content;
 
       objectProperties
         .getOrCreate('My first property')
@@ -350,23 +339,17 @@ module.exports = {
 
       return objectProperties;
     };
-    dummyObject.setRawJSONContent(
-      JSON.stringify({
-        property1: 'Hello world',
-        property2: true,
-        property3: 123,
-        myImage: '',
-      })
-    );
+    dummyObject.content = {
+      property1: 'Hello world',
+      property2: true,
+      property3: 123,
+      myImage: '',
+    };
 
-    // $FlowExpectedError - ignore Flow warning as we're creating an object
     dummyObject.updateInitialInstanceProperty = function (
-      objectContent,
       instance,
       propertyName,
-      newValue,
-      project,
-      layout
+      newValue
     ) {
       if (propertyName === 'My instance property') {
         instance.setRawStringProperty('instanceprop1', newValue);
@@ -379,13 +362,7 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError - ignore Flow warning as we're creating an object
-    dummyObject.getInitialInstanceProperties = function (
-      content,
-      instance,
-      project,
-      layout
-    ) {
+    dummyObject.getInitialInstanceProperties = function (instance) {
       var instanceProperties = new gd.MapStringPropertyDescriptor();
 
       instanceProperties
@@ -410,7 +387,8 @@ module.exports = {
       .setIncludeFile('Extensions/ExampleJsExtension/dummyruntimeobject.js')
       .addIncludeFile(
         'Extensions/ExampleJsExtension/dummyruntimeobject-pixi-renderer.js'
-      );
+      )
+      .setCategory('Testing');
 
     object
       .addAction(
@@ -434,7 +412,7 @@ module.exports = {
   },
   /**
    * You can optionally add sanity tests that will check the basic working
-   * of your extension behaviors/objects by instanciating behaviors/objects
+   * of your extension behaviors/objects by instantiating behaviors/objects
    * and setting the property to a given value.
    *
    * If you don't have any tests, you can simply return an empty array.
@@ -442,10 +420,7 @@ module.exports = {
    * But it is recommended to create tests for the behaviors/objects properties you created
    * to avoid mistakes.
    */
-  runExtensionSanityTests: function (
-    gd /*: libGDevelop */,
-    extension /*: gdPlatformExtension*/
-  ) {
+  runExtensionSanityTests: function (gd, extension) {
     const dummyBehavior = extension
       .getBehaviorMetadata('MyDummyExtension::DummyBehavior')
       .get();
@@ -470,9 +445,7 @@ module.exports = {
    *
    * ℹ️ Run `node import-GDJS-Runtime.js` (in newIDE/app/scripts) if you make any change.
    */
-  registerEditorConfigurations: function (
-    objectsEditorService /*: ObjectsEditorService */
-  ) {
+  registerEditorConfigurations: function (objectsEditorService) {
     objectsEditorService.registerEditorConfiguration(
       'MyDummyExtension::DummyObject',
       objectsEditorService.getDefaultObjectJsImplementationPropertiesEditor({
@@ -485,97 +458,89 @@ module.exports = {
    *
    * ℹ️ Run `node import-GDJS-Runtime.js` (in newIDE/app/scripts) if you make any change.
    */
-  registerInstanceRenderers: function (
-    objectsRenderingService /*: ObjectsRenderingService */
-  ) {
+  registerInstanceRenderers: function (objectsRenderingService) {
     const RenderedInstance = objectsRenderingService.RenderedInstance;
     const PIXI = objectsRenderingService.PIXI;
 
     /**
      * Renderer for instances of DummyObject inside the IDE.
-     *
-     * @extends RenderedInstance
-     * @class RenderedDummyObjectInstance
-     * @constructor
      */
-    function RenderedDummyObjectInstance(
-      project,
-      layout,
-      instance,
-      associatedObject,
-      pixiContainer,
-      pixiResourcesLoader
-    ) {
-      RenderedInstance.call(
-        this,
+    class RenderedDummyObjectInstance extends RenderedInstance {
+      constructor(
         project,
-        layout,
         instance,
-        associatedObject,
+        associatedObjectConfiguration,
         pixiContainer,
         pixiResourcesLoader
-      );
+      ) {
+        super(
+          project,
+          instance,
+          associatedObjectConfiguration,
+          pixiContainer,
+          pixiResourcesLoader
+        );
 
-      //Setup the PIXI object:
-      this._pixiObject = new PIXI.Text('This is a dummy object', {
-        align: 'left',
-      });
-      this._pixiObject.anchor.x = 0.5;
-      this._pixiObject.anchor.y = 0.5;
-      this._pixiContainer.addChild(this._pixiObject);
-      this.update();
+        //Setup the PIXI object:
+        this._pixiObject = new PIXI.Text('This is a dummy object', {
+          align: 'left',
+        });
+        this._pixiObject.anchor.x = 0.5;
+        this._pixiObject.anchor.y = 0.5;
+        this._pixiContainer.addChild(this._pixiObject);
+        this.update();
+      }
+
+      onRemovedFromScene() {
+        super.onRemovedFromScene();
+        this._pixiObject.destroy(true);
+      }
+
+      /**
+       * Return the path to the thumbnail of the specified object.
+       */
+      static getThumbnail(project, resourcesLoader, objectConfiguration) {
+        return 'CppPlatform/Extensions/texticon24.png';
+      }
+
+      /**
+       * This is called to update the PIXI object on the scene editor
+       */
+      update() {
+        const object = gd.castObject(
+          this._associatedObjectConfiguration,
+          gd.ObjectJsImplementation
+        );
+
+        // Read a property from the object
+        this._pixiObject.text = object.content.property1;
+
+        // Read position and angle from the instance
+        this._pixiObject.position.x =
+          this._instance.getX() + this._pixiObject.width / 2;
+        this._pixiObject.position.y =
+          this._instance.getY() + this._pixiObject.height / 2;
+        this._pixiObject.rotation = RenderedInstance.toRad(
+          this._instance.getAngle()
+        );
+        // Custom size can be read in this.getCustomWidth() and
+        // this.getCustomHeight()
+      }
+
+      /**
+       * Return the width of the instance, when it's not resized.
+       */
+      getDefaultWidth() {
+        return this._pixiObject.width;
+      }
+
+      /**
+       * Return the height of the instance, when it's not resized.
+       */
+      getDefaultHeight() {
+        return this._pixiObject.height;
+      }
     }
-    RenderedDummyObjectInstance.prototype = Object.create(
-      RenderedInstance.prototype
-    );
-
-    /**
-     * Return the path to the thumbnail of the specified object.
-     */
-    RenderedDummyObjectInstance.getThumbnail = function (
-      project,
-      resourcesLoader,
-      object
-    ) {
-      return 'CppPlatform/Extensions/texticon24.png';
-    };
-
-    /**
-     * This is called to update the PIXI object on the scene editor
-     */
-    RenderedDummyObjectInstance.prototype.update = function () {
-      // Read a property from the object
-      const property1Value = this._associatedObject
-        .getProperties()
-        .get('My first property')
-        .getValue();
-      this._pixiObject.text = property1Value;
-
-      // Read position and angle from the instance
-      this._pixiObject.position.x =
-        this._instance.getX() + this._pixiObject.width / 2;
-      this._pixiObject.position.y =
-        this._instance.getY() + this._pixiObject.height / 2;
-      this._pixiObject.rotation = RenderedInstance.toRad(
-        this._instance.getAngle()
-      );
-      // Custom size can be read in instance.getCustomWidth() and
-      // instance.getCustomHeight()
-    };
-
-    /**
-     * Return the width of the instance, when it's not resized.
-     */
-    RenderedDummyObjectInstance.prototype.getDefaultWidth = function () {
-      return this._pixiObject.width;
-    };
-
-    /**
-     * Return the height of the instance, when it's not resized.
-     */
-    RenderedDummyObjectInstance.prototype.getDefaultHeight = function () {
-      return this._pixiObject.height;
-    };
 
     objectsRenderingService.registerInstanceRenderer(
       'MyDummyExtension::DummyObject',

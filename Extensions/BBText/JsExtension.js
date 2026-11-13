@@ -1,4 +1,5 @@
-// @flow
+//@ts-check
+/// <reference path="../JsExtensionTypes.d.ts" />
 /**
  * This is a declaration of an extension for GDevelop 5.
  *
@@ -12,18 +13,11 @@
  * More information on https://github.com/4ian/GDevelop/blob/master/newIDE/README-extensions.md
  */
 
-/*::
-// Import types to allow Flow to do static type checking on this file.
-// Extensions declaration are typed using Flow (like the editor), but the files
-// for the game engine are checked with TypeScript annotations.
-import { type ObjectsRenderingService, type ObjectsEditorService } from '../JsExtensionTypes.flow.js'
-*/
+const stringifyOptions = (options) => '["' + options.join('","') + '"]';
 
+/** @type {ExtensionModule} */
 module.exports = {
-  createExtension: function (
-    _ /*: (string) => string */,
-    gd /*: libGDevelop */
-  ) {
+  createExtension: function (_, gd) {
     const extension = new gd.PlatformExtension();
     extension
       .setExtensionInformation(
@@ -33,15 +27,43 @@ module.exports = {
         'Todor Imreorov',
         'Open source (MIT License)'
       )
-      .setExtensionHelpPath('/objects/bbtext');
+      .setShortDescription(
+        'Rich text with BBCode markup: bold, italic, colors, sizes, shadows in a single object.'
+      )
+      .setDimension('2D')
+      .setExtensionHelpPath('/objects/bbtext')
+      .setCategory('Text');
+    extension
+      .addInstructionOrExpressionGroupMetadata(_('BBCode Text Object'))
+      .setIcon('JsPlatform/Extensions/bbcode32.png');
 
     var objectBBText = new gd.ObjectJsImplementation();
-    // $FlowExpectedError
-    objectBBText.updateProperty = function (
-      objectContent,
-      propertyName,
-      newValue
-    ) {
+    objectBBText.updateProperty = function (propertyName, newValue) {
+      const objectContent = this.content;
+      if (propertyName === 'align') {
+        const normalizedValue = newValue.toLowerCase();
+        if (
+          normalizedValue === 'left' ||
+          normalizedValue === 'center' ||
+          normalizedValue === 'right'
+        ) {
+          objectContent.align = normalizedValue;
+          return true;
+        }
+        return false;
+      }
+      if (propertyName === 'verticalTextAlignment') {
+        const normalizedValue = newValue.toLowerCase();
+        if (
+          normalizedValue === 'top' ||
+          normalizedValue === 'center' ||
+          normalizedValue === 'bottom'
+        ) {
+          objectContent.verticalTextAlignment = normalizedValue;
+          return true;
+        }
+        return false;
+      }
       if (propertyName in objectContent) {
         if (typeof objectContent[propertyName] === 'boolean')
           objectContent[propertyName] = newValue === '1';
@@ -53,96 +75,89 @@ module.exports = {
 
       return false;
     };
-    // $FlowExpectedError
-    objectBBText.getProperties = function (objectContent) {
+    objectBBText.getProperties = function () {
       const objectProperties = new gd.MapStringPropertyDescriptor();
+      const objectContent = this.content;
 
       objectProperties
         .getOrCreate('text')
         .setValue(objectContent.text)
-        .setType('textarea')
+        .setType('multilinestring')
         .setLabel(_('BBCode text'));
 
       objectProperties
         .getOrCreate('color')
         .setValue(objectContent.color)
         .setType('color')
-        .setLabel(_('Base color'));
-
-      objectProperties
-        .getOrCreate('opacity')
-        .setValue(objectContent.opacity.toString())
-        .setType('number')
-        .setLabel(_('Opacity (0-255)'));
+        .setLabel(_('Base color'))
+        .setGroup(_('Appearance'));
 
       objectProperties
         .getOrCreate('fontSize')
         .setValue(objectContent.fontSize.toString())
         .setType('number')
-        .setLabel(_('Base size'));
+        .setLabel(_('Base size'))
+        .setGroup(_('Font'));
 
       objectProperties
         .getOrCreate('align')
         .setValue(objectContent.align)
         .setType('choice')
-        .addExtraInfo('left')
-        .addExtraInfo('center')
-        .addExtraInfo('right')
-        .setLabel(_('Base alignment'));
+        .addChoice('left', _('Left'))
+        .addChoice('center', _('Center'))
+        .addChoice('right', _('Right'))
+        .setLabel(_('Base alignment'))
+        .setGroup(_('Appearance'));
+
+      if (!objectContent.verticalTextAlignment) {
+        objectContent.verticalTextAlignment = 'top';
+      }
+      objectProperties
+        .getOrCreate('verticalTextAlignment')
+        .setValue(objectContent.verticalTextAlignment)
+        .setType('choice')
+        .addChoice('top', _('Top'))
+        .addChoice('center', _('Center'))
+        .addChoice('bottom', _('Bottom'))
+        .setLabel(_('Vertical alignment'))
+        .setGroup(_('Appearance'));
 
       objectProperties
         .getOrCreate('fontFamily')
         .setValue(objectContent.fontFamily)
         .setType('resource')
         .addExtraInfo('font')
-        .setLabel(_('Base font family'));
-
-      objectProperties
-        .getOrCreate('wordWrap')
-        .setValue(objectContent.wordWrap ? 'true' : 'false')
-        .setType('boolean')
-        .setLabel(_('Word wrapping'));
+        .setLabel(_('Font'))
+        .setGroup(_('Font'));
 
       objectProperties
         .getOrCreate('visible')
         .setValue(objectContent.visible ? 'true' : 'false')
         .setType('boolean')
-        .setLabel(_('Visible on start'));
+        .setLabel(_('Visible on start'))
+        .setGroup(_('Appearance'));
 
       return objectProperties;
     };
-    objectBBText.setRawJSONContent(
-      JSON.stringify({
-        text:
-          '[b]bold[/b] [i]italic[/i] [size=15]smaller[/size] [font=times]times[/font] font\n[spacing=12]spaced out[/spacing]\n[outline=yellow]outlined[/outline] [shadow=red]DropShadow[/shadow] ',
-        opacity: 255,
-        fontSize: 20,
-        visible: true,
-        color: '0;0;0',
-        fontFamily: 'Arial',
-        align: 'left',
-        wordWrap: true,
-      })
-    );
+    objectBBText.content = {
+      text: '[b]bold[/b] [i]italic[/i] [size=15]smaller[/size] [font=times]times[/font] font\n[spacing=12]spaced out[/spacing]\n[outline=yellow]outlined[/outline] [shadow=red]DropShadow[/shadow] ',
+      opacity: 255,
+      fontSize: 20,
+      visible: true,
+      color: '0;0;0',
+      fontFamily: 'Arial',
+      align: 'left',
+      verticalTextAlignment: 'top',
+    };
 
-    // $FlowExpectedError
     objectBBText.updateInitialInstanceProperty = function (
-      objectContent,
       instance,
       propertyName,
-      newValue,
-      project,
-      layout
+      newValue
     ) {
       return false;
     };
-    // $FlowExpectedError
-    objectBBText.getInitialInstanceProperties = function (
-      content,
-      instance,
-      project,
-      layout
-    ) {
+    objectBBText.getInitialInstanceProperties = function (instance) {
       var instanceProperties = new gd.MapStringPropertyDescriptor();
       return instanceProperties;
     };
@@ -151,9 +166,7 @@ module.exports = {
       .addObject(
         'BBText',
         _('BBText'),
-        _(
-          'Displays a rich text label using BBCode markup (allowing to set parts of the text as bold, italic, use different colors and shadows).'
-        ),
+        _('Formatted text allowing to mix styles using BBCode markup.'),
         'JsPlatform/Extensions/bbcode32.png',
         objectBBText
       )
@@ -161,7 +174,10 @@ module.exports = {
       .addIncludeFile('Extensions/BBText/bbtextruntimeobject-pixi-renderer.js')
       .addIncludeFile(
         'Extensions/BBText/pixi-multistyle-text/dist/pixi-multistyle-text.umd.js'
-      );
+      )
+      .setCategory('Text')
+      .addDefaultBehavior('EffectCapability::EffectBehavior')
+      .addDefaultBehavior('OpacityCapability::OpacityBehavior');
 
     /**
      * Utility function to add both a setter and a getter to a property from a list.
@@ -185,7 +201,10 @@ module.exports = {
             .addParameter('object', objectName, objectName, false)
             .getCodeExtraInformation()
             .setFunctionName(`get${property.functionName}`);
-        } else if (parameterType === 'string') {
+        } else if (
+          parameterType === 'string' ||
+          parameterType === 'stringWithSelector'
+        ) {
           gdObject
             .addStrExpression(
               `Get${property.functionName}`,
@@ -200,13 +219,24 @@ module.exports = {
         }
 
         // Add the action
-        if (parameterType === 'number' || parameterType === 'string') {
-          const expressionType =
-            parameterType === 'number' ? 'expression' : 'string';
+        if (
+          parameterType === 'number' ||
+          parameterType === 'string' ||
+          parameterType === 'stringWithSelector'
+        ) {
+          const parameterOptions =
+            gd.ParameterOptions.makeNewOptions().setDescription(
+              property.paramLabel
+            );
+          if (property.options) {
+            parameterOptions.setTypeExtraInfo(
+              stringifyOptions(property.options)
+            );
+          }
           gdObject
             .addAction(
               `Set${property.functionName}`,
-              property.paramLabel,
+              property.instructionLabel,
               property.actionDescription,
               property.actionSentence,
               '',
@@ -214,7 +244,7 @@ module.exports = {
               property.iconPath
             )
             .addParameter('object', objectName, objectName, false)
-            .useStandardOperatorParameters(parameterType)
+            .useStandardOperatorParameters(parameterType, parameterOptions)
             .getCodeExtraInformation()
             .setFunctionName(`set${property.functionName}`)
             .setGetter(`get${property.functionName}`);
@@ -222,7 +252,7 @@ module.exports = {
           gdObject
             .addAction(
               `Set${property.functionName}`,
-              property.paramLabel,
+              property.instructionLabel,
               property.actionDescription,
               property.actionSentence,
               '',
@@ -233,9 +263,7 @@ module.exports = {
             .addParameter(
               parameterType,
               property.paramLabel,
-              property.options
-                ? '["' + property.options.join('", "') + '"]'
-                : '',
+              '', // There should not be options for the property if it's not a stringWithSelector
               false
             )
             .getCodeExtraInformation()
@@ -244,13 +272,24 @@ module.exports = {
         }
 
         // Add condition
-        if (parameterType === 'string' || parameterType === 'number') {
-          const propExpressionType =
-            parameterType === 'string' ? 'string' : 'expression';
+        if (
+          parameterType === 'string' ||
+          parameterType === 'number' ||
+          parameterType === 'stringWithSelector'
+        ) {
+          const parameterOptions =
+            gd.ParameterOptions.makeNewOptions().setDescription(
+              property.paramLabel
+            );
+          if (property.options) {
+            parameterOptions.setTypeExtraInfo(
+              stringifyOptions(property.options)
+            );
+          }
           gdObject
             .addCondition(
               `Is${property.functionName}`,
-              property.paramLabel,
+              property.instructionLabel,
               property.conditionDescription,
               property.conditionSentence,
               '',
@@ -258,14 +297,17 @@ module.exports = {
               property.iconPath
             )
             .addParameter('object', objectName, objectName, false)
-            .useStandardRelationalOperatorParameters(parameterType)
+            .useStandardRelationalOperatorParameters(
+              parameterType,
+              parameterOptions
+            )
             .getCodeExtraInformation()
             .setFunctionName(`get${property.functionName}`);
         } else if (parameterType === 'yesorno') {
           gdObject
             .addCondition(
               `Is${property.functionName}`,
-              property.paramLabel,
+              property.instructionLabel,
               property.conditionDescription,
               property.conditionSentence,
               '',
@@ -282,9 +324,10 @@ module.exports = {
     const setterAndGetterProperties = [
       {
         functionName: 'BBText',
-        iconPath: 'res/actions/text24.png',
+        iconPath: 'res/actions/text24_black.png',
         type: 'string',
-        paramLabel: _('BBCode text'),
+        instructionLabel: _('BBCode text'),
+        paramLabel: _('Text'),
         conditionDescription: _('Compare the value of the BBCode text.'),
         conditionSentence: _('the BBCode text'),
         actionDescription: _('Set BBCode text'),
@@ -296,7 +339,8 @@ module.exports = {
         functionName: 'Color',
         iconPath: 'res/actions/color24.png',
         type: 'color',
-        paramLabel: _('Color'),
+        instructionLabel: _('Color'),
+        paramLabel: _('Color (R;G;B)'),
         conditionDescription: '', // No conditions for a "color" property
         conditionSentence: '', // No conditions for a "color" property
         actionDescription: _('Set base color'),
@@ -308,7 +352,8 @@ module.exports = {
         functionName: 'Opacity',
         iconPath: 'res/actions/opacity24.png',
         type: 'number',
-        paramLabel: _('Opacity'),
+        instructionLabel: _('Opacity'),
+        paramLabel: _('Opacity (0-255)'),
         conditionDescription: _(
           'Compare the value of the base opacity of the text.'
         ),
@@ -322,6 +367,7 @@ module.exports = {
         functionName: 'FontSize',
         iconPath: 'res/actions/characterSize24.png',
         type: 'number',
+        instructionLabel: _('Font size'),
         paramLabel: _('Font size'),
         conditionDescription: _('Compare the base font size of the text.'),
         conditionSentence: _('the base font size'),
@@ -334,6 +380,7 @@ module.exports = {
         functionName: 'FontFamily',
         iconPath: 'res/actions/font24.png',
         type: 'string',
+        instructionLabel: _('Font family'),
         paramLabel: _('Font family'),
         conditionDescription: _('Compare the value of font family'),
         conditionSentence: _('the base font family'),
@@ -346,31 +393,21 @@ module.exports = {
         functionName: 'Alignment',
         iconPath: 'res/actions/textAlign24.png',
         type: 'stringWithSelector',
+        instructionLabel: _('Alignment'),
         paramLabel: _('Alignment'),
         options: ['left', 'right', 'center'],
         conditionDescription: _('Check the current text alignment.'),
         conditionSentence: _('The text alignment of _PARAM0_ is _PARAM1_'),
         actionDescription: _('Change the alignment of the text.'),
-        actionSentence: _('Set text alignment of _PARAM0_ to _PARAM1_'),
+        actionSentence: _('text alignment'),
         expressionLabel: _('Get the text alignment'),
         expressionDescription: _('Get the text alignment'),
       },
       {
-        functionName: 'WordWrap',
-        iconPath: 'res/actions/scaleWidth24.png',
-        type: 'boolean',
-        paramLabel: _('Word wrap'),
-        conditionDescription: _('Check if word wrap is enabled.'),
-        conditionSentence: _('Word wrap is enabled'),
-        actionDescription: _('Set word wrap'),
-        actionSentence: _('Activate word wrap for _PARAM0_: _PARAM1_'),
-        expressionLabel: '',
-        expressionDescription: '',
-      },
-      {
         functionName: 'WrappingWidth',
-        iconPath: 'res/actions/scaleWidth24.png',
+        iconPath: 'res/actions/scaleWidth24_black.png',
         type: 'number',
+        instructionLabel: _('Wrapping width'),
         paramLabel: _('Wrapping width'),
         conditionDescription: _(
           'Compare the width, in pixels, after which the text is wrapped on next line.'
@@ -387,12 +424,67 @@ module.exports = {
 
     addSettersAndGettersToObject(object, setterAndGetterProperties, 'BBText');
 
+    object
+      .addCondition(
+        'IsWordWrap',
+        _('Word wrapping'),
+        _('Check if word wrapping is enabled.'),
+        _('_PARAM0_ word wrapping is enabled'),
+        '',
+        'res/conditions/wordWrap24_black.png',
+        'res/conditions/wordWrap_black.png'
+      )
+      .addParameter('object', 'BBText', 'BBText', false)
+      .getCodeExtraInformation()
+      .setFunctionName('isWrapping');
+
+    object
+      .addAction(
+        'SetWordWrap',
+        _('Word wrapping'),
+        _('Activate or deactivate word wrapping.'),
+        _('Activate word wrapping of _PARAM0_: _PARAM1_'),
+        '',
+        'res/actions/wordWrap24_black.png',
+        'res/actions/wordWrap_black.png'
+      )
+      .addParameter('object', 'BBText', 'BBText', false)
+      .addParameter('yesorno', _('Activate word wrapping'), '', false)
+      .getCodeExtraInformation()
+      .setFunctionName('setWrapping');
+
+    object
+      .addAction(
+        `SetFontFamily2`,
+        _('Font family'),
+        _('Set font family'),
+        _('Set the font of _PARAM0_ to _PARAM1_'),
+        '',
+        'res/actions/font24.png',
+        'res/actions/font24.png'
+      )
+      .addParameter('object', 'BBText', 'BBText', false)
+      .addParameter('fontResource', _('Font family'), '', false)
+      .getCodeExtraInformation()
+      .setFunctionName(`setFontFamily`);
+
+    const actions = object.getAllActions();
+    const conditions = object.getAllConditions();
+    const expressions = object.getAllExpressions();
+
+    actions.get('BBText::SetOpacity').setHidden();
+    conditions.get('BBText::IsOpacity').setHidden();
+    expressions.get('GetOpacity').setHidden();
+    // Action deprecated because it's using the `string` type instead of the more
+    // user-friendly `fontResource` type.
+    actions.get('BBText::SetFontFamily').setHidden();
+
     return extension;
   },
 
   /**
    * You can optionally add sanity tests that will check the basic working
-   * of your extension behaviors/objects by instanciating behaviors/objects
+   * of your extension behaviors/objects by instantiating behaviors/objects
    * and setting the property to a given value.
    *
    * If you don't have any tests, you can simply return an empty array.
@@ -400,10 +492,7 @@ module.exports = {
    * But it is recommended to create tests for the behaviors/objects properties you created
    * to avoid mistakes.
    */
-  runExtensionSanityTests: function (
-    gd /*: libGDevelop */,
-    extension /*: gdPlatformExtension*/
-  ) {
+  runExtensionSanityTests: function (gd, extension) {
     return [];
   },
   /**
@@ -411,9 +500,7 @@ module.exports = {
    *
    * ℹ️ Run `node import-GDJS-Runtime.js` (in newIDE/app/scripts) if you make any change.
    */
-  registerEditorConfigurations: function (
-    objectsEditorService /*: ObjectsEditorService */
-  ) {
+  registerEditorConfigurations: function (objectsEditorService) {
     objectsEditorService.registerEditorConfiguration(
       'BBText::BBText',
       objectsEditorService.getDefaultObjectJsImplementationPropertiesEditor({
@@ -426,11 +513,8 @@ module.exports = {
    *
    * ℹ️ Run `node import-GDJS-Runtime.js` (in newIDE/app/scripts) if you make any change.
    */
-  registerInstanceRenderers: function (
-    objectsRenderingService /*: ObjectsRenderingService */
-  ) {
+  registerInstanceRenderers: function (objectsRenderingService) {
     const RenderedInstance = objectsRenderingService.RenderedInstance;
-    const PIXI = objectsRenderingService.PIXI;
     const MultiStyleText = objectsRenderingService.requireModule(
       __dirname,
       'pixi-multistyle-text/dist/pixi-multistyle-text.umd'
@@ -439,149 +523,220 @@ module.exports = {
     /**
      * Renderer for instances of BBText inside the IDE.
      *
-     * @extends RenderedBBTextInstance
+     * @extends RenderedInstance
      * @class RenderedBBTextInstance
      * @constructor
      */
-    function RenderedBBTextInstance(
-      project,
-      layout,
-      instance,
-      associatedObject,
-      pixiContainer,
-      pixiResourcesLoader
-    ) {
-      RenderedInstance.call(
-        this,
+    class RenderedBBTextInstance extends RenderedInstance {
+      constructor(
         project,
-        layout,
         instance,
-        associatedObject,
+        associatedObjectConfiguration,
         pixiContainer,
-        pixiResourcesLoader
-      );
+        pixiResourcesLoader,
+        getPropertyOverridings
+      ) {
+        super(
+          project,
+          instance,
+          associatedObjectConfiguration,
+          pixiContainer,
+          pixiResourcesLoader,
+          getPropertyOverridings
+        );
 
-      const bbTextStyles = {
-        default: {
-          // Use a default font family the time for the resource font to be loaded.
-          fontFamily: 'Arial',
-          fontSize: '24px',
-          fill: '#cccccc',
-          tagStyle: 'bbcode',
-          wordWrap: true,
-          wordWrapWidth: 250, // This value is the default wrapping width of the runtime object.
-          align: 'left',
-        },
-      };
+        const bbTextStyles = {
+          default: {
+            // Use a default font family the time for the resource font to be loaded.
+            fontFamily: 'Arial',
+            fontSize: '24px',
+            fill: '#cccccc',
+            tagStyle: 'bbcode',
+            wordWrapWidth: 250, // This value is the default wrapping width of the runtime object.
+            align: 'left',
+          },
+        };
 
-      this._pixiObject = new MultiStyleText('', bbTextStyles);
+        this._pixiObject = new MultiStyleText('', bbTextStyles);
 
-      this._pixiObject.anchor.x = 0.5;
-      this._pixiObject.anchor.y = 0.5;
-      this._pixiContainer.addChild(this._pixiObject);
-      this.update();
-    }
-    RenderedBBTextInstance.prototype = Object.create(
-      RenderedInstance.prototype
-    );
-
-    /**
-     * Return the path to the thumbnail of the specified object.
-     */
-    RenderedBBTextInstance.getThumbnail = function (
-      project,
-      resourcesLoader,
-      object
-    ) {
-      return 'JsPlatform/Extensions/bbcode24.png';
-    };
-
-    /**
-     * This is called to update the PIXI object on the scene editor
-     */
-    RenderedBBTextInstance.prototype.update = function () {
-      const properties = this._associatedObject.getProperties();
-
-      const rawText = properties.get('text').getValue();
-      if (rawText !== this._pixiObject.text) {
-        this._pixiObject.text = rawText;
-      }
-
-      const opacity = properties.get('opacity').getValue();
-      this._pixiObject.alpha = opacity / 255;
-
-      const color = properties.get('color').getValue();
-      this._pixiObject.textStyles.default.fill = objectsRenderingService.rgbOrHexToHexNumber(color);
-
-      const fontSize = properties.get('fontSize').getValue();
-      this._pixiObject.textStyles.default.fontSize = `${fontSize}px`;
-
-      const fontResourceName = properties.get('fontFamily').getValue();
-
-      if (this._fontResourceName !== fontResourceName) {
-        this._fontResourceName = fontResourceName;
-
-        this._pixiResourcesLoader
-          .loadFontFamily(this._project, fontResourceName)
-          .then((fontFamily) => {
-            // Once the font is loaded, we can use the given fontFamily.
-            this._pixiObject.textStyles.default.fontFamily = fontFamily;
-            this._pixiObject.dirty = true;
-          })
-          .catch((err) => {
-            // Ignore errors
+        // Override updateText to catch errors from invalid color values
+        // in BBCode tags (e.g. [color=blues] instead of [color=blue]).
+        // Without this, PixiJS Color.normalize throws "Unable to convert color"
+        // which propagates to _renderScene and crashes the entire editor.
+        const originalUpdateText = this._pixiObject.updateText.bind(
+          this._pixiObject
+        );
+        this._pixiObject.updateText = (...args) => {
+          try {
+            originalUpdateText(...args);
+          } catch (error) {
             console.warn(
-              'Unable to load font family for RenderedBBTextInstance',
-              err
+              'Error rendering BBText (invalid color or style in BBCode):',
+              error
             );
-          });
+            // Mark as not dirty to prevent retrying every frame.
+            this._pixiObject.dirty = false;
+          }
+        };
+
+        this._pixiObject.anchor.x = 0.5;
+        this._pixiObject.anchor.y = 0.5;
+        this._pixiContainer.addChild(this._pixiObject);
+        this.update();
       }
 
-      const wordWrap = properties.get('wordWrap').getValue() === 'true';
-      if (wordWrap !== this._pixiObject._style.wordWrap) {
-        this._pixiObject._style.wordWrap = wordWrap;
-        this._pixiObject.dirty = true;
+      /**
+       * Return the path to the thumbnail of the specified object.
+       */
+      static getThumbnail(project, resourcesLoader, objectConfiguration) {
+        return 'JsPlatform/Extensions/bbcode24.png';
       }
 
-      const align = properties.get('align').getValue();
-      if (align !== this._pixiObject._style.align) {
-        this._pixiObject._style.align = align;
-        this._pixiObject.dirty = true;
-      }
+      /**
+       * This is called to update the PIXI object on the scene editor
+       */
+      update() {
+        const object = gd.castObject(
+          this._associatedObjectConfiguration,
+          gd.ObjectJsImplementation
+        );
 
-      this._pixiObject.position.x =
-        this._instance.getX() + this._pixiObject.width / 2;
-      this._pixiObject.position.y =
-        this._instance.getY() + this._pixiObject.height / 2;
-      this._pixiObject.rotation = RenderedInstance.toRad(
-        this._instance.getAngle()
-      );
+        const propertyOverridings = this.getPropertyOverridings();
+        const rawText =
+          propertyOverridings && propertyOverridings.has('Text')
+            ? propertyOverridings.get('Text')
+            : object.content.text;
+        if (rawText !== this._pixiObject.text) {
+          this._pixiObject.text = rawText;
+        }
 
-      if (this._instance.hasCustomSize() && this._pixiObject) {
-        const customWidth = this._instance.getCustomWidth();
-        if (
-          this._pixiObject &&
-          this._pixiObject._style.wordWrapWidth !== customWidth
-        ) {
-          this._pixiObject._style.wordWrapWidth = customWidth;
+        const color = object.content.color;
+        const newColor = objectsRenderingService.rgbOrHexToHexNumber(color);
+        if (newColor !== this._pixiObject.textStyles.default.fill) {
+          this._pixiObject.textStyles.default.fill = newColor;
           this._pixiObject.dirty = true;
         }
+
+        const fontSize = object.content.fontSize;
+        const newDefaultFontsize = `${fontSize}px`;
+        if (
+          newDefaultFontsize !== this._pixiObject.textStyles.default.fontSize
+        ) {
+          this._pixiObject.textStyles.default.fontSize = `${fontSize}px`;
+          this._pixiObject.dirty = true;
+        }
+
+        const fontResourceName = object.content.fontFamily;
+
+        if (this._fontResourceName !== fontResourceName) {
+          this._fontResourceName = fontResourceName;
+
+          this._pixiResourcesLoader
+            .loadFontFamily(this._project, fontResourceName)
+            .then((fontFamily) => {
+              // Once the font is loaded, we can use the given fontFamily.
+              this._pixiObject.textStyles.default.fontFamily = fontFamily;
+              this._pixiObject.dirty = true;
+            })
+            .catch((err) => {
+              // Ignore errors
+              console.warn(
+                'Unable to load font family for RenderedBBTextInstance',
+                err
+              );
+            });
+        }
+
+        const wordWrap = this._instance.hasCustomSize();
+        if (wordWrap !== this._pixiObject._style.wordWrap) {
+          this._pixiObject._style.wordWrap = wordWrap;
+          this._pixiObject.dirty = true;
+        }
+        if (this._instance.hasCustomSize()) {
+          const customWidth = this.getCustomWidth();
+          if (this._pixiObject._style.wordWrapWidth !== customWidth) {
+            this._pixiObject._style.wordWrapWidth = customWidth;
+            this._pixiObject.dirty = true;
+          }
+        }
+
+        const align = object.content.align;
+        if (align !== this._pixiObject._style.align) {
+          this._pixiObject._style.align = align;
+          this._pixiObject.dirty = true;
+        }
+
+        if (this._instance.hasCustomSize() && this._pixiObject.width !== 0) {
+          const alignmentX =
+            object.content.align === 'right'
+              ? 1
+              : object.content.align === 'center'
+                ? 0.5
+                : 0;
+
+          const width = this.getCustomWidth();
+
+          // A vector from the custom size center to the renderer center.
+          const centerToCenterX =
+            (width - this._pixiObject.width) * (alignmentX - 0.5);
+
+          this._pixiObject.position.x = this._instance.getX() + width / 2;
+          this._pixiObject.anchor.x =
+            0.5 - centerToCenterX / this._pixiObject.width;
+        } else {
+          this._pixiObject.position.x =
+            this._instance.getX() + this._pixiObject.width / 2;
+          this._pixiObject.anchor.x = 0.5;
+        }
+        const alignmentY =
+          object.content.verticalTextAlignment === 'bottom'
+            ? 1
+            : object.content.verticalTextAlignment === 'center'
+              ? 0.5
+              : 0;
+        this._pixiObject.position.y =
+          this._instance.getY() + this._pixiObject.height * (0.5 - alignmentY);
+        this._pixiObject.anchor.y = 0.5;
+
+        this._pixiObject.rotation = RenderedInstance.toRad(
+          this._instance.getAngle()
+        );
+
+        // Do not hide completely an object so it can still be manipulated
+        const alphaForDisplay = Math.max(
+          this._instance.getOpacity() / 255,
+          0.5
+        );
+        this._pixiObject.alpha = alphaForDisplay;
       }
-    };
 
-    /**
-     * Return the width of the instance, when it's not resized.
-     */
-    RenderedBBTextInstance.prototype.getDefaultWidth = function () {
-      return this._pixiObject.width;
-    };
+      /**
+       * Return the width of the instance, when it's not resized.
+       */
+      getDefaultWidth() {
+        return this._pixiObject.width;
+      }
 
-    /**
-     * Return the height of the instance, when it's not resized.
-     */
-    RenderedBBTextInstance.prototype.getDefaultHeight = function () {
-      return this._pixiObject.height;
-    };
+      /**
+       * Return the height of the instance, when it's not resized.
+       */
+      getDefaultHeight() {
+        return this._pixiObject.height;
+      }
+
+      getOriginY() {
+        const object = gd.castObject(
+          this._associatedObjectConfiguration,
+          gd.ObjectJsImplementation
+        );
+        const height = this.getHeight();
+        return object.content.verticalTextAlignment === 'bottom'
+          ? height
+          : object.content.verticalTextAlignment === 'center'
+            ? height / 2
+            : 0;
+      }
+    }
 
     objectsRenderingService.registerInstanceRenderer(
       'BBText::BBText',

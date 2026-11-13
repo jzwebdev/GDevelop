@@ -1,30 +1,39 @@
 // @flow
 import * as React from 'react';
+import { hapticFeedback, hapticPatterns } from './Haptic';
 
-type CallbackEvent = {|
+export type ClientCoordinates = {|
   /* The X position, relative to the viewport, not including scroll offset, of the long touch */
-  clientX: number,
+  +clientX: number,
   /* The Y position, relative to the viewport, not including scroll offset, of the long touch */
-  clientY: number,
+  +clientY: number,
+  +currentTarget: EventTarget,
 |};
 
 // Find the position of an event on the screen
-const getClientXY = (event: TouchEvent): CallbackEvent => {
+const getClientXY = (event: TouchEvent): ClientCoordinates => {
   if (event.touches && event.touches.length > 0) {
     return {
       clientX: event.touches[0].clientX,
       clientY: event.touches[0].clientY,
+      currentTarget: event.currentTarget,
     };
   }
 
   return {
     clientX: 0,
     clientY: 0,
+    currentTarget: event.currentTarget,
   };
 };
 
-const delay = 600; // ms
+// Long press opening a context menu. Items that must be held before being
+// dragged use a longer delay (see LONG_PRESS_DELAY_ON_HELD_ITEM), as the
+// hold has an intermediate state (the item lifts) to notice first.
+const defaultDelay = 600; // ms
 const moveTolerance = 10; // px
+
+const contextLocks: { [string]: true } = {};
 
 /**
  * A hook to listen to a long touch ("long press") on an element, to workaround the
@@ -33,18 +42,43 @@ const moveTolerance = 10; // px
  * A long press is characterized by starting a touch and staying pressed, without
  * moving too far from the initial position (to avoid being confused with a drag/scroll).
  */
-export const useLongTouch = (callback: (e: CallbackEvent) => void) => {
+export const useLongTouch = (
+  callback: (e: ClientCoordinates) => void,
+  options?: {
+    /**
+     * To be set when nested elements with watched touches events are in conflict to run a callback.
+     * Priority will be given to the nested element.
+     */
+    context?: string,
+    delay?: number,
+    doNotCancelOnScroll?: boolean,
+  }
+): {|
+  contextMenuProps: {|
+    onTouchCancel: (event: TouchEvent) => void,
+    onTouchEnd: (event: TouchEvent) => void,
+    onTouchMove: (event: TouchEvent) => void,
+    onTouchStart: (event: TouchEvent) => void,
+  |},
+|} => {
   const timeout = React.useRef<?TimeoutID>(null);
-  const currentTouchCallbackEvent = React.useRef<CallbackEvent>({
-    clientX: 0,
-    clientY: 0,
-  });
-  const clear = React.useCallback(() => {
-    timeout.current && clearTimeout(timeout.current);
-  }, []);
+  const context = options && options.context ? options.context : null;
+  const delay = options && options.delay ? options.delay : defaultDelay;
+  const currentClientCoordinates = React.useRef<?ClientCoordinates>(null);
+  const longTouchFired = React.useRef<boolean>(false);
+  const clear = React.useCallback(
+    () => {
+      if (context) delete contextLocks[context];
+      timeout.current && clearTimeout(timeout.current);
+    },
+    [context]
+  );
+
+  const cancelOnScroll = !options || !options.doNotCancelOnScroll;
 
   React.useEffect(
     () => {
+      if (!cancelOnScroll) return;
       // Cancel the long touch if scrolling (otherwise we can get a long touch
       // being activated while scroll and maintaining the touch on an element,
       // which is weird for the user that just want to scroll).
@@ -66,7 +100,7 @@ export const useLongTouch = (callback: (e: CallbackEvent) => void) => {
         document.removeEventListener('scroll', clear, { capture: true });
       };
     },
-    [clear]
+    [clear, cancelOnScroll]
   );
 
   const start = React.useCallback(
@@ -75,13 +109,28 @@ export const useLongTouch = (callback: (e: CallbackEvent) => void) => {
       // if there is one already. This can happen if start is called
       // multiple times.
       timeout.current && clearTimeout(timeout.current);
+      // Reset before the context-lock early return below: an element that
+      // won't fire must not cancel this gesture's touchend.
+      longTouchFired.current = false;
+      if (context) {
+        if (contextLocks[context]) return;
+        contextLocks[context] = true;
+      }
 
-      currentTouchCallbackEvent.current = getClientXY(event);
+      const clientCoordinates = getClientXY(event);
+      currentClientCoordinates.current = clientCoordinates;
       timeout.current = setTimeout(() => {
-        callback(currentTouchCallbackEvent.current);
+        // Release the lock now: if the callback opens a context menu, the
+        // menu swallows the touchend and `clear` would never run.
+        if (context) delete contextLocks[context];
+        longTouchFired.current = true;
+        if (hapticFeedback) {
+          hapticFeedback({ pattern: hapticPatterns.longPress });
+        }
+        callback(clientCoordinates);
       }, delay);
     },
-    [callback]
+    [callback, context, delay]
   );
 
   const onMove = React.useCallback(
@@ -96,7 +145,8 @@ export const useLongTouch = (callback: (e: CallbackEvent) => void) => {
       // If touch moved too far from the initial touch position,
       // it's not a long press anymore.
       const touch = event.touches[0];
-      const { clientX, clientY } = currentTouchCallbackEvent.current;
+      if (!currentClientCoordinates.current) return;
+      const { clientX, clientY } = currentClientCoordinates.current;
       if (
         Math.abs(touch.clientX - clientX) > moveTolerance ||
         Math.abs(touch.clientY - clientY) > moveTolerance
@@ -105,12 +155,28 @@ export const useLongTouch = (callback: (e: CallbackEvent) => void) => {
         return;
       }
     },
-    [currentTouchCallbackEvent, clear]
+    [currentClientCoordinates, clear]
+  );
+
+  const end = React.useCallback(
+    (event: TouchEvent) => {
+      if (longTouchFired.current) {
+        // Prevent the synthesized mouse events/click, which would land on
+        // whatever is now under the finger (context menu, backdrop, item).
+        if (event.cancelable !== false) event.preventDefault();
+        longTouchFired.current = false;
+      }
+      clear();
+    },
+    [clear]
   );
 
   return {
-    onTouchStart: start,
-    onTouchMove: onMove,
-    onTouchEnd: clear,
+    contextMenuProps: {
+      onTouchStart: start,
+      onTouchMove: onMove,
+      onTouchEnd: end,
+      onTouchCancel: end,
+    },
   };
 };

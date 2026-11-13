@@ -4,35 +4,36 @@ Copyright (c) 2013-2016 Florian Rival (Florian.Rival@gmail.com)
  */
 
 namespace gdjs {
+  export interface RuntimeInstanceContainer {
+    pathfindingObstaclesManager: gdjs.PathfindingObstaclesManager;
+  }
   declare var rbush: any;
 
   /**
-   * PathfindingObstaclesManager manages the common objects shared by objects having a
-   * pathfinding behavior: In particular, the obstacles behaviors are required to declare
-   * themselves (see `PathfindingObstaclesManager.addObstacle`) to the manager of their associated scene
-   * (see `gdjs.PathfindingRuntimeBehavior.obstaclesManagers`).
+   * PathfindingObstaclesManager manages the common objects shared by objects
+   * having a pathfinding behavior: In particular, the obstacles behaviors are
+   * required to declare themselves (see
+   * `PathfindingObstaclesManager.addObstacle`) to the manager of their
+   * associated container (see `PathfindingObstaclesManager.getManager`).
+   * @category Behaviors > 2D Pathfinding
    */
   export class PathfindingObstaclesManager {
     _obstaclesRBush: any;
 
-    /**
-     * @param object The object
-     */
-    constructor(runtimeScene: gdjs.RuntimeScene) {
+    constructor(instanceContainer: gdjs.RuntimeInstanceContainer) {
       this._obstaclesRBush = new rbush();
     }
 
     /**
-     * Get the obstacles manager of a scene.
+     * Get the obstacles manager of an instance container.
      */
-    static getManager(runtimeScene) {
-      if (!runtimeScene.pathfindingObstaclesManager) {
+    static getManager(instanceContainer: gdjs.RuntimeInstanceContainer) {
+      if (!instanceContainer.pathfindingObstaclesManager) {
         //Create the shared manager if necessary.
-        runtimeScene.pathfindingObstaclesManager = new gdjs.PathfindingObstaclesManager(
-          runtimeScene
-        );
+        instanceContainer.pathfindingObstaclesManager =
+          new gdjs.PathfindingObstaclesManager(instanceContainer);
       }
-      return runtimeScene.pathfindingObstaclesManager;
+      return instanceContainer.pathfindingObstaclesManager;
     }
 
     /**
@@ -44,9 +45,8 @@ namespace gdjs {
       if (pathfindingObstacleBehavior.currentRBushAABB)
         pathfindingObstacleBehavior.currentRBushAABB.updateAABBFromOwner();
       else
-        pathfindingObstacleBehavior.currentRBushAABB = new gdjs.BehaviorRBushAABB(
-          pathfindingObstacleBehavior
-        );
+        pathfindingObstacleBehavior.currentRBushAABB =
+          new gdjs.BehaviorRBushAABB(pathfindingObstacleBehavior);
 
       this._obstaclesRBush.insert(pathfindingObstacleBehavior.currentRBushAABB);
     }
@@ -63,15 +63,17 @@ namespace gdjs {
 
     /**
      * Returns all the platforms around the specified object.
-     * @param maxMovementLength The maximum distance, in pixels, the object is going to do.
-     * @return An array with all platforms near the object.
+     * @param x The center X of the area to search.
+     * @param y The center Y of the area to search.
+     * @param radius The maximum distance, in pixels, the object is going to do.
+     * @param result An array returned with all platforms near the object.
      */
     getAllObstaclesAround(
       x: float,
       y: float,
       radius: float,
-      result: gdjs.BehaviorRBushAABB<gdjs.PathfindingObstacleRuntimeBehavior>[]
-    ): any {
+      result: gdjs.PathfindingObstacleRuntimeBehavior[]
+    ): void {
       const searchArea = gdjs.staticObject(
         PathfindingObstaclesManager.prototype.getAllObstaclesAround
       );
@@ -83,15 +85,19 @@ namespace gdjs {
       searchArea.maxX = x + radius;
       // @ts-ignore
       searchArea.maxY = y + radius;
-      const nearbyPlatforms = this._obstaclesRBush.search(searchArea);
+      const nearbyObstacles: gdjs.BehaviorRBushAABB<gdjs.PathfindingObstacleRuntimeBehavior>[] =
+        this._obstaclesRBush.search(searchArea);
       result.length = 0;
-      result.push.apply(result, nearbyPlatforms);
+      nearbyObstacles.forEach((nearbyObstacle) =>
+        result.push(nearbyObstacle.behavior)
+      );
     }
   }
 
   /**
    * PathfindingObstacleRuntimeBehavior represents a behavior allowing objects to be
    * considered as a obstacle by objects having Pathfinding Behavior.
+   * @category Behaviors > 2D Pathfinding
    */
   export class PathfindingObstacleRuntimeBehavior extends gdjs.RuntimeBehavior {
     _impassable: boolean;
@@ -102,30 +108,29 @@ namespace gdjs {
     _oldHeight: float = 0;
     _manager: PathfindingObstaclesManager;
     _registeredInManager: boolean = false;
-    currentRBushAABB: gdjs.BehaviorRBushAABB<
-      PathfindingObstacleRuntimeBehavior
-    > | null = null;
+    currentRBushAABB: gdjs.BehaviorRBushAABB<PathfindingObstacleRuntimeBehavior> | null =
+      null;
 
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
+      instanceContainer: gdjs.RuntimeInstanceContainer,
       behaviorData,
       owner: gdjs.RuntimeObject
     ) {
-      super(runtimeScene, behaviorData, owner);
+      super(instanceContainer, behaviorData, owner);
       this._impassable = behaviorData.impassable;
       this._cost = behaviorData.cost;
-      this._manager = PathfindingObstaclesManager.getManager(runtimeScene);
+      this._manager = PathfindingObstaclesManager.getManager(instanceContainer);
 
       //Note that we can't use getX(), getWidth()... of owner here:
       //The owner is not yet fully constructed.
     }
 
-    updateFromBehaviorData(oldBehaviorData, newBehaviorData): boolean {
-      if (oldBehaviorData.impassable !== newBehaviorData.impassable) {
-        this.setImpassable(newBehaviorData.impassable);
+    override applyBehaviorOverriding(behaviorData): boolean {
+      if (behaviorData.impassable !== undefined) {
+        this.setImpassable(behaviorData.impassable);
       }
-      if (oldBehaviorData.cost !== newBehaviorData.cost) {
-        this.setCost(newBehaviorData.cost);
+      if (behaviorData.cost !== undefined) {
+        this.setCost(behaviorData.cost);
       }
       return true;
     }
@@ -136,7 +141,7 @@ namespace gdjs {
       }
     }
 
-    doStepPreEvents(runtimeScene: gdjs.RuntimeScene) {
+    doStepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {
       //Make sure the obstacle is or is not in the obstacles manager.
       if (!this.activated() && this._registeredInManager) {
         this._manager.removeObstacle(this);
@@ -166,7 +171,7 @@ namespace gdjs {
       }
     }
 
-    doStepPostEvents(runtimeScene: gdjs.RuntimeScene) {}
+    doStepPostEvents(instanceContainer: gdjs.RuntimeInstanceContainer) {}
 
     getAABB() {
       return this.owner.getAABB();

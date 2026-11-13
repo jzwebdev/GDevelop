@@ -6,6 +6,7 @@
 namespace gdjs {
   /**
    * A vector used to move objects.
+   * @category Core Engine > Forces
    */
   export class Force {
     _x: float;
@@ -57,6 +58,25 @@ namespace gdjs {
      */
     setY(y: float): void {
       this._y = y;
+      this._dirty = true;
+    }
+
+    clear() {
+      this._x = 0;
+      this._y = 0;
+      this._length = 0;
+      this._dirty = false;
+    }
+
+    addForce(force: Force) {
+      this._x += force._x;
+      this._y += force._y;
+      this._dirty = true;
+    }
+
+    add(x: float, y: float) {
+      this._x += x;
+      this._y += y;
       this._dirty = true;
     }
 
@@ -127,6 +147,24 @@ namespace gdjs {
      */
     setMultiplier(multiplier: integer): void {
       this._multiplier = multiplier;
+    }
+
+    getNetworkSyncData(): ForceNetworkSyncData {
+      return {
+        x: this._x,
+        y: this._y,
+        a: this._angle,
+        l: this._length,
+        m: this._multiplier,
+      };
+    }
+
+    updateFromNetworkSyncData(syncData: ForceNetworkSyncData) {
+      this._x = syncData.x;
+      this._y = syncData.y;
+      this._angle = syncData.a;
+      this._length = syncData.l;
+      this._multiplier = syncData.m;
     }
   }
 }

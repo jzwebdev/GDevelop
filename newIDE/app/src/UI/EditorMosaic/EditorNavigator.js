@@ -4,8 +4,21 @@ import * as React from 'react';
 import { type Editor } from '.';
 import { Column, Line } from '../Grid';
 import FlatButton from '../FlatButton';
-import ArrowBack from '@material-ui/icons/ArrowBack';
 import Background from '../Background';
+import ChevronArrowLeft from '../CustomSvgIcons/ChevronArrowLeft';
+import {
+  getAvoidSoftKeyboardStyle,
+  useSoftKeyboardBottomOffset,
+} from '../MobileSoftKeyboard';
+
+const styles = {
+  avoidSoftKeyboardContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+  },
+};
 
 type Props = {|
   initialEditorName: string,
@@ -14,10 +27,10 @@ type Props = {|
   },
   transitions: {
     [string]: {|
-      nextEditor?: string | (() => string),
-      nextLabel?: React.Node,
-      nextIcon?: React.Node,
-      previousEditor?: string | (() => string),
+      nextEditor?: string | (() => string) | null,
+      nextLabel?: React.Node | null,
+      nextIcon?: React.Node | null,
+      previousEditor?: string | (() => string) | null,
     |},
   },
   onEditorChanged: (editorName: string) => void,
@@ -30,7 +43,7 @@ export type EditorNavigatorInterface = {|
 // Flow types might have to be changed/removed if upgrading Flow
 // (see example at https://github.com/wgao19/flow-notes/blob/master/react/react-memo.md)
 
-export default React.forwardRef<Props, EditorNavigatorInterface>(
+export default (React.forwardRef<Props, EditorNavigatorInterface>(
   (
     { initialEditorName, editors, transitions, onEditorChanged }: Props,
     ref
@@ -38,6 +51,7 @@ export default React.forwardRef<Props, EditorNavigatorInterface>(
     const [currentEditorName, setCurrentEditorName] = React.useState(
       initialEditorName
     );
+    const softKeyboardBottomOffset = useSoftKeyboardBottomOffset();
     React.useImperativeHandle(ref, () => ({
       openEditor: editorName => {
         setCurrentEditorName(editorName);
@@ -61,8 +75,22 @@ export default React.forwardRef<Props, EditorNavigatorInterface>(
       }
     }
 
+    const editor = editors[currentEditorName];
+    const renderedEditorWithKeyboardAvoidanceDiv = editor ? (
+      <div
+        style={{
+          ...styles.avoidSoftKeyboardContainer,
+          ...(editor.noSoftKeyboardAvoidance
+            ? null
+            : getAvoidSoftKeyboardStyle(softKeyboardBottomOffset)),
+        }}
+      >
+        {editor.renderEditor()}
+      </div>
+    ) : null;
+
     return (
-      <Column noMargin expand>
+      <Column noMargin expand noOverflowParent>
         {transition && (
           <Background maxWidth noExpand noFullHeight>
             <Column>
@@ -74,7 +102,7 @@ export default React.forwardRef<Props, EditorNavigatorInterface>(
                       if (transition.previousEditor)
                         setCurrentEditorName(transition.previousEditor);
                     }}
-                    icon={<ArrowBack />}
+                    leftIcon={<ChevronArrowLeft />}
                   />
                 )}
                 {transition.nextLabel && transition.nextEditor && (
@@ -84,17 +112,18 @@ export default React.forwardRef<Props, EditorNavigatorInterface>(
                       if (transition.nextEditor)
                         setCurrentEditorName(transition.nextEditor);
                     }}
-                    icon={transition.nextIcon}
+                    leftIcon={transition.nextIcon}
                   />
                 )}
               </Line>
             </Column>
           </Background>
         )}
-        {editors[currentEditorName]
-          ? editors[currentEditorName].renderEditor()
-          : null}
+        {renderedEditorWithKeyboardAvoidanceDiv}
       </Column>
     );
   }
-);
+): React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<EditorNavigatorInterface>,
+}>);

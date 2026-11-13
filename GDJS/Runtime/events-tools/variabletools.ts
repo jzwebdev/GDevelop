@@ -76,7 +76,7 @@ namespace gdjs {
         runtimeScene: gdjs.RuntimeScene,
         variableName: string
       ): boolean {
-        return runtimeScene.getVariables().has(variableName);
+        return runtimeScene.getScene().getVariables().has(variableName);
       };
 
       /**
@@ -85,10 +85,10 @@ namespace gdjs {
        * @private
        */
       export const globalVariableExists = function (
-        runtimeScene: gdjs.RuntimeScene,
+        instanceContainer: gdjs.RuntimeInstanceContainer,
         variableName: string
       ): boolean {
-        return runtimeScene.getGame().getVariables().has(variableName);
+        return instanceContainer.getGame().getVariables().has(variableName);
       };
 
       /**
@@ -169,6 +169,60 @@ namespace gdjs {
         variable: gdjs.Variable
       ): number {
         return variable.getChildrenCount();
+      };
+
+      /**
+       * Shortcut to get the first value of an array variable as a number.
+       */
+      export const getFirstVariableNumber = function (
+        array: gdjs.Variable
+      ): number {
+        if (array.getChildrenCount() === 0) {
+          return 0;
+        }
+        const firstChild = array.getAllChildrenArray()[0];
+        return firstChild ? firstChild.getAsNumber() : 0;
+      };
+
+      /**
+       * Shortcut to get the last value of an array variable as a string.
+       */
+      export const getFirstVariableString = function (
+        array: gdjs.Variable
+      ): string {
+        if (array.getChildrenCount() === 0) {
+          return '';
+        }
+        const firstChild = array.getAllChildrenArray()[0];
+        return firstChild ? firstChild.getAsString() : '';
+      };
+
+      /**
+       * Shortcut to get the last value of an array variable as a number.
+       */
+      export const getLastVariableNumber = function (
+        array: gdjs.Variable
+      ): number {
+        const children = array.getAllChildrenArray();
+        if (children.length === 0) {
+          return 0;
+        }
+        const lastChild = children[children.length - 1];
+        return lastChild ? lastChild.getAsNumber() : 0;
+      };
+
+      /**
+       * Shortcut to get the last value of an array variable as a string.
+       */
+      export const getLastVariableString = function (
+        array: gdjs.Variable
+      ): string {
+        const children = array.getAllChildrenArray();
+        if (children.length === 0) {
+          return '';
+        }
+        const lastChild = children[children.length - 1];
+        return lastChild ? lastChild.getAsString() : '';
       };
     }
 

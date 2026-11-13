@@ -1,441 +1,222 @@
 // @flow
 import * as React from 'react';
-import { Trans } from '@lingui/macro';
-import { makeStyles, createStyles } from '@material-ui/styles';
 import GridList from '@material-ui/core/GridList';
-import { GridListTile } from '@material-ui/core';
-import ArrowBackIos from '@material-ui/icons/ArrowBackIos';
-import ArrowForwardIos from '@material-ui/icons/ArrowForwardIos';
-import ListOutlined from '@material-ui/icons/ListOutlined';
-import { Skeleton } from '@material-ui/lab';
+import {
+  useResponsiveWindowSize,
+  type WindowSizeType,
+} from './Responsive/ResponsiveWindowMeasurer';
+import ChevronArrowLeft from './CustomSvgIcons/ChevronArrowLeft';
+import ChevronArrowRight from './CustomSvgIcons/ChevronArrowRight';
+import GDevelopThemeContext from './Theme/GDevelopThemeContext';
+import { LARGE_WIDGET_SIZE } from '../MainFrame/EditorContainers/HomePage/CardWidget';
+import { getColumnsFromWindowSize } from '../MainFrame/EditorContainers/HomePage/LearnSection/Utils';
+import classes from './Carousel.module.css';
 
-import Window from '../Utils/Window';
-import Text from './Text';
-import { Line, Spacer } from './Grid';
-import { useResponsiveWindowWidth } from './Reponsive/ResponsiveWindowMeasurer';
-import FlatButton from './FlatButton';
-import { shouldValidate } from './KeyboardShortcuts/InteractionKeys';
-import AlertMessage from './AlertMessage';
-
-type Thumbnail = {
-  id: string,
-  title: string,
-  thumbnailUrl: string,
-  +link?: string,
-  +onClick?: () => void,
+export type CarouselItem = {
+  renderItem: () => React.Node,
 };
 
-type SkeletonThumbnail = {
-  ...Thumbnail,
-  skeleton: boolean,
-};
-
-type Props<ThumbnailType> = {|
-  title: React.Node,
-  items: ?Array<ThumbnailType>,
-  onBrowseAllClick?: () => void,
-  browseAllLink?: string,
-  displayItemTitles?: boolean,
-  error?: React.Node,
+type Props = {|
+  items: Array<CarouselItem>,
 |};
 
-const referenceSizesByWindowSize = {
-  imageHeight: {
-    small: 120,
-    medium: 130,
-    large: 140,
-  },
-  arrowWidth: {
-    small: 24,
-    medium: 30,
-    large: 36,
-  },
+export const getCarouselColumnsFromWindowSize = (
+  windowSize: WindowSizeType,
+  isLandscape: boolean
+): number => {
+  switch (windowSize) {
+    case 'small':
+      return isLandscape ? 2 : 1;
+    case 'medium':
+      return 2;
+    case 'large':
+      return 4;
+    case 'xlarge':
+      return 6;
+    default:
+      return 3;
+  }
 };
 
-const cellSpacing = 12;
-const titleHeight = 24;
-const spacerSize = 4;
-const focusItemBorderWidth = 2;
-const rightArrowMargin = cellSpacing / 2; // Necessary because MUI adds a margin to GridList corresponding to cell spacing
-const skeletonNumber = 4;
-const randomNumbers = Array(skeletonNumber)
-  .fill(0)
-  .map(e => Math.random());
-
+const MAX_COLUMNS = getColumnsFromWindowSize('xlarge', true);
+const MAX_SECTION_WIDTH = (LARGE_WIDGET_SIZE + 2 * 5) * MAX_COLUMNS; // widget size + 5 padding per side
+const ITEMS_SPACING = 5;
 const styles = {
-  itemTitle: {
-    textOverflow: 'ellipsis',
-    overflow: 'hidden',
-    overflowWrap: 'break-word',
-    whiteSpace: 'nowrap',
-  },
-  gridList: { position: 'relative' },
-  image: {
-    display: 'block',
-    objectFit: 'cover',
-  },
-  error: { display: 'flex', justifyContent: 'center', alignItems: 'center' },
-  itemTitleContainer: { height: titleHeight },
-  arrowContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 32,
-  },
-};
-
-const useStylesForGridList = makeStyles({
-  root: {
+  gridList: {
+    textAlign: 'center',
+    // Avoid tiles taking too much space on large screens.
+    maxWidth: MAX_SECTION_WIDTH,
+    width: `calc(100% + ${2 * ITEMS_SPACING}px)`, // This is needed to compensate for the `margin: -5px` added by MUI related to spacing.
     overflowX: 'scroll',
     overflowY: 'hidden',
     flexWrap: 'nowrap',
-    scrollbarWidth: 'none' /* For Firefox */,
-    '-ms-overflow-style': 'none' /* For Internet Explorer and Edge */,
-    '&::-webkit-scrollbar': {
-      height: 0 /* For Chrome, Safari, and Opera */,
-    },
   },
-});
+  container: { display: 'flex', position: 'relative', width: '100%' },
+  arrowsContainer: {
+    width: `calc(100% + ${2 * ITEMS_SPACING}px)`, // This is needed to compensate for the `margin: -5px` added by MUI related to spacing.
+    left: -ITEMS_SPACING,
+    justifyContent: 'space-between',
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    pointerEvents: 'none',
+    padding: 0,
+    maxWidth: MAX_SECTION_WIDTH,
+    zIndex: 12, // Above text.
+    transition: 'opacity 0.2s ease-in-out',
+  },
+  arrowContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    width: 50,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease-in-out',
+  },
+  arrow: {
+    fontSize: 50,
+    cursor: 'pointer',
+  },
+};
 
-const useStylesForGridListItem = makeStyles(theme =>
-  createStyles({
-    root: {
-      width: 'unset !important',
-      '&:focus': {
-        border: `${focusItemBorderWidth}px solid ${theme.palette.primary.main}`,
-        outline: 'none',
-      },
-      '&:focus-visible': { outline: 'unset' },
-    },
-    tile: {
-      display: 'flex',
-      flexDirection: 'column',
-    },
-  })
-);
+const getAdditionalColumnToDisplayFromNumberOfColumns = (
+  numberOfColumns: number
+) => (numberOfColumns < 2 ? 0.6 : numberOfColumns < 4 ? 0.9 : 0.25);
 
-const useStylesForLeftArrow = makeStyles({
-  arrow: { '& > path': { transform: 'translate(5px, 0px)' } }, // Translate path inside SVG since MUI icon is not centered
-});
-
-const Carousel = <ThumbnailType: Thumbnail>({
-  title,
-  items,
-  browseAllLink,
-  onBrowseAllClick,
-  error,
-  displayItemTitles = true,
-}: Props<ThumbnailType>) => {
-  const [
-    shouldDisplayLeftArrow,
-    setShouldDisplayLeftArrow,
-  ] = React.useState<boolean>(false);
-  const classesForGridList = useStylesForGridList();
-  const classesForGridListItem = useStylesForGridListItem();
-  const classesForLeftArrow = useStylesForLeftArrow();
+const Carousel = ({ items }: Props): React.MixedElement => {
+  const [canScrollLeft, setCanScrollLeft] = React.useState<boolean>(false);
+  const [canScrollRight, setCanScrollRight] = React.useState<boolean>(false);
+  const [isHoveringContainer, setIsHoveringContainer] = React.useState<boolean>(
+    false
+  );
+  const { windowSize, isMobile, isLandscape } = useResponsiveWindowSize();
+  const gdevelopTheme = React.useContext(GDevelopThemeContext);
   const scrollView = React.useRef<?HTMLUListElement>(null);
-  const [hoveredElement, setHoveredElement] = React.useState<?HTMLElement>(
-    null
+  const initialColumnsToDisplay = React.useMemo(
+    () => getCarouselColumnsFromWindowSize(windowSize, isLandscape),
+    [windowSize, isLandscape]
   );
-  const areItemsSet = items && items.length > 0;
-  const itemsToDisplay =
-    items && items.length > 0
-      ? items
-      : Array(skeletonNumber)
-          .fill({
-            skeleton: true,
-            title: '',
-            thumbnail: '',
-          })
-          .map((item, index) => ({ ...item, id: `skeleton${index}` }));
-
-  const windowSize = useResponsiveWindowWidth();
-  const imageHeight = referenceSizesByWindowSize.imageHeight[windowSize];
-  const arrowWidth = referenceSizesByWindowSize.arrowWidth[windowSize];
-  const cellWidth = (16 / 9) * imageHeight;
-  const widthUnit = cellWidth + cellSpacing;
-
-  const cellHeight =
-    imageHeight +
-    (displayItemTitles ? titleHeight + spacerSize : 2 * focusItemBorderWidth); // Take focus border into account to make sure it is not cut (box-sizing: content-box not working)
-
-  const renderImage = React.useCallback(
-    (item: ThumbnailType | SkeletonThumbnail): React.Node => (
-      <img
-        src={item.thumbnailUrl}
-        style={{
-          ...styles.image,
-          height: imageHeight,
-          minHeight: imageHeight,
-          width: cellWidth,
-        }}
-        alt={item.title}
-        title={item.title}
-      />
-    ),
-    [cellWidth, imageHeight]
+  const actualColumnsToDisplay = React.useMemo(
+    // Show a bit more to see the next item partially.
+    () =>
+      initialColumnsToDisplay +
+      (items.length > initialColumnsToDisplay
+        ? getAdditionalColumnToDisplayFromNumberOfColumns(
+            initialColumnsToDisplay
+          )
+        : 0),
+    [items.length, initialColumnsToDisplay]
   );
+  const checkScrollability = React.useCallback(() => {
+    if (!scrollView.current) return;
 
-  const openLinkCallback = (link: string): (() => void) => (): void => {
-    Window.openExternalURL(link);
-  };
-
-  const renderThumbnail = React.useCallback(
-    (item: ThumbnailType | SkeletonThumbnail): ?React.Node => {
-      if (!item.skeleton && !item.link && !item.thumbnailUrl) return null;
-      if (item.thumbnailUrl || item.link) {
-        return renderImage(item);
-      }
-      if (item.skeleton) {
-        return (
-          <Skeleton variant="rect" height={imageHeight} width={cellWidth} />
-        );
-      }
-    },
-    [renderImage, cellWidth, imageHeight]
-  );
-
-  const renderItemTitle = React.useCallback(
-    (item: ThumbnailType | SkeletonThumbnail, index: number): ?React.Node => {
-      if (!displayItemTitles) return null;
-      return (
-        <>
-          <Spacer />
-          {item.title ? (
-            <div style={{ ...styles.itemTitleContainer, width: cellWidth }}>
-              <Text noMargin style={styles.itemTitle}>
-                {item.title}
-              </Text>
-            </div>
-          ) : (
-            <Skeleton
-              variant="rect"
-              height={titleHeight}
-              width={(cellWidth / 3) * (1 + 2 * randomNumbers[index])} // Make rectangles of different lengths so that the UI feels more "alive".
-            />
-          )}
-        </>
-      );
-    },
-    [cellWidth, displayItemTitles]
-  );
-
-  const roundScroll = React.useCallback(
-    (value: number): number => {
-      return Math.round(value / widthUnit) * widthUnit;
-    },
-    [widthUnit]
-  );
-
-  const getVisibleThumbnailsCount = React.useCallback(
-    (element: HTMLElement): number =>
-      Math.max(Math.floor(element.offsetWidth / widthUnit), 1),
-    [widthUnit]
-  );
-
-  const computeScroll = React.useCallback(
-    (
-      direction: 'left' | 'right',
-      scrollViewElement: HTMLUListElement
-    ): number => {
-      const visibleThumbnailsCount = getVisibleThumbnailsCount(
-        scrollViewElement
-      );
-      const scale = visibleThumbnailsCount * widthUnit;
-
-      const currentScroll = scrollViewElement.scrollLeft;
-      const currentFirstVisibleItemIndex = Math.round(
-        currentScroll / widthUnit
-      );
-
-      if (
-        direction === 'right' &&
-        currentFirstVisibleItemIndex >
-          itemsToDisplay.length - visibleThumbnailsCount - 1
-      )
-        return 0;
-      return roundScroll(
-        scrollViewElement.scrollLeft + scale * (direction === 'left' ? -1 : 1)
-      );
-    },
-    [widthUnit, itemsToDisplay, roundScroll, getVisibleThumbnailsCount]
-  );
-
-  const onClickArrow = React.useCallback(
-    (direction: 'left' | 'right') => (): void => {
-      const scrollViewElement = scrollView.current;
-      if (!scrollViewElement) return;
-      const newScrollPosition = computeScroll(direction, scrollViewElement);
-
-      scrollViewElement.scrollTo({
-        left: newScrollPosition,
-        behavior: 'smooth',
-      });
-    },
-    [computeScroll]
-  );
-
-  const handleScroll = React.useCallback(
-    (): void => {
-      const scrollViewElement = scrollView.current;
-      if (!scrollViewElement) return;
-
-      if (!shouldDisplayLeftArrow)
-        setShouldDisplayLeftArrow(scrollViewElement.scrollLeft !== 0);
-    },
-    [shouldDisplayLeftArrow]
-  );
-
-  const handleScrollEnd = React.useCallback(
-    (): void => {
-      const scrollViewElement = scrollView.current;
-      if (!scrollViewElement) return;
-
-      scrollViewElement.scrollTo({
-        left: roundScroll(scrollViewElement.scrollLeft),
-        behavior: 'smooth',
-      });
-    },
-    [roundScroll]
-  );
-
-  const onFocusItem = React.useCallback(
-    (event: SyntheticFocusEvent<HTMLLIElement>, index: number): void => {
-      // Clicked element receives focus before click event is triggered.
-      // If a scroll occurs before onmouseup event and the element is scrolled out
-      // of the cursor, the click of the user is logically but wrongly ignored.
-      if (event.currentTarget !== hoveredElement) {
-        const element = event.currentTarget;
-        const parent = element.offsetParent;
-        if (!parent || !(parent instanceof HTMLElement)) return;
-
-        const visibleThumbnailsCount = getVisibleThumbnailsCount(parent);
-
-        // Browsers handle differently a focus on an out-of-sight element.
-        // To ensure the behavior is the same across all browsers, we compute
-        // the scroll value to reach to make the tab navigation pleasant.
-        const elementBoundingRect = element.getBoundingClientRect();
-        const parentBoundingRect = parent.getBoundingClientRect();
-        const isHiddenLeft =
-          Math.round(elementBoundingRect.left - parentBoundingRect.left) < 0;
-        const isHiddenRight =
-          Math.round(elementBoundingRect.right - parentBoundingRect.right) >= 0;
-        if (isHiddenLeft)
-          parent.scroll({
-            left: element.offsetLeft,
-          });
-        else if (isHiddenRight)
-          parent.scroll({
-            left: widthUnit * (index - visibleThumbnailsCount + 1),
-          });
-      }
-    },
-    [getVisibleThumbnailsCount, hoveredElement, widthUnit]
-  );
+    const { scrollLeft, scrollWidth, clientWidth } = scrollView.current;
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 10); // Small buffer for rounding errors
+  }, []);
 
   React.useEffect(
     () => {
-      const scrollViewElement = scrollView.current;
-      if (!scrollViewElement) return;
+      const element = scrollView.current;
+      if (!element) {
+        return;
+      }
 
-      // Add event listeners on component mount. There is no need to
-      // remove them with a cleanup function because scrollview element
-      // does not change and they will be destroyed when the element is
-      // removed from the DOM.
-      scrollViewElement.addEventListener('scroll', handleScroll);
-      scrollViewElement.addEventListener('touchend', handleScrollEnd);
-      scrollViewElement.addEventListener('touchleave', handleScrollEnd);
+      checkScrollability();
+      element.addEventListener('scroll', checkScrollability);
+
+      // Create a ref to the resize handler to be used in cleanup
+      const handleResize = () => {
+        checkScrollability();
+      };
+
+      window.addEventListener('resize', handleResize);
+
+      return () => {
+        if (element) {
+          element.removeEventListener('scroll', checkScrollability);
+          window.removeEventListener('resize', handleResize);
+        }
+      };
     },
-    [handleScroll, handleScrollEnd]
+    [checkScrollability]
+  );
+
+  const onScroll = React.useCallback(
+    (direction: 'left' | 'right') => {
+      const scrollViewRef = scrollView.current;
+      if (!scrollViewRef) return;
+
+      // Calculate actual item width based on visible items
+      const firstItem = scrollViewRef.children[0];
+      const itemWidth = firstItem.offsetWidth;
+
+      // Calculate scroll to show full items
+      const scrollAmount = initialColumnsToDisplay * itemWidth;
+      const currentScroll = scrollViewRef.scrollLeft;
+      const newScroll =
+        direction === 'left'
+          ? currentScroll - scrollAmount
+          : currentScroll + scrollAmount;
+
+      scrollViewRef.scrollTo({
+        left: newScroll,
+        behavior: 'smooth',
+      });
+    },
+    [initialColumnsToDisplay]
   );
 
   return (
-    <Line noMargin>
+    <div
+      style={styles.container}
+      onMouseEnter={() => setIsHoveringContainer(true)}
+      onMouseLeave={() => setIsHoveringContainer(false)}
+    >
       <div
         style={{
-          ...styles.arrowContainer,
-          width: arrowWidth,
-        }}
-        onClick={onClickArrow('left')}
-      >
-        {areItemsSet && shouldDisplayLeftArrow && (
-          <ArrowBackIos className={classesForLeftArrow.arrow} />
-        )}
-      </div>
-      <div
-        style={{
-          width: `calc(100% - ${2 * arrowWidth}px - ${rightArrowMargin}px)`,
+          ...styles.arrowsContainer,
+          display: isMobile ? 'none' : 'flex',
+          opacity: isHoveringContainer ? 1 : 0,
         }}
       >
-        <Line noMargin justifyContent="space-between" alignItems="center">
-          <Text size="bold-title">{title}</Text>
-          <FlatButton
-            onClick={
-              onBrowseAllClick ||
-              (browseAllLink ? openLinkCallback(browseAllLink) : () => {})
-            }
-            label={<Trans>Browse all</Trans>}
-            icon={<ListOutlined />}
-          />
-        </Line>
-        {error ? (
-          <div style={{ ...styles.error, height: cellHeight }}>
-            <AlertMessage kind="warning">{error}</AlertMessage>
-          </div>
-        ) : (
-          <GridList
-            classes={classesForGridList}
-            cols={itemsToDisplay.length}
-            cellHeight={cellHeight}
-            spacing={cellSpacing}
-            style={styles.gridList}
-            ref={scrollView}
-          >
-            {itemsToDisplay.map((item, index) => (
-              <GridListTile
-                classes={classesForGridListItem}
-                key={item.id}
-                tabIndex={0}
-                onFocus={event => onFocusItem(event, index)}
-                onMouseEnter={event => setHoveredElement(event.currentTarget)}
-                onMouseLeave={() => setHoveredElement(null)}
-                onKeyPress={(
-                  event: SyntheticKeyboardEvent<HTMLLIElement>
-                ): void => {
-                  if (shouldValidate(event)) {
-                    if (item.link) openLinkCallback(item.link)();
-                    if (item.onClick) item.onClick();
-                  }
-                }}
-                onClick={
-                  item.link
-                    ? openLinkCallback(item.link)
-                    : item.onClick
-                    ? item.onClick
-                    : null
-                }
-              >
-                {renderThumbnail(item)}
-                {renderItemTitle(item, index)}
-              </GridListTile>
-            ))}
-          </GridList>
-        )}
-      </div>
-      {areItemsSet && (
         <div
           style={{
             ...styles.arrowContainer,
-            width: arrowWidth,
-            marginLeft: rightArrowMargin,
+            backgroundColor: gdevelopTheme.paper.backgroundColor.medium,
+            pointerEvents: canScrollLeft ? 'auto' : 'none',
+            opacity: canScrollLeft ? 0.8 : 0,
           }}
-          onClick={onClickArrow('right')}
+          className={classes.arrowContainer}
+          onClick={() => onScroll('left')}
         >
-          <ArrowForwardIos />
+          <ChevronArrowLeft style={styles.arrow} />
         </div>
-      )}
-    </Line>
+        <div
+          style={{
+            ...styles.arrowContainer,
+            backgroundColor: gdevelopTheme.paper.backgroundColor.medium,
+            pointerEvents: canScrollRight ? 'auto' : 'none',
+            opacity: canScrollRight ? 0.8 : 0,
+          }}
+          className={classes.arrowContainer}
+          onClick={() => onScroll('right')}
+        >
+          <ChevronArrowRight style={styles.arrow} />
+        </div>
+      </div>
+      <GridList
+        className="almost-invisible-scrollbar"
+        cols={actualColumnsToDisplay}
+        style={styles.gridList}
+        cellHeight="auto"
+        spacing={ITEMS_SPACING * 2}
+        ref={scrollView}
+      >
+        {items.map(item => item.renderItem())}
+      </GridList>
+    </div>
   );
 };
 

@@ -8,6 +8,7 @@
       "group": "build",
       "label": "Start development server",
       "detail": "Starts the GDevelop development server.",
+      "options": { "env": { "NODE_OPTIONS": "--max-old-space-size=8192" } },
       "problemMatcher": [
         {
           "owner": "cra",
@@ -37,8 +38,7 @@
       "presentation": {
         "reveal": "silent"
       },
-      "isBackground": true,
-      "runOptions": { "instanceLimit": 1, "runOn": "folderOpen" }
+      "isBackground": true
     },
     {
       "type": "npm",

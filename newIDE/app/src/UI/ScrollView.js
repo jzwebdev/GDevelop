@@ -1,6 +1,7 @@
 // @flow
 import * as React from 'react';
 import ReactDOM from 'react-dom';
+import { dataObjectToProps, type HTMLDataset } from '../Utils/HTMLDataset';
 
 const styles = {
   container: {
@@ -10,26 +11,54 @@ const styles = {
 
 type Props = {|
   children: React.Node,
+  id?: string,
+  data?: HTMLDataset,
   /**
    * If true, scrollbar won't be shown if the content is not clipped.
    */
   autoHideScrollbar?: ?boolean,
   style?: ?Object,
+  onScroll?: ({ remainingScreensToBottom: number }) => void,
+|};
+
+export type ScrollBehaviorOptions = {|
+  behavior: 'smooth',
 |};
 
 export type ScrollViewInterface = {|
-  scrollTo: (target: ?React$Component<any, any>) => void,
-  scrollToBottom: () => void,
+  getDomElement: () => ?HTMLDivElement,
+  getScrollPosition: () => number,
+  scrollTo: (
+    target: ?React.Component<any, any> | ?React.ElementRef<any>
+  ) => void,
+  scrollToPosition: (number: number) => void,
+  scrollBy: (deltaY: number) => void,
+  scrollToBottom: (options?: ScrollBehaviorOptions) => void,
 |};
 
-export default React.forwardRef<Props, ScrollViewInterface>(
-  ({ children, autoHideScrollbar, style }: Props, ref) => {
+export default (React.forwardRef<Props, ScrollViewInterface>(
+  ({ id, data, children, autoHideScrollbar, style, onScroll }: Props, ref) => {
     const scrollView = React.useRef((null: ?HTMLDivElement));
     React.useImperativeHandle(ref, () => ({
       /**
+       * Return the DOM element of the scroll view.
+       */
+      getDomElement: () => scrollView.current,
+      /**
+       * Return the scroll position.
+       */
+      getScrollPosition: () => {
+        const scrollViewElement = scrollView.current;
+        if (!scrollViewElement) return 0;
+
+        const scrollViewYPosition = scrollViewElement.getBoundingClientRect()
+          .top;
+        return scrollViewElement.scrollTop + scrollViewYPosition;
+      },
+      /**
        * Scroll the view to the target component.
        */
-      scrollTo: (target: ?React$Component<any, any>) => {
+      scrollTo: (target: ?React.Component<any, any>) => {
         const scrollViewElement = scrollView.current;
         if (!scrollViewElement) return;
 
@@ -47,27 +76,71 @@ export default React.forwardRef<Props, ScrollViewInterface>(
         }
       },
       /**
-       * Scroll the view to the bottom.
+       * Scroll the view to the target component.
        */
-      scrollToBottom: () => {
+      scrollBy: (deltaY: number) => {
+        const scrollViewElement = scrollView.current;
+        if (!scrollViewElement) return;
+        scrollViewElement.scrollBy(0, deltaY);
+      },
+      /**
+       * Scroll the view vertically by the offset passed as argument.
+       */
+      scrollToPosition: (deltaY: number) => {
         const scrollViewElement = scrollView.current;
         if (!scrollViewElement) return;
 
-        scrollViewElement.scrollTop = scrollViewElement.scrollHeight;
+        const scrollViewYPosition = scrollViewElement.getBoundingClientRect()
+          .top;
+        scrollViewElement.scrollTop = deltaY - scrollViewYPosition;
+      },
+      /**
+       * Scroll the view to the bottom.
+       */
+      scrollToBottom: (options?: ScrollBehaviorOptions) => {
+        const scrollViewElement = scrollView.current;
+        if (!scrollViewElement) return;
+
+        scrollViewElement.scrollTo({
+          top: scrollViewElement.scrollHeight,
+          behavior: options ? options.behavior : undefined,
+        });
       },
     }));
 
+    const handleScroll = React.useCallback(
+      () => {
+        if (!onScroll) return;
+        const scrollViewElement = scrollView.current;
+        if (!scrollViewElement) return;
+
+        onScroll({
+          remainingScreensToBottom:
+            (scrollViewElement.scrollHeight -
+              (scrollViewElement.clientHeight + scrollViewElement.scrollTop)) /
+            scrollViewElement.clientHeight,
+        });
+      },
+      [onScroll]
+    );
+
     return (
       <div
+        id={id}
+        {...dataObjectToProps(data)}
         style={{
           ...styles.container,
           overflowY: autoHideScrollbar ? 'auto' : 'scroll',
           ...style,
         }}
+        onScroll={handleScroll}
         ref={scrollView}
       >
         {children}
       </div>
     );
   }
-);
+): React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<ScrollViewInterface>,
+}>);

@@ -27,14 +27,12 @@ BaseObjectExtension::BaseObjectExtension() {
   std::map<gd::String, gd::ExpressionMetadata> &objectStrExpressions =
       GetAllStrExpressionsForObject("");
 
-  objectActions["MettreX"]
-      .SetFunctionName("setX")
-      .SetGetter("getX")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["MettreY"]
-      .SetFunctionName("setY")
-      .SetGetter("getY")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["SetX"].SetFunctionName("setX").SetGetter("getX");
+  objectActions["SetY"].SetFunctionName("setY").SetGetter("getY");
+  // Compatibility with GD <= 5.6.251
+  objectActions["MettreX"].SetFunctionName("setX").SetGetter("getX");
+  objectActions["MettreY"].SetFunctionName("setY").SetGetter("getY");
+  // End of compatibility code
   objectConditions["PosX"].SetFunctionName("getX").SetIncludeFile(
       "runtimeobject.js");
   objectConditions["PosY"].SetFunctionName("getY").SetIncludeFile(
@@ -47,13 +45,8 @@ BaseObjectExtension::BaseObjectExtension() {
   objectActions["SetCenterY"]
       .SetFunctionName("setCenterYInScene")
       .SetGetter("getCenterYInScene");
-  objectActions["SetAngle"]
-      .SetFunctionName("setAngle")
-      .SetGetter("getAngle")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Angle"]
-      .SetFunctionName("getAngle")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["SetAngle"].SetFunctionName("setAngle").SetGetter("getAngle");
+  objectConditions["Angle"].SetFunctionName("getAngle");
   objectConditions["BoundingBoxLeft"].SetFunctionName("getAABBLeft");
   objectConditions["BoundingBoxTop"].SetFunctionName("getAABBTop");
   objectConditions["BoundingBoxRight"].SetFunctionName("getAABBRight");
@@ -62,138 +55,100 @@ BaseObjectExtension::BaseObjectExtension() {
   objectConditions["BoundingBoxCenterY"].SetFunctionName("getAABBCenterY");
   objectActions["Rotate"].SetFunctionName("rotate").SetIncludeFile(
       "runtimeobject.js");
-  objectActions["RotateTowardAngle"]
-      .SetFunctionName("rotateTowardAngle")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["RotateTowardPosition"]
-      .SetFunctionName("rotateTowardPosition")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ChangeLayer"]
-      .SetFunctionName("setLayer")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Layer"]
-      .SetFunctionName("isOnLayer")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["RotateTowardAngle"].SetFunctionName("rotateTowardAngle");
+  objectActions["RotateTowardPosition"].SetFunctionName("rotateTowardPosition");
+  objectActions["RotateTowardObject"].SetFunctionName("rotateTowardObject");
+  objectActions["ChangeLayer"].SetFunctionName("setLayer");
+  objectConditions["Layer"].SetFunctionName("isOnLayer");
+  objectActions["SetZOrder"]
+      .SetFunctionName("setZOrder")
+      .SetGetter("getZOrder");
+  objectConditions["ZOrder"].SetFunctionName("getZOrder");
+  // Compatibility with GD <= 5.6.254
   objectActions["ChangePlan"]
       .SetFunctionName("setZOrder")
-      .SetGetter("getZOrder")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Plan"]
-      .SetFunctionName("getZOrder")
-      .SetIncludeFile("runtimeobject.js");
+      .SetGetter("getZOrder");
+  // End of compatibility code
+  // Compatibility with GD <= 5.6.251
+  objectConditions["Plan"].SetFunctionName("getZOrder");
+  // End of compatibility code
+  objectActions["Hide"].SetFunctionName("hide").SetIncludeFile(
+      "runtimeobject.js");
+  objectActions["Show"].SetFunctionName("hide").SetIncludeFile(
+      "runtimeobject.js");
+  // Compatibility with GD <= 5.6.251
   objectActions["Cache"].SetFunctionName("hide").SetIncludeFile(
       "runtimeobject.js");
   objectActions["Montre"].SetFunctionName("hide").SetIncludeFile(
       "runtimeobject.js");
-  objectConditions["Visible"]
-      .SetFunctionName("isVisible")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Invisible"]
-      .SetFunctionName("isHidden")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["IsEffectEnabled"]
-      .SetFunctionName("isEffectEnabled")
-      .SetIncludeFile("runtimeobject.js");
+  // End of compatibility code
+  objectConditions["Visible"].SetFunctionName("isVisible");
+  objectConditions["Invisible"].SetFunctionName("isHidden");
+  objectConditions["IsEffectEnabled"].SetFunctionName("isEffectEnabled");
   objectActions["Delete"].SetFunctionName("deleteFromScene");
+  objectActions["PutAroundPosition"].SetFunctionName("putAround");
+  objectActions["PutAroundObject"].SetFunctionName("putAroundObject");
+  // Compatibility with GD <= 5.6.251
   objectActions["MettreAutourPos"].SetFunctionName("putAround");
-  objectActions["MettreAutour"]
-      .SetFunctionName("putAroundObject")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["VarObjet"]
-      .SetFunctionName("getVariableNumber")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["VarObjetTxt"]
-      .SetFunctionName("getVariableString")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["ObjectVariableAsBoolean"]
-      .SetFunctionName("getVariableBoolean")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["VarObjetDef"]
-      .SetFunctionName("hasVariable")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["AddForceXY"]
-      .SetFunctionName("addForce")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["AddForceAL"]
-      .SetFunctionName("addPolarForce")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["AddForceVersPos"]
-      .SetFunctionName("addForceTowardPosition")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["AddForceVers"]
-      .SetFunctionName("addForceTowardObject")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["Arreter"]
-      .SetFunctionName("clearForces")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Arret"]
-      .SetFunctionName("hasNoForces")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["Vitesse"]
-      .SetFunctionName("getAverageForce().getLength")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["AngleOfDisplacement"]
-      .SetFunctionName("averageForceAngleIs")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["SeparateFromObjects"]
-      .SetFunctionName("separateFromObjectsList")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["Ecarter"]
-      .codeExtraInformation  // Deprecated
-      .SetFunctionName("separateObjectsWithoutForces")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["Rebondir"]
-      .codeExtraInformation  // Deprecated
-      .SetFunctionName("separateObjectsWithForces")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["BehaviorActivated"]
-      .SetFunctionName("behaviorActivated")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ActivateBehavior"]
-      .SetFunctionName("activateBehavior")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["ObjectVariableChildExists"]
-      .SetFunctionName("variableChildExists")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariableRemoveChild"]
-      .SetFunctionName("variableRemoveChild")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariableClearChildren"]
-      .SetFunctionName("variableClearChildren")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["CollisionPoint"]
-      .SetFunctionName("isCollidingWithPoint")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["ObjectTimer"]
-      .SetFunctionName("timerElapsedTime")
-      .SetIncludeFile("runtimeobject.js");
-  objectConditions["ObjectTimerPaused"]
-      .SetFunctionName("timerPaused")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ResetObjectTimer"]
-      .SetFunctionName("resetTimer")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["PauseObjectTimer"]
-      .SetFunctionName("pauseTimer")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["UnPauseObjectTimer"]
-      .SetFunctionName("unpauseTimer")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["RemoveObjectTimer"]
-      .SetFunctionName("removeTimer")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["EnableEffect"]
-      .SetFunctionName("enableEffect")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["SetEffectDoubleParameter"]
-      .SetFunctionName("setEffectDoubleParameter")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["SetEffectStringParameter"]
-      .SetFunctionName("setEffectStringParameter")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["SetEffectBooleanParameter"]
-      .SetFunctionName("setEffectBooleanParameter")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["MettreAutour"].SetFunctionName("putAroundObject");
+  // End of compatibility code
+  objectConditions["VarObjet"].SetFunctionName("getVariableNumber");
+  objectConditions["VarObjetTxt"].SetFunctionName("getVariableString");
+  objectConditions["ObjectVariableAsBoolean"].SetFunctionName(
+      "getVariableBoolean");
+  objectConditions["VarObjetDef"].SetFunctionName("hasVariable");
+  objectActions["AddForceXY"].SetFunctionName("addForce");
+  objectActions["AddForceAL"].SetFunctionName("addPolarForce");
+  objectActions["AddForceTowardPosition"].SetFunctionName(
+      "addForceTowardPosition");
+  objectActions["AddForceTowardObject"].SetFunctionName("addForceTowardObject");
+  objectActions["ClearForces"].SetFunctionName("clearForces");
+  objectConditions["HasNoForces"].SetFunctionName("hasNoForces");
+  objectConditions["Speed"].SetFunctionName("getAverageForce().getLength");
+  // Compatibility with GD <= 5.6.251
+  objectActions["AddForceVersPos"].SetFunctionName("addForceTowardPosition");
+  objectActions["AddForceVers"].SetFunctionName("addForceTowardObject");
+  objectActions["Arreter"].SetFunctionName("clearForces");
+  objectConditions["Arret"].SetFunctionName("hasNoForces");
+  objectConditions["Vitesse"].SetFunctionName("getAverageForce().getLength");
+  // End of compatibility code
+  objectConditions["AngleOfDisplacement"].SetFunctionName(
+      "averageForceAngleIs");
+  objectConditions["IsTotalForceAngleAround"].SetFunctionName(
+      "isTotalForceAngleAround");
+  objectActions["SeparateFromObjects"].SetFunctionName(
+      "separateFromObjectsList");
+  // Deprecated
+  objectActions["Ecarter"].SetFunctionName("separateObjectsWithoutForces");
+  // Deprecated
+  objectActions["Rebondir"].SetFunctionName("separateObjectsWithForces");
+  objectConditions["BehaviorActivated"].SetFunctionName("behaviorActivated");
+  objectActions["ActivateBehavior"].SetFunctionName("activateBehavior");
+  objectConditions["ObjectVariableChildExists"].SetFunctionName(
+      "variableChildExists");
+  objectActions["ObjectVariableRemoveChild"].SetFunctionName(
+      "variableRemoveChild");
+  objectActions["ObjectVariableClearChildren"].SetFunctionName(
+      "variableClearChildren");
+  objectConditions["CollisionPoint"].SetFunctionName("isCollidingWithPoint");
+  // deprecated
+  objectConditions["ObjectTimer"].SetFunctionName("timerElapsedTime");
+  objectConditions["CompareObjectTimer"].SetFunctionName(
+      "getTimerElapsedTimeInSecondsOrNaN");
+  objectConditions["ObjectTimerPaused"].SetFunctionName("timerPaused");
+  objectActions["ResetObjectTimer"].SetFunctionName("resetTimer");
+  objectActions["PauseObjectTimer"].SetFunctionName("pauseTimer");
+  objectActions["UnPauseObjectTimer"].SetFunctionName("unpauseTimer");
+  objectActions["RemoveObjectTimer"].SetFunctionName("removeTimer");
+  objectActions["EnableEffect"].SetFunctionName("enableEffect");
+  objectActions["SetEffectDoubleParameter"].SetFunctionName(
+      "setEffectDoubleParameter");
+  objectActions["SetEffectStringParameter"].SetFunctionName(
+      "setEffectStringParameter");
+  objectActions["SetEffectBooleanParameter"].SetFunctionName(
+      "setEffectBooleanParameter");
+  objectActions["SetIncludedInParentCollisionMask"].SetFunctionName(
+      "setIncludedInParentCollisionMask");
 
   objectExpressions["X"].SetFunctionName("getX");
   objectExpressions["Y"].SetFunctionName("getY");
@@ -206,11 +161,14 @@ BaseObjectExtension::BaseObjectExtension() {
   objectExpressions["BoundingBoxCenterX"].SetFunctionName("getAABBCenterX");
   objectExpressions["BoundingBoxCenterY"].SetFunctionName("getAABBCenterY");
   objectExpressions["ZOrder"].SetFunctionName("getZOrder");
-  objectExpressions["Plan"].SetFunctionName("getZOrder");  // Deprecated
+  // Deprecated
+  objectExpressions["Plan"].SetFunctionName("getZOrder");
   objectExpressions["Width"].SetFunctionName("getWidth");
   objectExpressions["Height"].SetFunctionName("getHeight");
-  objectExpressions["Largeur"].SetFunctionName("getWidth");   // Deprecated
-  objectExpressions["Hauteur"].SetFunctionName("getHeight");  // Deprecated
+  // Deprecated
+  objectExpressions["Largeur"].SetFunctionName("getWidth");
+  // Deprecated
+  objectExpressions["Hauteur"].SetFunctionName("getHeight");
   objectExpressions["Variable"]
       .SetFunctionName("gdjs.RuntimeObject.getVariableNumber")
       .SetStatic();
@@ -220,14 +178,26 @@ BaseObjectExtension::BaseObjectExtension() {
   objectExpressions["VariableChildCount"]
       .SetFunctionName("gdjs.RuntimeObject.getVariableChildCount")
       .SetStatic();
+  objectExpressions["ArrayVariableFirstNumber"]
+      .SetFunctionName("gdjs.RuntimeObject.getFirstVariableNumber")
+      .SetStatic();
+  objectStrExpressions["ArrayVariableFirstString"]
+      .SetFunctionName("gdjs.RuntimeObject.getFirstVariableString")
+      .SetStatic();
+  objectExpressions["ArrayVariableLastNumber"]
+      .SetFunctionName("gdjs.RuntimeObject.getLastVariableNumber")
+      .SetStatic();
+  objectStrExpressions["ArrayVariableLastString"]
+      .SetFunctionName("gdjs.RuntimeObject.getLastVariableString")
+      .SetStatic();
   objectExpressions["ForceX"].SetFunctionName("getAverageForce().getX");
   objectExpressions["ForceY"].SetFunctionName("getAverageForce().getY");
   objectExpressions["ForceAngle"].SetFunctionName("getAverageForce().getAngle");
   objectExpressions["Angle"].SetFunctionName("getAngle");
   objectExpressions["ForceLength"].SetFunctionName(
       "getAverageForce().getLength");
-  objectExpressions["Longueur"].SetFunctionName(
-      "getAverageForce().getLength");  // Deprecated
+  // Deprecated
+  objectExpressions["Longueur"].SetFunctionName("getAverageForce().getLength");
   objectExpressions["Distance"].SetFunctionName("getDistanceToObject");
   objectExpressions["SqDistance"].SetFunctionName("getSqDistanceToObject");
   objectExpressions["DistanceToPosition"].SetFunctionName(
@@ -249,10 +219,22 @@ BaseObjectExtension::BaseObjectExtension() {
       "gdjs.evtTools.object.createObjectOnScene");
   GetAllActions()["CreateByName"].SetFunctionName(
       "gdjs.evtTools.object.createObjectFromGroupOnScene");
+  // Deprecated
   GetAllExpressions()["Count"].SetFunctionName(
       "gdjs.evtTools.object.pickedObjectsCount");
+  // Deprecated
   GetAllConditions()["NbObjet"].SetFunctionName(
       "gdjs.evtTools.object.pickedObjectsCount");
+
+  GetAllExpressions()["SceneInstancesCount"].SetFunctionName(
+      "gdjs.evtTools.object.getSceneInstancesCount");
+  GetAllConditions()["SceneInstancesCount"].SetFunctionName(
+      "gdjs.evtTools.object.getSceneInstancesCount");
+  GetAllExpressions()["PickedInstancesCount"].SetFunctionName(
+      "gdjs.evtTools.object.getPickedInstancesCount");
+  GetAllConditions()["PickedInstancesCount"].SetFunctionName(
+      "gdjs.evtTools.object.getPickedInstancesCount");
+
   GetAllConditions()["CollisionNP"].SetFunctionName(
       "gdjs.evtTools.object.hitBoxesCollisionTest");
   GetAllConditions()["Raycast"].SetFunctionName(
@@ -261,13 +243,36 @@ BaseObjectExtension::BaseObjectExtension() {
       "gdjs.evtTools.object.raycastObjectToPosition");
   GetAllConditions()["Distance"].SetFunctionName(
       "gdjs.evtTools.object.distanceTest");
+  GetAllConditions()["Distance3D"].SetFunctionName(
+      "gdjs.evtTools.object.distanceTest3D");
+  GetAllConditions()["IsTotalForceAngleTowardObject"].SetFunctionName(
+      "gdjs.evtTools.object.movesTowardTest");
+  // Compatibility with GD <= 5.6.251
   GetAllConditions()["SeDirige"].SetFunctionName(
       "gdjs.evtTools.object.movesTowardTest");
+  // End of compatibility code
   GetAllConditions()["EstTourne"].SetFunctionName(
       "gdjs.evtTools.object.turnedTowardTest");
+  GetAllConditions()["IsTurnedTowardObject"].SetFunctionName(
+      "gdjs.evtTools.object.isTurnedTowardObject");
+  GetAllConditions()["IsTurnedTowardObject3D"].SetFunctionName(
+      "gdjs.evtTools.object.isTurnedTowardObject3D");
+  GetAllConditions()["IsCursorOnObject"].SetFunctionName(
+      "gdjs.evtTools.input.cursorOnObject");
+  // Compatibility with GD <= 5.6.251
   GetAllConditions()["SourisSurObjet"].SetFunctionName(
       "gdjs.evtTools.input.cursorOnObject");
+  // End of compatibility code
 
+  GetAllActions()["PickAllInstances"].SetFunctionName(
+      "gdjs.evtTools.object.pickAllObjects");
+  GetAllConditions()["PickAllInstances"].SetFunctionName(
+      "gdjs.evtTools.object.pickAllObjects");
+  GetAllActions()["PickRandomInstance"].SetFunctionName(
+      "gdjs.evtTools.object.pickRandomObject");
+  GetAllConditions()["PickRandomInstance"].SetFunctionName(
+      "gdjs.evtTools.object.pickRandomObject");
+  // Compatibility with GD <= 5.6.251
   GetAllActions()["AjoutObjConcern"].SetFunctionName(
       "gdjs.evtTools.object.pickAllObjects");
   GetAllConditions()["AjoutObjConcern"].SetFunctionName(
@@ -276,8 +281,40 @@ BaseObjectExtension::BaseObjectExtension() {
       "gdjs.evtTools.object.pickRandomObject");
   GetAllConditions()["AjoutHasard"].SetFunctionName(
       "gdjs.evtTools.object.pickRandomObject");
+  // End of compatibility code
+  GetAllActions()["PickNearest"].SetFunctionName(
+      "gdjs.evtTools.object.pickNearestObject");
   GetAllConditions()["PickNearest"].SetFunctionName(
       "gdjs.evtTools.object.pickNearestObject");
+
+  objectActions["SetNumberObjectVariable"]
+      .SetFunctionName("returnVariable")
+      .SetManipulatedType("number")
+      .SetMutators({
+          {"=", "setNumber"},
+          {"+", "add"},
+          {"-", "sub"},
+          {"*", "mul"},
+          {"/", "div"},
+      });
+  objectActions["SetStringObjectVariable"]
+      .SetFunctionName("returnVariable")
+      .SetManipulatedType("string")
+      .SetMutators({
+          {"=", "setString"},
+          {"+", "concatenate"},
+      });
+  objectActions["SetBooleanObjectVariable"]
+      .SetFunctionName("returnVariable")
+      .SetManipulatedType("boolean")
+      .SetMutators({
+          {"True", "setBoolean(true)"},
+          {"False", "setBoolean(false)"},
+          {"Toggle", "toggle()"},
+      });
+  objectConditions["NumberObjectVariable"].SetFunctionName("getVariableNumber");
+  objectConditions["StringObjectVariable"].SetFunctionName("getVariableString");
+  objectConditions["BooleanObjectVariable"].SetFunctionName("getVariableBoolean");
 
   objectActions["ModVarObjet"]
       .SetFunctionName("returnVariable")
@@ -288,41 +325,33 @@ BaseObjectExtension::BaseObjectExtension() {
           {"-", "sub"},
           {"*", "mul"},
           {"/", "div"},
-      })
-      .SetIncludeFile("runtimeobject.js");
+      });
   objectActions["ModVarObjetTxt"]
       .SetFunctionName("returnVariable")
       .SetManipulatedType("string")
       .SetMutators({
           {"=", "setString"},
           {"+", "concatenate"},
-      })
-      .SetIncludeFile("runtimeobject.js");
+      });
 
-  objectActions["SetObjectVariableAsBoolean"]
-      .SetFunctionName("setVariableBoolean")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ToggleObjectVariableAsBoolean"]
-      .SetFunctionName("toggleVariableBoolean")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["SetObjectVariableAsBoolean"].SetFunctionName(
+      "setVariableBoolean");
+  objectActions["ToggleObjectVariableAsBoolean"].SetFunctionName(
+      "toggleVariableBoolean");
 
-  objectActions["ObjectVariablePush"]
-      .SetFunctionName("variablePushCopy")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariablePushString"]
-      .SetFunctionName("valuePush")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariablePushNumber"]
-      .SetFunctionName("valuePush")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariablePushBool"]
-      .SetFunctionName("valuePush")
-      .SetIncludeFile("runtimeobject.js");
-  objectActions["ObjectVariableRemoveAt"]
-      .SetFunctionName("variableRemoveAt")
-      .SetIncludeFile("runtimeobject.js");
+  objectActions["ObjectVariablePush"].SetFunctionName("variablePushCopy");
+  objectActions["ObjectVariablePush2"].SetFunctionName("variablePushCopy");
+  objectActions["ObjectVariablePushString"].SetFunctionName("valuePush");
+  objectActions["ObjectVariablePushNumber"].SetFunctionName("valuePush");
+  objectActions["ObjectVariablePushBool"].SetFunctionName("valuePush");
+  objectActions["PushStringToObjectVariable"].SetFunctionName("valuePush");
+  objectActions["PushNumberToObjectVariable"].SetFunctionName("valuePush");
+  objectActions["PushBooleanToObjectVariable"].SetFunctionName("valuePush");
+  objectActions["ObjectVariableRemoveAt"].SetFunctionName("variableRemoveAt");
+  objectConditions["ObjectVariableChildCount"].SetFunctionName(
+      "getVariableChildCount");
 
-  GetAllActions()["MoveObjects"].codeExtraInformation.SetCustomCodeGenerator(
+  GetAllActions()["MoveObjects"].SetCustomCodeGenerator(
       [](gd::Instruction &,
          gd::EventsCodeGenerator &,
          gd::EventsCodeGenerationContext &) {
@@ -333,14 +362,14 @@ BaseObjectExtension::BaseObjectExtension() {
     return op == "/" || op == "*" || op == "-" || op == "+";
   };
 
-  objectActions["MettreXY"].codeExtraInformation.SetCustomCodeGenerator(
+  objectActions["SetXY"].SetCustomCodeGenerator(
       [&](gd::Instruction &instruction,
           gd::EventsCodeGenerator &codeGenerator,
           gd::EventsCodeGenerationContext &context) -> gd::String {
         gd::String outputCode;
 
-        auto realObjects = codeGenerator.ExpandObjectsName(
-            instruction.GetParameter(0).GetPlainString(), context);
+        auto realObjects = codeGenerator.GetObjectsContainersList().ExpandObjectName(
+            instruction.GetParameter(0).GetPlainString(), context.GetCurrentObject());
         for (auto &realObjectName : realObjects) {
           context.SetCurrentObject(realObjectName);
           context.ObjectsListNeeded(realObjectName);
@@ -353,26 +382,28 @@ BaseObjectExtension::BaseObjectExtension() {
                   codeGenerator,
                   context,
                   "number",
-                  instruction.GetParameter(2).GetPlainString());
+                  instruction.GetParameter(2).GetPlainString(),
+                  instruction.GetParameter(0).GetPlainString());
 
           gd::String expression2Code =
               gd::ExpressionCodeGenerator::GenerateExpressionCode(
                   codeGenerator,
                   context,
                   "number",
-                  instruction.GetParameter(4).GetPlainString());
+                  instruction.GetParameter(4).GetPlainString(),
+                  instruction.GetParameter(0).GetPlainString());
 
           gd::String op1 = instruction.GetParameter(1).GetPlainString();
-          gd::String newX =
-              isNotAssignmentOperator(op1)
-                  ? (objectListName + "[i].getX() " + op1 + expression1Code)
-                  : expression1Code;
+          gd::String newX = isNotAssignmentOperator(op1)
+                                ? (objectListName + "[i].getX() " + op1 + "(" +
+                                   expression1Code + ")")
+                                : expression1Code;
 
           gd::String op2 = instruction.GetParameter(3).GetPlainString();
-          gd::String newY =
-              isNotAssignmentOperator(op2)
-                  ? (objectListName + "[i].getY() " + op2 + expression2Code)
-                  : expression2Code;
+          gd::String newY = isNotAssignmentOperator(op2)
+                                ? (objectListName + "[i].getY() " + op2 + "(" +
+                                   expression2Code + ")")
+                                : expression2Code;
 
           gd::String call =
               objectListName + "[i].setPosition(" + newX + "," + newY + ")";
@@ -388,14 +419,19 @@ BaseObjectExtension::BaseObjectExtension() {
         return outputCode;
       });
 
-  objectActions["SetCenter"].codeExtraInformation.SetCustomCodeGenerator(
+  // Compatibility with GD <= 5.6.251
+  objectActions["MettreXY"].codeExtraInformation =
+      objectActions["SetXY"].codeExtraInformation;
+  // End of compatibility code
+
+  objectActions["SetCenter"].SetCustomCodeGenerator(
       [&](gd::Instruction &instruction,
           gd::EventsCodeGenerator &codeGenerator,
           gd::EventsCodeGenerationContext &context) -> gd::String {
         gd::String outputCode;
 
-        auto realObjects = codeGenerator.ExpandObjectsName(
-            instruction.GetParameter(0).GetPlainString(), context);
+        auto realObjects = codeGenerator.GetObjectsContainersList().ExpandObjectName(
+            instruction.GetParameter(0).GetPlainString(), context.GetCurrentObject());
         for (auto &realObjectName : realObjects) {
           context.SetCurrentObject(realObjectName);
           context.ObjectsListNeeded(realObjectName);
@@ -408,14 +444,16 @@ BaseObjectExtension::BaseObjectExtension() {
                   codeGenerator,
                   context,
                   "number",
-                  instruction.GetParameter(2).GetPlainString());
+                  instruction.GetParameter(2).GetPlainString(),
+                  instruction.GetParameter(0).GetPlainString());
 
           gd::String expression2Code =
               gd::ExpressionCodeGenerator::GenerateExpressionCode(
                   codeGenerator,
                   context,
                   "number",
-                  instruction.GetParameter(4).GetPlainString());
+                  instruction.GetParameter(4).GetPlainString(),
+                  instruction.GetParameter(0).GetPlainString());
 
           gd::String op1 = instruction.GetParameter(1).GetPlainString();
           gd::String newX = isNotAssignmentOperator(op1)
@@ -447,4 +485,4 @@ BaseObjectExtension::BaseObjectExtension() {
   StripUnimplementedInstructionsAndExpressions();
 }
 
-}  // namespace gdjs
+} // namespace gdjs

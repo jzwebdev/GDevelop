@@ -7,7 +7,22 @@ import {
   type RenderEditorContainerProps,
   type RenderEditorContainerPropsWithRef,
 } from './BaseEditor';
-import SubscriptionChecker from '../../Profile/SubscriptionChecker';
+import {
+  type SceneEventsOutsideEditorChanges,
+  type InstancesOutsideEditorChanges,
+  type ObjectsOutsideEditorChanges,
+  type ObjectGroupsOutsideEditorChanges,
+  type WillDeleteObjectChanges,
+  type ExtensionsOutsideEditorChanges,
+} from '../../EditorFunctions/OutsideEditorChanges';
+import SubscriptionChecker, {
+  type SubscriptionCheckerInterface,
+} from '../../Profile/Subscription/SubscriptionChecker';
+import { type ObjectWithContext } from '../../ObjectsList/EnumerateObjects';
+import {
+  setEditorHotReloadNeeded,
+  type HotReloadSteps,
+} from '../../EmbeddedGame/EmbeddedGameFrame';
 
 type State = {|
   subscriptionChecked: boolean,
@@ -18,12 +33,13 @@ export class DebuggerEditorContainer extends React.Component<
   State
 > {
   editor: ?Debugger;
-  _subscriptionChecker: ?SubscriptionChecker;
+  _subscriptionChecker: ?SubscriptionCheckerInterface;
+  // $FlowFixMe[missing-local-annot]
   state = {
     subscriptionChecked: false,
   };
 
-  shouldComponentUpdate(nextProps: RenderEditorContainerProps) {
+  shouldComponentUpdate(nextProps: RenderEditorContainerProps): any {
     // We stop updates when the component is inactive.
     // If it's active, was active or becoming active again we let update propagate.
     // Especially important to note that when becoming inactive, a "last" update is allowed.
@@ -39,35 +55,97 @@ export class DebuggerEditorContainer extends React.Component<
   }
 
   updateToolbar() {
-    if (this.editor) this.editor.updateToolbar();
+    if (this.editor) {
+      this.editor.updateToolbar();
+    } else {
+      // Clear the toolbar if the editor is not ready yet to avoid showing stale toolbar
+      // from the previous editor (e.g., HomePage)
+      this.props.setToolbar(null);
+    }
   }
 
   forceUpdateEditor() {
     // No updates to be done.
   }
 
-  componentWillReceiveProps() {
-    this._checkHasSubscription();
+  onEventsBasedObjectChildrenEdited(
+    eventsBasedObject: gdEventsBasedObject,
+    options?: {| editedObject?: ?gdObject, hasResourceChanged?: boolean |}
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectEdited(
+    scene: gdLayout,
+    objectWithContext: ObjectWithContext,
+    hasResourceChanged?: boolean
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectsDeleted(scene: gdLayout) {
+    // No thing to be done.
+  }
+
+  onSceneEventsModifiedOutsideEditor(changes: SceneEventsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  selectAllInsideEditor() {
+    // No thing to be done.
+  }
+
+  notifyChangesToInGameEditor(hotReloadSteps: HotReloadSteps) {
+    setEditorHotReloadNeeded(hotReloadSteps);
+  }
+
+  switchInGameEditorIfNoHotReloadIsNeeded() {}
+
+  onInstancesModifiedOutsideEditor(changes: InstancesOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectsModifiedOutsideEditor(changes: ObjectsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onWillDeleteObject(changes: WillDeleteObjectChanges) {
+    // No thing to be done.
+  }
+
+  onExtensionsModifiedOutsideEditor(changes: ExtensionsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectGroupsModifiedOutsideEditor(
+    changes: ObjectGroupsOutsideEditorChanges
+  ) {
+    // No thing to be done.
+  }
+
+  // To be updated, see https://reactjs.org/docs/react-component.html#unsafe_componentwillreceiveprops.
+  UNSAFE_componentWillReceiveProps() {
+    this._checkUserHasSubscription();
   }
 
   componentDidMount() {
-    this._checkHasSubscription();
+    this._checkUserHasSubscription();
   }
 
-  _checkHasSubscription() {
+  _checkUserHasSubscription() {
     if (
       this._subscriptionChecker &&
       this.props.isActive &&
       !this.state.subscriptionChecked
     ) {
-      this._subscriptionChecker.checkHasSubscription();
+      this._subscriptionChecker.checkUserHasSubscription();
       this.setState({
         subscriptionChecked: true,
       });
     }
   }
 
-  render() {
+  render(): any {
     const { project, previewDebuggerServer } = this.props;
     if (!project || !previewDebuggerServer) return null;
 
@@ -83,12 +161,9 @@ export class DebuggerEditorContainer extends React.Component<
           ref={subscriptionChecker =>
             (this._subscriptionChecker = subscriptionChecker)
           }
-          onChangeSubscription={() => {
-            if (this.props.onChangeSubscription)
-              this.props.onChangeSubscription();
-          }}
           id="Debugger"
           title={<Trans>Debugger</Trans>}
+          placementId="debugger"
           mode="try"
         />
       </React.Fragment>
@@ -98,4 +173,4 @@ export class DebuggerEditorContainer extends React.Component<
 
 export const renderDebuggerEditorContainer = (
   props: RenderEditorContainerPropsWithRef
-) => <DebuggerEditorContainer {...props} />;
+): React.Node => <DebuggerEditorContainer {...props} />;

@@ -13,14 +13,25 @@ declare type float = number;
 /** A point in cartesian space. */
 declare type FloatPoint = [number, number];
 
-/** A Hastable with the picked objects lists. */
+/**
+ * A Hashtable with the picked objects lists.
+ *
+ * @category Core Engine > Events interfacing
+ */
 declare type ObjectsLists = Hashtable<gdjs.RuntimeObject[]>;
 
 /**
  * Represents the context of the events function (or the behavior method),
  * if any. If the JavaScript code is running in a scene, this will be undefined (so you can't use this in a scene).
+ * @category Core Engine > Events interfacing
  */
 declare type EventsFunctionContext = {
+  /**
+   * If the action in which the JavaScript runs is asynchronous, this will be non-null and
+   * allows to mark the action as finished by calling `task.resolve()`.
+   */
+  task?: gdjs.ManuallyResolvableTask;
+
   /**  Get the list of instances of the specified object. */
   getObjects: (objectName: string) => Array<gdjs.RuntimeObject>;
 
@@ -37,10 +48,26 @@ declare type EventsFunctionContext = {
   /**  Create a new object from its name. The object is added to the instances living on the scene. */
   createObject: (objectName: string) => gdjs.RuntimeObject;
 
-  /**  Get the value (string or number) of an argument that was passed to the events function. To get objects, use `getObjects`. */
-  getArgument: (argumentName: string) => string | number;
+  /** Return the number of instances of the specified object on the scene. */
+  getInstancesCountOnScene: (objectName: string) => integer;
 
-  /** The return value that should be returned by the expression or the condition. */
+  /**  Get the value (string, number, boolean or a `gdjs.Variable`) of an argument that was passed to the events function. To get **objects**, use `getObjects` instead. */
+  getArgument: (argumentName: string) => string | number | gdjs.Variable;
+
+  /**
+   * Set the return value that should be returned by the expression or the condition.
+   * For example:
+   *
+   * ```js
+   * // When the condition is true:
+   * eventsFunctionContext.returnValue = true;
+   * ```
+   *
+   * ```js
+   * // To return a string for an expression:
+   * eventsFunctionContext.returnValue = "Hello World";
+   * ```
+   */
   returnValue: boolean | number | string;
 
   /**  Do not use this. Use `runtimeScene.getLayer` instead. */
@@ -48,9 +75,44 @@ declare type EventsFunctionContext = {
 };
 
 declare namespace gdjs {
+  /**
+   * @category Core Engine > Game
+   */
   var projectData: ProjectData;
+  /**
+   * @category Core Engine > Game
+   */
   var runtimeGameOptions: gdjs.RuntimeGameOptions;
 }
 
 /** The global cc object from Cocos2D-Js. */
 declare var cc: any;
+
+/**
+ * Fixes https://github.com/microsoft/TypeScript/issues/16655 for `Array.prototype.filter()`
+ * For example, using the fix the type of `bar` is `string[]` in the below snippet as it should be.
+ *
+ *  const foo: (string | null | undefined)[] = [];
+ *  const bar = foo.filter(Boolean);
+ *
+ * For related definitions, see https://github.com/microsoft/TypeScript/blob/master/src/lib/es5.d.ts
+ *
+ * Original licenses apply, see
+ *  - https://github.com/microsoft/TypeScript/blob/master/LICENSE.txt
+ *  - https://stackoverflow.com/help/licensing
+ */
+
+/** See https://stackoverflow.com/a/51390763/1470607  */
+type Falsy = false | 0 | '' | null | undefined;
+
+interface Array<T> {
+  /**
+   * Returns the elements of an array that meet the condition specified in a callback function.
+   * @param predicate A function that accepts up to three arguments. The filter method calls the predicate function one time for each element in the array.
+   * @param thisArg An object to which the this keyword can refer in the predicate function. If thisArg is omitted, undefined is used as the this value.
+   */
+  filter<S extends T>(
+    predicate: BooleanConstructor,
+    thisArg?: any
+  ): Exclude<S, Falsy>[];
+}

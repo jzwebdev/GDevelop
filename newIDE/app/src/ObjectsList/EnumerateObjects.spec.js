@@ -15,18 +15,77 @@ describe('EnumerateObjects', () => {
       containerObjectsList,
       projectObjectsList,
       allObjectsList,
-    } = enumerateObjects(project, testLayout);
+    } = enumerateObjects(project.getObjects(), testLayout.getObjects());
 
-    expect(containerObjectsList).toHaveLength(14);
+    expect(containerObjectsList).toHaveLength(22);
     expect(projectObjectsList).toHaveLength(2);
-    expect(allObjectsList).toHaveLength(16);
+    expect(allObjectsList).toHaveLength(24);
+  });
+
+  it('can enumerate objects with a filter on object type', () => {
+    const { project, testLayout } = makeTestProject(gd);
+    const countByType = {
+      'Button::PanelSpriteButton': 1,
+      'TextObject::Text': 2,
+      Sprite: 13,
+    };
+    Object.entries(countByType).forEach(([type, count]) => {
+      const { allObjectsList } = enumerateObjects(
+        project.getObjects(),
+        testLayout.getObjects(),
+        {
+          type,
+        }
+      );
+
+      expect(allObjectsList).toHaveLength(count);
+    });
+  });
+
+  it('can enumerate objects with a filter on object names', () => {
+    const { project, testLayout } = makeTestProject(gd);
+    const { allObjectsList } = enumerateObjects(
+      project.getObjects(),
+      testLayout.getObjects(),
+      {
+        names: [
+          'MyTiledSpriteObject',
+          'MyParticleEmitter',
+          'MySpriteObject_With_A_Veeeerrryyyyyyyyy_Looooooooooooong_Name',
+          'MyButton',
+        ],
+      }
+    );
+
+    expect(allObjectsList).toHaveLength(4);
+  });
+
+  it('can enumerate objects with a filter on both object name and type', () => {
+    const { project, testLayout } = makeTestProject(gd);
+    const { allObjectsList } = enumerateObjects(
+      project.getObjects(),
+      testLayout.getObjects(),
+      {
+        type: 'TiledSpriteObject::TiledSprite',
+        names: [
+          'MyTiledSpriteObject',
+          'MyParticleEmitter',
+          'MySpriteObject_With_A_Veeeerrryyyyyyyyy_Looooooooooooong_Name',
+          'MyButton',
+        ],
+      }
+    );
+
+    expect(allObjectsList).toHaveLength(1);
   });
 
   it('can enumerate groups from a project and scene', () => {
-    const { project, testLayout } = makeTestProject(gd);
-    const allGroupsList = enumerateGroups(testLayout.getObjectGroups());
+    const { testLayout } = makeTestProject(gd);
+    const allGroupsList = enumerateGroups(
+      testLayout.getObjects().getObjectGroups()
+    );
 
-    expect(allGroupsList).toHaveLength(4);
+    expect(allGroupsList).toHaveLength(5);
   });
 
   it('can do a case-insensitive search in the lists of objects', () => {
@@ -35,7 +94,7 @@ describe('EnumerateObjects', () => {
       containerObjectsList,
       projectObjectsList,
       allObjectsList,
-    } = enumerateObjects(project, testLayout);
+    } = enumerateObjects(project.getObjects(), testLayout.getObjects());
 
     expect(
       filterObjectsList(containerObjectsList, {
@@ -86,9 +145,9 @@ describe('EnumerateObjects', () => {
   });
 
   it('can do a case-insensitive search in the lists of groups of objects', () => {
-    const { project, testLayout } = makeTestProject(gd);
+    const { testLayout } = makeTestProject(gd);
     const objectGroupsList: GroupWithContextList = enumerateGroups(
-      testLayout.getObjectGroups()
+      testLayout.getObjects().getObjectGroups()
     ).map(group => ({ group, global: false }));
 
     expect(

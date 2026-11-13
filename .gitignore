@@ -8,6 +8,7 @@
 /Binaries/.embuild*
 /Binaries/build*
 /Binaries/embuild*
+/emsdk
 *.dll
 *.exe
 *.a
@@ -32,3 +33,6 @@
 .Spotlight-V100
 .Trashes
 Thumbs.db
+.claude
+/GDJS/tests/.benchmark-runtimes
+/GDJS/tests/rendering-snapshots-results

@@ -1,16 +1,16 @@
 // @flow
-import {
-  type ResourceSource,
-  type ChooseResourceFunction,
-} from '../../ResourcesList/ResourceSource';
-import { type ResourceExternalEditor } from '../../ResourcesList/ResourceExternalEditor.flow';
-import { type EventsScope } from '../../InstructionOrExpression/EventsScope.flow';
+import { type ResourceManagementProps } from '../../ResourcesList/ResourceSource';
+import { type EventsScope } from '../../InstructionOrExpression/EventsScope';
 import { type MessageDescriptor } from '../../Utils/i18n/MessageDescriptor.flow';
+import { type ProjectScopedContainersAccessor } from '../../InstructionOrExpression/EventsScope';
+import { type ParameterInlineRendererProps } from './ParameterInlineRenderer.flow';
+import { type VariableDialogOpeningProps } from '../../VariablesList/VariablesEditorDialog';
 
 export type ParameterRenderingServiceType = {
   components: any,
   getParameterComponent: (type: string) => any,
   getUserFriendlyTypeName: (rawType: string) => ?MessageDescriptor,
+  renderInlineParameter: (props: ParameterInlineRendererProps) => React.Node,
 };
 
 type CommonProps = {|
@@ -20,19 +20,22 @@ type CommonProps = {|
   value: string,
 
   // Context
-  project?: gdProject,
+  project: gdProject,
   scope: EventsScope,
   globalObjectsContainer: gdObjectsContainer,
   objectsContainer: gdObjectsContainer,
+  projectScopedContainersAccessor: ProjectScopedContainersAccessor,
   isInline?: boolean,
+  shouldHideExpressionListButton?: boolean,
   onRequestClose?: () => void,
   onApply?: () => void,
-  resourceSources?: Array<ResourceSource>,
-  onChooseResource?: ChooseResourceFunction,
-  resourceExternalEditors?: Array<ResourceExternalEditor>,
+  resourceManagementProps?: ResourceManagementProps,
 
   // Pass the ParameterRenderingService to allow to render nested parameters
   parameterRenderingService?: ParameterRenderingServiceType,
+
+  // Other
+  id?: string,
 |};
 
 export type ExpressionParameters = {|
@@ -54,16 +57,41 @@ export type ParameterFieldProps = {|
 
   // The index of the parameter in the instruction or expression.
   parameterIndex?: number,
+  onInstructionTypeChanged?: () => void,
+  editEventsFunctionParameter?: (VariableDialogOpeningProps => void) | null,
+  openEventsBasedEntityPropertyEditorDialog?:
+    | (VariableDialogOpeningProps => void)
+    | null,
+  expressionTypeExtraInfo?: string,
 |};
 
+export type FieldFocusFunction = (
+  ?{|
+    selectAll?: boolean,
+    caretPosition?: 'end' | number | null,
+  |}
+) => void;
+
 export type ParameterFieldInterface = {|
-  focus: () => void,
+  focus: FieldFocusFunction,
 |};
+
+/** The parameter long description, followed by the extra helper text, if any. */
+export const getParameterHelperMarkdownText = (
+  parameterMetadata: ?gdParameterMetadata,
+  extraHelperMarkdownText: ?string
+): ?string => {
+  const parts = [
+    parameterMetadata ? parameterMetadata.getLongDescription() : null,
+    extraHelperMarkdownText,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join('  \n') : null;
+};
 
 export const getParameterValueOrDefault = (
   value: string,
   parameterMetadata: ?gdParameterMetadata
-) => {
+): string => {
   if (value) return value;
 
   const defaultValue =

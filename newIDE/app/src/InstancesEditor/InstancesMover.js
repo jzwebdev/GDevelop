@@ -1,10 +1,11 @@
 // @flow
-import { roundPosition } from '../Utils/GridHelpers';
+import { roundPositionsToGrid } from '../Utils/GridHelpers';
 import Rectangle from '../Utils/Rectangle';
 import { type InstancesEditorSettings } from './InstancesEditorSettings';
+import { type InstanceMeasurer } from './InstancesRenderer';
 
 export default class InstancesMover {
-  instanceMeasurer: any;
+  instanceMeasurer: InstanceMeasurer;
   instancesEditorSettings: InstancesEditorSettings;
   instancePositions: { [number]: { x: number, y: number } };
   totalDeltaX: number;
@@ -18,7 +19,7 @@ export default class InstancesMover {
     instanceMeasurer,
     instancesEditorSettings,
   }: {
-    instanceMeasurer: any,
+    instanceMeasurer: InstanceMeasurer,
     instancesEditorSettings: InstancesEditorSettings,
   }) {
     this.instanceMeasurer = instanceMeasurer;
@@ -37,7 +38,7 @@ export default class InstancesMover {
     totalDeltaX: number,
     totalDeltaY: number,
     followAxis: boolean
-  ) {
+  ): any {
     if (followAxis && Math.abs(totalDeltaX) < Math.abs(totalDeltaY)) return 0;
 
     return totalDeltaX;
@@ -47,7 +48,7 @@ export default class InstancesMover {
     totalDeltaX: number,
     totalDeltaY: number,
     followAxis: boolean
-  ) {
+  ): any {
     if (followAxis && Math.abs(totalDeltaY) < Math.abs(totalDeltaX)) return 0;
 
     return totalDeltaY;
@@ -105,30 +106,15 @@ export default class InstancesMover {
     const magnetPosition = this._temporaryPoint;
     magnetPosition[0] = initialMagnetX + this.totalDeltaX;
     magnetPosition[1] = initialMagnetY + this.totalDeltaY;
-    if (
-      this.instancesEditorSettings.snap &&
-      this.instancesEditorSettings.grid &&
-      !noGridSnap
-    ) {
-      roundPosition(
-        magnetPosition,
-        this.instancesEditorSettings.gridWidth,
-        this.instancesEditorSettings.gridHeight,
-        this.instancesEditorSettings.gridOffsetX,
-        this.instancesEditorSettings.gridOffsetY,
-        this.instancesEditorSettings.gridType
-      );
-    } else {
-      // Without a grid, the position is still rounded to the nearest pixel.
-      // The size of the instance (or selection of instances) might not be round,
-      // so the magnet corner is still relevant.
-      magnetPosition[0] = Math.round(magnetPosition[0]);
-      magnetPosition[1] = Math.round(magnetPosition[1]);
-    }
+    roundPositionsToGrid(
+      magnetPosition,
+      this.instancesEditorSettings,
+      noGridSnap
+    );
     const roundedTotalDeltaX = magnetPosition[0] - initialMagnetX;
     const roundedTotalDeltaY = magnetPosition[1] - initialMagnetY;
 
-    for (var i = 0; i < nonLockedInstances.length; i++) {
+    for (let i = 0; i < nonLockedInstances.length; i++) {
       const selectedInstance = nonLockedInstances[i];
 
       let initialPosition = this.instancePositions[selectedInstance.ptr];
@@ -138,7 +124,10 @@ export default class InstancesMover {
           y: selectedInstance.getY(),
         };
       }
-      selectedInstance.setX(
+      // We round the position to the nearest pixel when an instance is moved in the editor.
+      // This is to avoid having a lot of decimals in the position of instances.
+      // It does not prevent the user from having decimals, when editing the position manually.
+      const newX = Math.round(
         initialPosition.x +
           this._getMoveDeltaX(
             roundedTotalDeltaX,
@@ -146,7 +135,7 @@ export default class InstancesMover {
             followAxis
           )
       );
-      selectedInstance.setY(
+      const newY = Math.round(
         initialPosition.y +
           this._getMoveDeltaY(
             roundedTotalDeltaX,
@@ -154,6 +143,8 @@ export default class InstancesMover {
             followAxis
           )
       );
+      selectedInstance.setX(newX);
+      selectedInstance.setY(newY);
     }
   }
 
@@ -162,5 +153,19 @@ export default class InstancesMover {
     this.instancePositions = {};
     this.totalDeltaX = 0;
     this.totalDeltaY = 0;
+  }
+
+  snapSelection(instances: gdInitialInstance[]): void {
+    // The snapping doesn't work well on 3D model objects because their default
+    // dimensions and origin change when the model is loaded from an async call.
+    this.endMove();
+    // Force magnet from selection top left corner.
+    this.startMove(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+    this.moveBy(instances, 0, 0, false, false);
+    this.endMove();
+  }
+
+  isMoving(): any {
+    return !!this._initialSelectionAABB;
   }
 }

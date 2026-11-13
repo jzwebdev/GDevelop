@@ -12,17 +12,21 @@
 #include <string>
 
 #include "GDCore/CommonTools.h"
+#include "GDCore/Events/CodeGeneration/DiagnosticReport.h"
+#include "GDCore/Extensions/Metadata/InGameEditorResourceMetadata.h"
 #include "GDCore/IDE/AbstractFileSystem.h"
 #include "GDCore/IDE/Events/UsedExtensionsFinder.h"
 #include "GDCore/IDE/Project/ProjectResourcesCopier.h"
+#include "GDCore/IDE/Project/SceneResourcesFinder.h"
 #include "GDCore/IDE/ProjectStripper.h"
+#include "GDCore/Project/EventsBasedObject.h"
+#include "GDCore/Project/EventsBasedObjectVariant.h"
+#include "GDCore/Project/EventsFunctionsExtension.h"
 #include "GDCore/Project/ExternalEvents.h"
 #include "GDCore/Project/ExternalLayout.h"
 #include "GDCore/Project/Layout.h"
 #include "GDCore/Project/Project.h"
-#include "GDCore/Project/SourceFile.h"
 #include "GDCore/Serialization/Serializer.h"
-#include "GDCore/TinyXml/tinyxml.h"
 #include "GDCore/Tools/Localization.h"
 #include "GDCore/Tools/Log.h"
 #include "GDJS/Events/CodeGeneration/EventsCodeGenerator.h"
@@ -31,6 +35,11 @@
 #undef CopyFile  // Disable an annoying macro
 
 namespace gdjs {
+
+static void InsertUnique(std::vector<gd::String> &container, gd::String str) {
+  if (std::find(container.begin(), container.end(), str) == container.end())
+    container.push_back(str);
+}
 
 Exporter::Exporter(gd::AbstractFileSystem &fileSystem, gd::String gdjsRoot_)
     : fs(fileSystem), gdjsRoot(gdjsRoot_) {
@@ -42,31 +51,41 @@ Exporter::~Exporter() {}
 bool Exporter::ExportProjectForPixiPreview(
     const PreviewExportOptions &options) {
   ExporterHelper helper(fs, gdjsRoot, codeOutputDir);
-  return helper.ExportProjectForPixiPreview(options);
+  return helper.ExportProjectForPixiPreview(options, includesFiles);
 }
 
-bool Exporter::ExportWholePixiProject(
-    gd::Project &project,
-    gd::String exportDir,
-    std::map<gd::String, bool> &exportOptions) {
+bool Exporter::ExportWholePixiProject(const ExportOptions &options) {
   ExporterHelper helper(fs, gdjsRoot, codeOutputDir);
-  gd::Project exportedProject = project;
+  gd::Project exportedProject = options.project;
 
-  auto usedExtensions = gd::UsedExtensionsFinder::ScanProject(project);
+  auto usedExtensionsResult =
+      gd::UsedExtensionsFinder::ScanProject(options.project);
+  auto &usedExtensions = usedExtensionsResult.GetUsedExtensions();
 
-  auto exportProject = [this, &exportedProject, &exportOptions, &helper](
-                           gd::String exportDir) {
-    bool exportForCordova = exportOptions["exportForCordova"];
-    bool exportForFacebookInstantGames =
-        exportOptions["exportForFacebookInstantGames"];
+  auto exportProject = [this,
+                        &exportedProject,
+                        &options,
+                        &helper,
+                        &usedExtensionsResult](gd::String exportDir) {
+    gd::WholeProjectDiagnosticReport &wholeProjectDiagnosticReport =
+        options.project.GetWholeProjectDiagnosticReport();
+    wholeProjectDiagnosticReport.Clear();
 
-    // Always disable the splash for Facebook Instant Games
-    if (exportForFacebookInstantGames)
-      exportedProject.GetLoadingScreen().ShowGDevelopSplash(false);
+    // Use project properties fallback to set empty properties
+    if (exportedProject.GetAuthorIds().empty() &&
+        !options.fallbackAuthorId.empty()) {
+      exportedProject.GetAuthorIds().push_back(options.fallbackAuthorId);
+    }
+    if (exportedProject.GetAuthorUsernames().empty() &&
+        !options.fallbackAuthorUsername.empty()) {
+      exportedProject.GetAuthorUsernames().push_back(
+          options.fallbackAuthorUsername);
+    }
 
     // Prepare the export directory
     fs.MkDir(exportDir);
-    std::vector<gd::String> includesFiles;
+    includesFiles.clear();
+    std::vector<gd::String> resourcesFiles;
 
     // Export the resources (before generating events as some resources
     // filenames may be updated)
@@ -82,59 +101,67 @@ bool Exporter::ExportWholePixiProject(
     // Export engine libraries
     helper.AddLibsInclude(
         /*pixiRenderers=*/true,
+        usedExtensionsResult.Has3DObjects(),
+        /*isInGameEditor=*/false,
         /*includeWebsocketDebuggerClient=*/false,
         /*includeWindowMessageDebuggerClient=*/false,
+        /*includeMinimalDebuggerClient=*/false,
+        /*includeCaptureManager*/ false,
+        /*includeInAppTutorialMessage*/ false,
         exportedProject.GetLoadingScreen().GetGDevelopLogoStyle(),
-        includesFiles);
+        includesFiles,
+        resourcesFiles);
 
-    // Export files for object and behaviors
-    helper.ExportObjectAndBehaviorsIncludes(exportedProject, includesFiles);
+    // Export files for free function, object and behaviors
+    for (const auto &includeFile : usedExtensionsResult.GetUsedIncludeFiles()) {
+      InsertUnique(includesFiles, includeFile);
+    }
+    for (const auto &requiredFile :
+         usedExtensionsResult.GetUsedRequiredFiles()) {
+      InsertUnique(resourcesFiles, requiredFile);
+    }
 
     // Export effects (after engine libraries as they auto-register themselves
     // to the engine)
     helper.ExportEffectIncludes(exportedProject, includesFiles);
 
     // Export events
-    if (!helper.ExportEventsCode(
-            exportedProject, codeOutputDir, includesFiles, false)) {
+    if (!helper.ExportScenesEventsCode(exportedProject,
+                                 codeOutputDir,
+                                 includesFiles,
+                                 wholeProjectDiagnosticReport,
+                                 false)) {
       gd::LogError(_("Error during exporting! Unable to export events:\n") +
                    lastError);
       return false;
     }
 
-    // Export source files
-    if (!helper.ExportExternalSourceFiles(
-            exportedProject, codeOutputDir, includesFiles)) {
-      gd::LogError(
-          _("Error during exporting! Unable to export source files:\n") +
-          lastError);
-      return false;
-    }
-
-    // Strip the project (*after* generating events as the events may use
-    // stripped things like objects groups...)...
-    gd::ProjectStripper::StripProjectForExport(exportedProject);
-
-    //...and export it
-    gd::SerializerElement noRuntimeGameOptions;
-    helper.ExportProjectData(
-        fs, exportedProject, codeOutputDir + "/data.js", noRuntimeGameOptions);
+    //...and export it, with the setup options passed to the gdjs.RuntimeGame.
+    gd::SerializerElement runtimeGameOptions;
+    runtimeGameOptions.AddChild("runtimeFilesBaseUrl")
+        .SetStringValue(
+            ExporterHelper::GetExportedRuntimeFilesBaseUrl(fs, gdjsRoot));
+    std::vector<gd::InGameEditorResourceMetadata> noInGameEditorResources;
+    helper.ExportProjectData(fs, exportedProject, codeOutputDir + "/data.js",
+                             runtimeGameOptions, false, noInGameEditorResources);
     includesFiles.push_back(codeOutputDir + "/data.js");
 
     helper.ExportIncludesAndLibs(includesFiles, exportDir, false);
+    helper.ExportIncludesAndLibs(resourcesFiles, exportDir, false);
 
     gd::String source = gdjsRoot + "/Runtime/index.html";
-    if (exportForCordova)
+    if (options.target == "cordova")
       source = gdjsRoot + "/Runtime/Cordova/www/index.html";
-    else if (exportForFacebookInstantGames)
+    else if (options.target == "facebookInstantGames")
       source = gdjsRoot + "/Runtime/FacebookInstantGames/index.html";
 
-    if (!helper.ExportPixiIndexFile(exportedProject,
+    if (!helper.ExportIndexFile(exportedProject,
                                     source,
                                     exportDir,
                                     includesFiles,
+                                    usedExtensionsResult.GetUsedSourceFiles(),
                                     /*nonRuntimeScriptsCacheBurst=*/0,
-                                    "")) {
+                                    "gdjs.runtimeGameOptions")) {
       gd::LogError(_("Error during export:\n") + lastError);
       return false;
     }
@@ -142,31 +169,55 @@ bool Exporter::ExportWholePixiProject(
     return true;
   };
 
-  if (exportOptions["exportForCordova"]) {
-    fs.MkDir(exportDir);
-    fs.MkDir(exportDir + "/www");
+  if (options.target == "cordova") {
+    fs.MkDir(options.exportPath);
+    fs.MkDir(options.exportPath + "/www");
 
-    if (!exportProject(exportDir + "/www")) return false;
+    if (!exportProject(options.exportPath + "/www")) return false;
 
-    if (!helper.ExportCordovaFiles(exportedProject, exportDir, usedExtensions))
+    if (!helper.ExportCordovaFiles(
+            exportedProject, options.exportPath, usedExtensions))
       return false;
-  } else if (exportOptions["exportForElectron"]) {
-    fs.MkDir(exportDir);
+  } else if (options.target == "electron") {
+    fs.MkDir(options.exportPath);
 
-    if (!exportProject(exportDir + "/app")) return false;
+    if (!exportProject(options.exportPath + "/app")) return false;
 
-    if (!helper.ExportElectronFiles(exportedProject, exportDir, usedExtensions))
+    if (!helper.ExportElectronFiles(
+            exportedProject, options.exportPath, usedExtensions))
       return false;
-  } else if (exportOptions["exportForFacebookInstantGames"]) {
-    if (!exportProject(exportDir)) return false;
 
-    if (!helper.ExportFacebookInstantGamesFiles(exportedProject, exportDir))
+    if (!helper.ExportBuildResourcesElectronFiles(exportedProject,
+                                                  options.exportPath))
+      return false;
+  } else if (options.target == "facebookInstantGames") {
+    if (!exportProject(options.exportPath)) return false;
+
+    if (!helper.ExportFacebookInstantGamesFiles(exportedProject,
+                                                options.exportPath))
       return false;
   } else {
-    if (!exportProject(exportDir)) return false;
+    if (!exportProject(options.exportPath)) return false;
+
+    if (!helper.ExportHtml5Files(exportedProject, options.exportPath))
+      return false;
   }
 
   return true;
+}
+
+void Exporter::SerializeProjectData(const gd::Project &project,
+                                    const PreviewExportOptions &options,
+                                    gd::SerializerElement &projectDataElement) {
+  std::vector<gd::InGameEditorResourceMetadata> noInGameEditorResources;
+  ExporterHelper::SerializeProjectData(fs, project, options, projectDataElement, noInGameEditorResources);
+}
+
+void Exporter::SerializeRuntimeGameOptions(
+    const PreviewExportOptions &options,
+    gd::SerializerElement &runtimeGameOptionsElement) {
+  ExporterHelper::SerializeRuntimeGameOptions(
+      fs, gdjsRoot, options, includesFiles, runtimeGameOptionsElement);
 }
 
 }  // namespace gdjs

@@ -10,6 +10,7 @@ namespace gdjs {
    * stays the same even if the underlying object is moved
    * (in which case the behavior is responsible for removing/adding
    * back/updating this BehaviorRBushAABB).
+   * @category Core Engine > Behavior
    */
   export class BehaviorRBushAABB<T extends RuntimeBehavior> {
     minX: float = 0;
@@ -33,26 +34,37 @@ namespace gdjs {
 
   /**
    * RuntimeBehavior represents a behavior being used by a RuntimeObject.
+   * @category Core Engine > Behavior
    */
   export class RuntimeBehavior {
     name: string;
     type: string;
     _nameId: integer;
-    _activated: boolean = true;
+    _activated: boolean;
+
+    // When synchronised over the network, a behavior is always owned by the player owning the object,
+    // and synced unless set otherwise in the editor (`isSynchronizedOverNetwork` in the behavior data)
+    // or by an action. If set to false, the behavior properties will not be synced to others.
+    _syncOverNetwork: boolean;
 
     /**
-     * @param runtimeScene The scene owning the object of the behavior
+     * @param instanceContainer The container owning the object of the behavior
      * @param behaviorData The properties used to setup the behavior
      * @param owner The object owning the behavior
      */
     constructor(
-      runtimeScene: gdjs.RuntimeScene,
+      instanceContainer: gdjs.RuntimeInstanceContainer,
       behaviorData: BehaviorData,
       public owner: gdjs.RuntimeObject
     ) {
       this.name = behaviorData.name || '';
       this.type = behaviorData.type || '';
       this._nameId = gdjs.RuntimeObject.getNameIdentifier(this.name);
+      this._syncOverNetwork = behaviorData.isSynchronizedOverNetwork !== false;
+      const game = instanceContainer.getGame();
+      this._activated =
+        !game.isInGameEdition() ||
+        !!game.isBehaviorActivatedByDefaultInEditor(this.type);
     }
 
     /**
@@ -69,8 +81,57 @@ namespace gdjs {
       oldBehaviorData: BehaviorData,
       newBehaviorData: BehaviorData
     ): boolean {
+      if (
+        oldBehaviorData.isSynchronizedOverNetwork !==
+        newBehaviorData.isSynchronizedOverNetwork
+      ) {
+        this._syncOverNetwork =
+          newBehaviorData.isSynchronizedOverNetwork !== false;
+      }
+      const diffBehaviorData: BehaviorData & { [key: string]: any } = {
+        name: newBehaviorData.name,
+        type: newBehaviorData.type,
+      };
+      const oldData = oldBehaviorData as { [key: string]: any };
+      const newData = newBehaviorData as { [key: string]: any };
+      for (const key in newData) {
+        if (newData[key] !== oldData[key]) {
+          diffBehaviorData[key] = newData[key];
+        }
+      }
+      // If not redefined, mark by default the hot-reload as failed.
+      return this.applyBehaviorOverriding(diffBehaviorData);
+    }
+
+    applyBehaviorOverriding(behaviorOverriding: BehaviorData): boolean {
       // If not redefined, mark by default the hot-reload as failed.
       return false;
+    }
+
+    getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): BehaviorNetworkSyncData {
+      // To be redefined by behaviors that need to synchronize properties
+      // while calling super() to get the common properties.
+      return {
+        act: this._activated,
+        props: {},
+      };
+    }
+
+    /**
+     * Update the behavior properties using the provided data.
+     * @param networkSyncData The new properties of the behavior.
+     */
+    updateFromNetworkSyncData(
+      networkSyncData: BehaviorNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      // Must be redefined by behaviors that need to synchronize properties
+      // while calling super() to get the common properties.
+      if (networkSyncData.act !== this._activated) {
+        this.activate(networkSyncData.act);
+      }
     }
 
     /**
@@ -92,15 +153,15 @@ namespace gdjs {
     /**
      * Called at each frame before events. Call doStepPreEvents.<br>
      * Behaviors writers: Please do not redefine this method. Redefine doStepPreEvents instead.
-     * @param runtimeScene The runtimeScene owning the object
+     * @param instanceContainer The instanceContainer owning the object
      */
-    stepPreEvents(runtimeScene: gdjs.RuntimeScene): void {
+    stepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       if (this._activated) {
-        const profiler = runtimeScene.getProfiler();
+        const profiler = instanceContainer.getScene().getProfiler();
         if (profiler) {
           profiler.begin(this.name);
         }
-        this.doStepPreEvents(runtimeScene);
+        this.doStepPreEvents(instanceContainer);
         if (profiler) {
           profiler.end(this.name);
         }
@@ -110,15 +171,15 @@ namespace gdjs {
     /**
      * Called at each frame after events. Call doStepPostEvents.<br>
      * Behaviors writers: Please do not redefine this method. Redefine doStepPreEvents instead.
-     * @param runtimeScene The runtimeScene owning the object
+     * @param instanceContainer The instanceContainer owning the object
      */
-    stepPostEvents(runtimeScene: gdjs.RuntimeScene): void {
+    stepPostEvents(instanceContainer: gdjs.RuntimeInstanceContainer): void {
       if (this._activated) {
-        const profiler = runtimeScene.getProfiler();
+        const profiler = instanceContainer.getScene().getProfiler();
         if (profiler) {
           profiler.begin(this.name);
         }
-        this.doStepPostEvents(runtimeScene);
+        this.doStepPostEvents(instanceContainer);
         if (profiler) {
           profiler.end(this.name);
         }
@@ -171,15 +232,15 @@ namespace gdjs {
 
     /**
      * This method is called each tick before events are done.
-     * @param runtimeScene The runtimeScene owning the object
+     * @param instanceContainer The instanceContainer owning the object
      */
-    doStepPreEvents(runtimeScene: gdjs.RuntimeScene): void {}
+    doStepPreEvents(instanceContainer: gdjs.RuntimeInstanceContainer): void {}
 
     /**
      * This method is called each tick after events are done.
-     * @param runtimeScene The runtimeScene owning the object
+     * @param instanceContainer The instanceContainer owning the object
      */
-    doStepPostEvents(runtimeScene: gdjs.RuntimeScene): void {}
+    doStepPostEvents(instanceContainer: gdjs.RuntimeInstanceContainer): void {}
 
     /**
      * This method is called when the owner of the behavior
@@ -196,6 +257,27 @@ namespace gdjs {
      * of events.
      */
     onObjectHotReloaded(): void {}
+
+    /**
+     * Should return `false` if the behavior does not need any lifecycle function to
+     * be called.
+     * Default, hidden, "capability" behaviors set it to `false`.
+     * This avoids useless calls to empty lifecycle functions, which would waste CPU
+     * time (and have a sizeable impact for example when lots of static instances
+     * are living in the scene).
+     * @returns
+     */
+    usesLifecycleFunction(): boolean {
+      return true;
+    }
+
+    enableSynchronization(enable: boolean) {
+      this._syncOverNetwork = enable;
+    }
+
+    isSyncedOverNetwork(): boolean {
+      return this._syncOverNetwork;
+    }
   }
   gdjs.registerBehavior('', gdjs.RuntimeBehavior);
 }

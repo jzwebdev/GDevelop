@@ -30,24 +30,25 @@ std::map<gd::String, gd::PropertyDescriptor> PlatformBehavior::GetProperties(
   std::map<gd::String, gd::PropertyDescriptor> properties;
 
   gd::String platformType = behaviorContent.GetStringAttribute("platformType");
-  gd::String platformTypeStr = _("Platform");
-  if (platformType == "Ladder")
-    platformTypeStr = _("Ladder");
-  else if (platformType == "Jumpthru")
-    platformTypeStr = _("Jumpthru platform");
 
-  properties[_("Type")]
-      .SetValue(platformTypeStr)
+  properties["PlatformType"]
+      .SetLabel(_("Type"))
+      .SetValue(platformType.empty() ? "NormalPlatform" : platformType)
       .SetType("Choice")
-      .AddExtraInfo(_("Platform"))
-      .AddExtraInfo(_("Jumpthru platform"))
-      .AddExtraInfo(_("Ladder"));
-  properties[_("Ledges can be grabbed")].SetGroup(_("Ledge"))
+      .AddChoice("NormalPlatform", _("Platform"))
+      .AddChoice("Jumpthru", _("Jumpthru platform"))
+      .AddChoice("Ladder", _("Ladder"));
+  properties["CanBeGrabbed"]
+      .SetLabel(_("Ledges can be grabbed"))
+      .SetGroup(_("Ledge"))
       .SetValue(behaviorContent.GetBoolAttribute("canBeGrabbed", true)
                     ? "true"
                     : "false")
       .SetType("Boolean");
-  properties[_("Grab offset on Y axis")].SetGroup(_("Ledge")).SetValue(
+  properties["YGrabOffset"]
+      .SetLabel(_("Grab offset on Y axis"))
+      .SetGroup(_("Ledge"))
+      .SetValue(
       gd::String::From(behaviorContent.GetDoubleAttribute("yGrabOffset")));
 
   return properties;
@@ -56,16 +57,17 @@ std::map<gd::String, gd::PropertyDescriptor> PlatformBehavior::GetProperties(
 bool PlatformBehavior::UpdateProperty(gd::SerializerElement& behaviorContent,
                                       const gd::String& name,
                                       const gd::String& value) {
-  if (name == _("Ledges can be grabbed"))
+  if (name == "CanBeGrabbed")
     behaviorContent.SetAttribute("canBeGrabbed", (value == "1"));
-  else if (name == _("Type")) {
-    if (value == _("Jumpthru platform"))
+  else if (name == "PlatformType") {
+    auto normalizedValue = value.LowerCase();
+    if (normalizedValue == "jumpthru")
       behaviorContent.SetAttribute("platformType", "Jumpthru");
-    else if (value == _("Ladder"))
+    else if (normalizedValue == "ladder")
       behaviorContent.SetAttribute("platformType", "Ladder");
     else
       behaviorContent.SetAttribute("platformType", "NormalPlatform");
-  } else if (name == _("Grab offset on Y axis"))
+  } else if (name == "YGrabOffset")
     behaviorContent.SetAttribute("yGrabOffset", value.To<double>());
   else
     return false;

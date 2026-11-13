@@ -16,8 +16,8 @@
 #include "GDCore/Extensions/Platform.h"
 #include "GDCore/IDE/SceneNameMangler.h"
 #include "GDCore/Project/Behavior.h"
-#include "GDCore/Project/BehaviorContent.h"
 #include "GDCore/Project/BehaviorsSharedData.h"
+#include "GDCore/Project/CustomBehaviorsSharedData.h"
 #include "GDCore/Project/InitialInstance.h"
 #include "GDCore/Project/Layer.h"
 #include "GDCore/Project/Object.h"
@@ -26,16 +26,19 @@
 #include "GDCore/Project/Project.h"
 #include "GDCore/Serialization/SerializerElement.h"
 #include "GDCore/String.h"
+#include "GDCore/Tools/Log.h"
 #include "GDCore/Tools/PolymorphicClone.h"
 
 using namespace std;
 
 namespace gd {
 
-gd::Layer Layout::badLayer;
-gd::BehaviorContent Layout::badBehaviorContent("", "");
+gd::BehaviorsSharedData Layout::badBehaviorSharedData("", "");
 
-Layout::Layout(const Layout& other) { Init(other); }
+Layout::Layout(const Layout& other)
+    : objectsContainer(gd::ObjectsContainer::SourceType::Scene) {
+  Init(other);
+}
 
 Layout& Layout::operator=(const Layout& other) {
   if (this != &other) Init(other);
@@ -43,27 +46,19 @@ Layout& Layout::operator=(const Layout& other) {
   return *this;
 }
 
-Layout::~Layout(){};
+Layout::~Layout() {};
 
 Layout::Layout()
-    : backgroundColorR(209),
-      backgroundColorG(209),
-      backgroundColorB(209),
+    : backgroundColorR(247),
+      backgroundColorG(249),
+      backgroundColorB(255),
       stopSoundsOnStartup(true),
+      resourcesPreloading("inherit"),
+      resourcesUnloading("inherit"),
       standardSortMethod(true),
-      oglFOV(90.0f),
-      oglZNear(1.0f),
-      oglZFar(500.0f),
-      disableInputWhenNotFocused(true)
-#if defined(GD_IDE_ONLY)
-      ,
-      profiler(NULL)
-#endif
-{
-  gd::Layer layer;
-  layer.SetCameraCount(1);
-  initialLayers.push_back(layer);
-}
+      disableInputWhenNotFocused(true),
+      variables(gd::VariablesContainer::SourceType::Scene),
+      objectsContainer(gd::ObjectsContainer::SourceType::Scene) {}
 
 void Layout::SetName(const gd::String& name_) {
   name = name_;
@@ -82,113 +77,69 @@ std::vector<gd::String> Layout::GetAllBehaviorSharedDataNames() const {
   return allNames;
 }
 
-const gd::BehaviorContent& Layout::GetBehaviorSharedData(
+const gd::BehaviorsSharedData& Layout::GetBehaviorSharedData(
     const gd::String& behaviorName) const {
   auto it = behaviorsSharedData.find(behaviorName);
   if (it != behaviorsSharedData.end()) return *it->second;
 
-  return badBehaviorContent;
+  return badBehaviorSharedData;
 }
 
-gd::BehaviorContent& Layout::GetBehaviorSharedData(
+gd::BehaviorsSharedData& Layout::GetBehaviorSharedData(
     const gd::String& behaviorName) {
   auto it = behaviorsSharedData.find(behaviorName);
   if (it != behaviorsSharedData.end()) return *it->second;
 
-  return badBehaviorContent;
+  return badBehaviorSharedData;
 }
 
-const std::map<gd::String, std::unique_ptr<gd::BehaviorContent> >&
+const std::map<gd::String, std::unique_ptr<gd::BehaviorsSharedData> >&
 Layout::GetAllBehaviorSharedData() const {
   return behaviorsSharedData;
 }
 
 gd::Layer& Layout::GetLayer(const gd::String& name) {
-  std::vector<gd::Layer>::iterator layer =
-      find_if(initialLayers.begin(),
-              initialLayers.end(),
-              bind2nd(gd::LayerHasName(), name));
-
-  if (layer != initialLayers.end()) return *layer;
-
-  return badLayer;
+  return layers.GetLayer(name);
 }
 
 const gd::Layer& Layout::GetLayer(const gd::String& name) const {
-  std::vector<gd::Layer>::const_iterator layer =
-      find_if(initialLayers.begin(),
-              initialLayers.end(),
-              bind2nd(gd::LayerHasName(), name));
-
-  if (layer != initialLayers.end()) return *layer;
-
-  return badLayer;
+  return layers.GetLayer(name);
 }
 
-gd::Layer& Layout::GetLayer(std::size_t index) { return initialLayers[index]; }
+gd::Layer& Layout::GetLayer(std::size_t index) {
+  return layers.GetLayer(index);
+}
 
 const gd::Layer& Layout::GetLayer(std::size_t index) const {
-  return initialLayers[index];
+  return layers.GetLayer(index);
 }
 
-std::size_t Layout::GetLayersCount() const { return initialLayers.size(); }
+std::size_t Layout::GetLayersCount() const { return layers.GetLayersCount(); }
 
-#if defined(GD_IDE_ONLY)
 bool Layout::HasLayerNamed(const gd::String& name) const {
-  return (find_if(initialLayers.begin(),
-                  initialLayers.end(),
-                  bind2nd(gd::LayerHasName(), name)) != initialLayers.end());
+  return layers.HasLayerNamed(name);
 }
 std::size_t Layout::GetLayerPosition(const gd::String& name) const {
-  for (std::size_t i = 0; i < initialLayers.size(); ++i) {
-    if (initialLayers[i].GetName() == name) return i;
-  }
-  return gd::String::npos;
+  return layers.GetLayerPosition(name);
 }
 
 void Layout::InsertNewLayer(const gd::String& name, std::size_t position) {
-  gd::Layer newLayer;
-  newLayer.SetName(name);
-  if (position < initialLayers.size())
-    initialLayers.insert(initialLayers.begin() + position, newLayer);
-  else
-    initialLayers.push_back(newLayer);
+  layers.InsertNewLayer(name, position);
 }
 
 void Layout::InsertLayer(const gd::Layer& layer, std::size_t position) {
-  if (position < initialLayers.size())
-    initialLayers.insert(initialLayers.begin() + position, layer);
-  else
-    initialLayers.push_back(layer);
+  layers.InsertLayer(layer, position);
 }
 
-void Layout::RemoveLayer(const gd::String& name) {
-  std::vector<gd::Layer>::iterator layer =
-      find_if(initialLayers.begin(),
-              initialLayers.end(),
-              bind2nd(gd::LayerHasName(), name));
-  if (layer == initialLayers.end()) return;
-
-  initialLayers.erase(layer);
-}
+void Layout::RemoveLayer(const gd::String& name) { layers.RemoveLayer(name); }
 
 void Layout::SwapLayers(std::size_t firstLayerIndex,
                         std::size_t secondLayerIndex) {
-  if (firstLayerIndex >= initialLayers.size() ||
-      secondLayerIndex >= initialLayers.size())
-    return;
-
-  std::iter_swap(initialLayers.begin() + firstLayerIndex,
-                 initialLayers.begin() + secondLayerIndex);
+  layers.SwapLayers(firstLayerIndex, secondLayerIndex);
 }
 
 void Layout::MoveLayer(std::size_t oldIndex, std::size_t newIndex) {
-  if (oldIndex >= initialLayers.size() || newIndex >= initialLayers.size())
-    return;
-
-  auto layer = initialLayers[oldIndex];
-  initialLayers.erase(initialLayers.begin() + oldIndex);
-  InsertLayer(layer, newIndex);
+  layers.MoveLayer(oldIndex, newIndex);
 }
 
 void Layout::UpdateBehaviorsSharedData(gd::Project& project) {
@@ -196,24 +147,25 @@ void Layout::UpdateBehaviorsSharedData(gd::Project& project) {
   std::vector<gd::String> allBehaviorsNames;
 
   // Search in objects for the type and the name of every behaviors.
-  for (std::size_t i = 0; i < initialObjects.size(); ++i) {
+  for (std::size_t i = 0; i < objectsContainer.GetObjectsCount(); ++i) {
     std::vector<gd::String> objectBehaviors =
-        initialObjects[i]->GetAllBehaviorNames();
+        objectsContainer.GetObject(i).GetAllBehaviorNames();
     for (unsigned int j = 0; j < objectBehaviors.size(); ++j) {
-      auto& behaviorContent =
-          initialObjects[i]->GetBehavior(objectBehaviors[j]);
-      allBehaviorsTypes.push_back(behaviorContent.GetTypeName());
-      allBehaviorsNames.push_back(behaviorContent.GetName());
+      auto& behavior =
+          objectsContainer.GetObject(i).GetBehavior(objectBehaviors[j]);
+      allBehaviorsTypes.push_back(behavior.GetTypeName());
+      allBehaviorsNames.push_back(behavior.GetName());
     }
   }
-  for (std::size_t i = 0; i < project.GetObjectsCount(); ++i) {
+  auto& globalObjects = project.GetObjects();
+  for (std::size_t i = 0; i < globalObjects.GetObjectsCount(); ++i) {
     std::vector<gd::String> objectBehaviors =
-        project.GetObject(i).GetAllBehaviorNames();
+        globalObjects.GetObject(i).GetAllBehaviorNames();
     for (std::size_t j = 0; j < objectBehaviors.size(); ++j) {
-      auto& behaviorContent =
-          project.GetObject(i).GetBehavior(objectBehaviors[j]);
-      allBehaviorsTypes.push_back(behaviorContent.GetTypeName());
-      allBehaviorsNames.push_back(behaviorContent.GetName());
+      auto& behavior =
+          globalObjects.GetObject(i).GetBehavior(objectBehaviors[j]);
+      allBehaviorsTypes.push_back(behavior.GetTypeName());
+      allBehaviorsNames.push_back(behavior.GetName());
     }
   }
 
@@ -225,19 +177,11 @@ void Layout::UpdateBehaviorsSharedData(gd::Project& project) {
 
     if (behaviorsSharedData.find(name) != behaviorsSharedData.end()) continue;
 
-    const gd::BehaviorMetadata& behaviorMetadata =
-        gd::MetadataProvider::GetBehaviorMetadata(project.GetCurrentPlatform(),
-                                                  allBehaviorsTypes[i]);
-    if (gd::MetadataProvider::IsBadBehaviorMetadata(behaviorMetadata)) continue;
-
-    gd::BehaviorsSharedData* behaviorSharedData =
-        behaviorMetadata.GetSharedDataInstance();
-    if (!behaviorSharedData) continue;
-
-    auto behaviorContent =
-        gd::make_unique<gd::BehaviorContent>(name, allBehaviorsTypes[i]);
-    behaviorSharedData->InitializeContent(behaviorContent->GetContent());
-    behaviorsSharedData[name] = std::move(behaviorContent);
+    auto sharedData =
+        CreateBehaviorsSharedData(project, name, allBehaviorsTypes[i]);
+    if (sharedData) {
+      behaviorsSharedData[name] = std::move(sharedData);
+    }
   }
 
   // Remove useless shared data:
@@ -256,6 +200,42 @@ void Layout::UpdateBehaviorsSharedData(gd::Project& project) {
   }
 }
 
+std::unique_ptr<gd::BehaviorsSharedData> Layout::CreateBehaviorsSharedData(
+    gd::Project& project,
+    const gd::String& name,
+    const gd::String& behaviorsType) {
+  if (project.HasEventsBasedBehavior(behaviorsType)) {
+    auto sharedData = gd::make_unique<gd::CustomBehaviorsSharedData>(
+        name, project, behaviorsType);
+    sharedData->InitializeContent();
+    return std::move(sharedData);
+  }
+  const gd::BehaviorMetadata& behaviorMetadata =
+      gd::MetadataProvider::GetBehaviorMetadata(project.GetCurrentPlatform(),
+                                                behaviorsType);
+  if (gd::MetadataProvider::IsBadBehaviorMetadata(behaviorMetadata)) {
+    gd::LogWarning(
+        "Tried to create a behavior shared data with an unknown type: " +
+        behaviorsType + " on object " + GetName() + "!");
+    // It's probably an events-based behavior that was removed.
+    // Create a custom behavior shared data to preserve the properties values.
+    auto sharedData = gd::make_unique<gd::CustomBehaviorsSharedData>(
+        name, project, behaviorsType);
+    sharedData->InitializeContent();
+    return std::move(sharedData);
+  }
+
+  gd::BehaviorsSharedData* behaviorsSharedDataBluePrint =
+      behaviorMetadata.GetSharedDataInstance();
+  if (!behaviorsSharedDataBluePrint) return nullptr;
+
+  auto sharedData = behaviorsSharedDataBluePrint->Clone();
+  sharedData->SetName(name);
+  sharedData->SetTypeName(behaviorsType);
+  sharedData->InitializeContent();
+  return std::unique_ptr<gd::BehaviorsSharedData>(sharedData);
+}
+
 void Layout::SerializeTo(SerializerElement& element) const {
   element.SetAttribute("name", GetName());
   element.SetAttribute("mangledName", GetMangledName());
@@ -263,57 +243,50 @@ void Layout::SerializeTo(SerializerElement& element) const {
   element.SetAttribute("v", (int)GetBackgroundColorGreen());
   element.SetAttribute("b", (int)GetBackgroundColorBlue());
   element.SetAttribute("title", GetWindowDefaultTitle());
-  element.SetAttribute("oglFOV", oglFOV);
-  element.SetAttribute("oglZNear", oglZNear);
-  element.SetAttribute("oglZFar", oglZFar);
   element.SetAttribute("standardSortMethod", standardSortMethod);
   element.SetAttribute("stopSoundsOnStartup", stopSoundsOnStartup);
+  if (resourcesPreloading != "inherit")
+    element.SetAttribute("resourcesPreloading", resourcesPreloading);
+  if (resourcesUnloading != "inherit")
+    element.SetAttribute("resourcesUnloading", resourcesUnloading);
   element.SetAttribute("disableInputWhenNotFocused",
                        disableInputWhenNotFocused);
+  element.SetAttribute("renderer3DWorldScale", renderer3DWorldScale);
 
-#if defined(GD_IDE_ONLY)
   editorSettings.SerializeTo(element.AddChild("uiSettings"));
-#endif
 
-  GetObjectGroups().SerializeTo(element.AddChild("objectsGroups"));
+  objectsContainer.GetObjectGroups().SerializeTo(
+      element.AddChild("objectsGroups"));
   GetVariables().SerializeTo(element.AddChild("variables"));
   GetInitialInstances().SerializeTo(element.AddChild("instances"));
-  SerializeObjectsTo(element.AddChild("objects"));
+  objectsContainer.SerializeObjectsTo(element.AddChild("objects"));
+  objectsContainer.SerializeFoldersTo(
+      element.AddChild("objectsFolderStructure"));
   gd::EventsListSerialization::SerializeEventsTo(events,
                                                  element.AddChild("events"));
 
-  SerializeLayersTo(element.AddChild("layers"));
+  layers.SerializeLayersTo(element.AddChild("layers"));
 
   SerializerElement& behaviorDatasElement =
       element.AddChild("behaviorsSharedData");
   behaviorDatasElement.ConsiderAsArrayOf("behaviorSharedData");
   for (const auto& it : behaviorsSharedData) {
+    const gd::BehaviorsSharedData& sharedData = *it.second;
     SerializerElement& dataElement =
         behaviorDatasElement.AddChild("behaviorSharedData");
 
-    it.second->SerializeTo(dataElement);
+    sharedData.SerializeTo(dataElement);
     dataElement.RemoveChild("type");  // The content can contain type or name
                                       // properties, remove them.
     dataElement.RemoveChild("name");
-    dataElement.SetAttribute("type", it.second->GetTypeName());
-    dataElement.SetAttribute("name", it.second->GetName());
-  }
-}
+    dataElement.SetAttribute("type", sharedData.GetTypeName());
+    dataElement.SetAttribute("name", sharedData.GetName());
 
-void Layout::SerializeLayersTo(SerializerElement& element) const {
-  element.ConsiderAsArrayOf("layer");
-  for (std::size_t j = 0; j < GetLayersCount(); ++j)
-    GetLayer(j).SerializeTo(element.AddChild("layer"));
-}
-#endif
-
-void Layout::UnserializeLayersFrom(const SerializerElement& element) {
-  initialLayers.clear();
-  element.ConsiderAsArrayOf("layer", "Layer");
-  for (std::size_t i = 0; i < element.GetChildrenCount(); ++i) {
-    gd::Layer layer;
-    layer.UnserializeFrom(element.GetChild(i));
-    initialLayers.push_back(layer);
+    // Compatibility with projects saved with the removed Quick Customization:
+    // the content can contain its former visibilities, remove them.
+    dataElement.RemoveChild("propertiesQuickCustomizationVisibilities");
+    dataElement.RemoveAttribute("quickCustomizationVisibility");
+    // end of compatibility code
   }
 }
 
@@ -324,30 +297,38 @@ void Layout::UnserializeFrom(gd::Project& project,
                      element.GetIntAttribute("b"));
   SetWindowDefaultTitle(
       element.GetStringAttribute("title", "(No title)", "titre"));
-  oglFOV = element.GetDoubleAttribute("oglFOV");
-  oglZNear = element.GetDoubleAttribute("oglZNear");
-  oglZFar = element.GetDoubleAttribute("oglZFar");
   standardSortMethod = element.GetBoolAttribute("standardSortMethod");
   stopSoundsOnStartup = element.GetBoolAttribute("stopSoundsOnStartup");
+  resourcesPreloading =
+      element.GetStringAttribute("resourcesPreloading", "inherit");
+  resourcesUnloading =
+      element.GetStringAttribute("resourcesUnloading", "inherit");
   disableInputWhenNotFocused =
       element.GetBoolAttribute("disableInputWhenNotFocused");
+  renderer3DWorldScale =
+      element.GetDoubleAttribute("renderer3DWorldScale", 100);
 
-#if defined(GD_IDE_ONLY)
   editorSettings.UnserializeFrom(
       element.GetChild("uiSettings", 0, "UISettings"));
 
-  GetObjectGroups().UnserializeFrom(
+  objectsContainer.GetObjectGroups().UnserializeFrom(
       element.GetChild("objectsGroups", 0, "GroupesObjets"));
   gd::EventsListSerialization::UnserializeEventsFrom(
       project, GetEvents(), element.GetChild("events", 0, "Events"));
-#endif
 
-  UnserializeObjectsFrom(project, element.GetChild("objects", 0, "Objets"));
+  objectsContainer.UnserializeObjectsFrom(
+      project, element.GetChild("objects", 0, "Objets"));
+  if (element.HasChild("objectsFolderStructure")) {
+    objectsContainer.UnserializeFoldersFrom(
+        project, element.GetChild("objectsFolderStructure", 0));
+  }
+  objectsContainer.AddMissingObjectsInRootFolder();
+
   initialInstances.UnserializeFrom(
-      element.GetChild("instances", 0, "Positions"));
+      project, element.GetChild("instances", 0, "Positions"));
   variables.UnserializeFrom(element.GetChild("variables", 0, "Variables"));
 
-  UnserializeLayersFrom(element.GetChild("layers", 0, "Layers"));
+  layers.UnserializeLayersFrom(element.GetChild("layers", 0, "Layers"));
 
   // Compatibility with GD <= 4
   gd::String deprecatedTag1 = "automatismsSharedData";
@@ -369,20 +350,23 @@ void Layout::UnserializeFrom(gd::Project& project,
                             "Behavior");  // Compatibility with GD <= 4
     gd::String name = sharedDataElement.GetStringAttribute("name", "", "Name");
 
-    auto behaviorContent = gd::make_unique<gd::BehaviorContent>(name, type);
-    // Compatibility with GD <= 4.0.98
-    // If there is only one child called "content" (in addition to "type" and
-    // "name"), it's the content of a JavaScript behavior. Move the content
-    // out of the "content" object (to put it directly at the root of the
-    // behavior shared data element).
-    if (sharedDataElement.HasChild("content")) {
-      behaviorContent->UnserializeFrom(sharedDataElement.GetChild("content"));
+    auto sharedData = CreateBehaviorsSharedData(project, name, type);
+    if (sharedData) {
+      // Compatibility with GD <= 4.0.98
+      // If there is only one child called "content" (in addition to "type" and
+      // "name"), it's the content of a JavaScript behavior. Move the content
+      // out of the "content" object (to put it directly at the root of the
+      // behavior shared data element).
+      if (sharedDataElement.HasChild("content")) {
+        sharedData->UnserializeFrom(sharedDataElement.GetChild("content"));
+      }
+      // end of compatibility code
+      else {
+        sharedData->UnserializeFrom(sharedDataElement);
+      }
+
+      behaviorsSharedData[name] = std::move(sharedData);
     }
-    // end of compatibility code
-    else {
-      behaviorContent->UnserializeFrom(sharedDataElement);
-    }
-    behaviorsSharedData[name] = std::move(behaviorContent);
   }
 }
 
@@ -393,30 +377,25 @@ void Layout::Init(const Layout& other) {
   backgroundColorB = other.backgroundColorB;
   standardSortMethod = other.standardSortMethod;
   title = other.title;
-  oglFOV = other.oglFOV;
-  oglZNear = other.oglZNear;
-  oglZFar = other.oglZFar;
   stopSoundsOnStartup = other.stopSoundsOnStartup;
+  resourcesPreloading = other.resourcesPreloading;
+  resourcesUnloading = other.resourcesUnloading;
   disableInputWhenNotFocused = other.disableInputWhenNotFocused;
+  renderer3DWorldScale = other.renderer3DWorldScale;
   initialInstances = other.initialInstances;
-  initialLayers = other.initialLayers;
+  layers = other.layers;
   variables = other.GetVariables();
 
-  initialObjects = gd::Clone(other.initialObjects);
+  objectsContainer = other.objectsContainer;
 
   behaviorsSharedData.clear();
   for (const auto& it : other.behaviorsSharedData) {
     behaviorsSharedData[it.first] =
-        std::unique_ptr<gd::BehaviorContent>(it.second->Clone());
+        std::unique_ptr<gd::BehaviorsSharedData>(it.second->Clone());
   }
 
-#if defined(GD_IDE_ONLY)
   events = other.events;
   editorSettings = other.editorSettings;
-  objectGroups = other.objectGroups;
-
-  profiler = other.profiler;
-#endif
 }
 
 std::vector<gd::String> GetHiddenLayers(const Layout& layout) {
@@ -430,74 +409,321 @@ std::vector<gd::String> GetHiddenLayers(const Layout& layout) {
   return hiddenLayers;
 }
 
-#if defined(GD_IDE_ONLY)
 gd::String GD_CORE_API GetTypeOfObject(const gd::ObjectsContainer& project,
                                        const gd::ObjectsContainer& layout,
                                        gd::String name,
                                        bool searchInGroups) {
   gd::String type;
 
-  // Search in objects
+  // Search in objects.
   if (layout.HasObjectNamed(name))
     type = layout.GetObject(name).GetType();
   else if (project.HasObjectNamed(name))
     type = project.GetObject(name).GetType();
 
-  // Search in groups
-  if (searchInGroups) {
-    for (std::size_t i = 0; i < layout.GetObjectGroups().size(); ++i) {
-      if (layout.GetObjectGroups()[i].GetName() == name) {
-        // A group has the name searched
-        // Verifying now that all objects have the same type.
-
-        vector<gd::String> groupsObjects =
-            layout.GetObjectGroups()[i].GetAllObjectsNames();
-        gd::String previousType =
-            groupsObjects.empty()
-                ? ""
-                : GetTypeOfObject(project, layout, groupsObjects[0], false);
-
-        for (std::size_t j = 0; j < groupsObjects.size(); ++j) {
-          if (GetTypeOfObject(project, layout, groupsObjects[j], false) !=
-              previousType)
-            return "";  // The group has more than one type.
-        }
-
-        if (!type.empty() && previousType != type)
-          return "";  // The group has objects of different type, so the group
-                      // has not any type.
-
-        type = previousType;
-      }
+  // Search in groups.
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  else if (searchInGroups) {
+    // A group of the layout shadows a global group with the same name: only
+    // the most local group is considered (as done for objects, and by
+    // gd::ObjectsContainersList::ExpandObjectName when generating code).
+    const gd::ObjectsContainer* container = nullptr;
+    if (layout.GetObjectGroups().Has(name)) {
+      container = &layout;
+    } else if (project.GetObjectGroups().Has(name)) {
+      container = &project;
     }
-    for (std::size_t i = 0; i < project.GetObjectGroups().size(); ++i) {
-      if (project.GetObjectGroups()[i].GetName() == name) {
-        // A group has the name searched
-        // Verifying now that all objects have the same type.
-
-        vector<gd::String> groupsObjects =
-            project.GetObjectGroups()[i].GetAllObjectsNames();
-        gd::String previousType =
-            groupsObjects.empty()
-                ? ""
-                : GetTypeOfObject(project, layout, groupsObjects[0], false);
-
-        for (std::size_t j = 0; j < groupsObjects.size(); ++j) {
-          if (GetTypeOfObject(project, layout, groupsObjects[j], false) !=
-              previousType)
-            return "";  // The group has more than one type.
-        }
-
-        if (!type.empty() && previousType != type)
-          return "";  // The group has objects of different type, so the group
-                      // has not any type.
-
-        type = previousType;
+    if (container) {
+      // Verifying now that all objects have the same type.
+      const vector<gd::String>& groupsObjects =
+          container->GetObjectGroups().Get(name).GetAllObjectsNames();
+      // Empty groups don't have any type.
+      if (groupsObjects.empty()) {
+        return "";
+      }
+      type = GetTypeOfObject(project, layout, groupsObjects[0], false);
+      for (std::size_t j = 1; j < groupsObjects.size(); ++j) {
+        if (GetTypeOfObject(project, layout, groupsObjects[j], false) != type)
+          return "";  // The group has more than one type.
       }
     }
   }
-
   return type;
+}
+
+void GD_CORE_API
+FilterBehaviorNamesFromObject(const gd::Object& object,
+                              const gd::String& behaviorType,
+                              std::vector<gd::String>& behaviorNames) {
+  for (size_t i = 0; i < behaviorNames.size();) {
+    auto& behaviorName = behaviorNames[i];
+    if (!object.HasBehaviorNamed(behaviorName) ||
+        object.GetBehavior(behaviorName).GetTypeName() != behaviorType) {
+      behaviorNames.erase(behaviorNames.begin() + i);
+    } else {
+      ++i;
+    }
+  }
+}
+
+std::vector<gd::String> GD_CORE_API
+GetBehaviorNamesInObjectOrGroup(const gd::ObjectsContainer& project,
+                                const gd::ObjectsContainer& layout,
+                                const gd::String& objectOrGroupName,
+                                const gd::String& behaviorType,
+                                bool searchInGroups) {
+  // Search in objects.
+  if (layout.HasObjectNamed(objectOrGroupName)) {
+    auto& object = layout.GetObject(objectOrGroupName);
+    auto behaviorNames = object.GetAllBehaviorNames();
+    FilterBehaviorNamesFromObject(object, behaviorType, behaviorNames);
+    return behaviorNames;
+  }
+  if (project.HasObjectNamed(objectOrGroupName)) {
+    auto& object = project.GetObject(objectOrGroupName);
+    auto behaviorNames = object.GetAllBehaviorNames();
+    FilterBehaviorNamesFromObject(object, behaviorType, behaviorNames);
+    return behaviorNames;
+  }
+
+  if (!searchInGroups) {
+    std::vector<gd::String> behaviorNames;
+    return behaviorNames;
+  }
+
+  // Search in groups.
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  const gd::ObjectsContainer* container;
+  if (layout.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &layout;
+  } else if (project.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &project;
+  } else {
+    std::vector<gd::String> behaviorNames;
+    return behaviorNames;
+  }
+  const vector<gd::String>& groupsObjects =
+      container->GetObjectGroups().Get(objectOrGroupName).GetAllObjectsNames();
+
+  // Empty groups don't contain any behavior.
+  if (groupsObjects.empty()) {
+    std::vector<gd::String> behaviorNames;
+    return behaviorNames;
+  }
+
+  // Compute the intersection of the behaviors of all objects.
+  std::vector<gd::String> behaviorNames;
+  size_t objectIndex = 0;
+  // Look for a first that object exists
+  for (; objectIndex < groupsObjects.size(); objectIndex++) {
+    auto &objectName = groupsObjects[objectIndex];
+    if (layout.HasObjectNamed(objectName) ||
+        project.HasObjectNamed(objectName)) {
+      behaviorNames = GetBehaviorNamesInObjectOrGroup(
+          project, layout, groupsObjects[objectIndex], behaviorType, false);
+      objectIndex++;
+      break;
+    }
+  }
+  for (; objectIndex < groupsObjects.size(); objectIndex++) {
+    auto& objectName = groupsObjects[objectIndex];
+
+    if (layout.HasObjectNamed(objectName)) {
+      auto& object = layout.GetObject(objectName);
+      FilterBehaviorNamesFromObject(object, behaviorType, behaviorNames);
+      return behaviorNames;
+    }
+    if (project.HasObjectNamed(objectName)) {
+      auto& object = project.GetObject(objectName);
+      FilterBehaviorNamesFromObject(object, behaviorType, behaviorNames);
+      return behaviorNames;
+    }
+    if (behaviorNames.size() == 0) {
+      return behaviorNames;
+    }
+  }
+  return behaviorNames;
+}
+
+bool GD_CORE_API HasBehaviorInObjectOrGroup(const gd::ObjectsContainer& project,
+                                            const gd::ObjectsContainer& layout,
+                                            const gd::String& objectOrGroupName,
+                                            const gd::String& behaviorName,
+                                            bool searchInGroups) {
+  // Search in objects.
+  if (layout.HasObjectNamed(objectOrGroupName)) {
+    return layout.GetObject(objectOrGroupName).HasBehaviorNamed(behaviorName);
+  }
+  if (project.HasObjectNamed(objectOrGroupName)) {
+    return project.GetObject(objectOrGroupName).HasBehaviorNamed(behaviorName);
+  }
+
+  if (!searchInGroups) {
+    return false;
+  }
+
+  // Search in groups.
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  const gd::ObjectsContainer* container;
+  if (layout.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &layout;
+  } else if (project.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &project;
+  } else {
+    return false;
+  }
+  const vector<gd::String>& groupsObjects =
+      container->GetObjectGroups().Get(objectOrGroupName).GetAllObjectsNames();
+
+  // Empty groups don't contain any behavior.
+  if (groupsObjects.empty()) {
+    return false;
+  }
+
+  // Check that all objects have the behavior.
+  for (auto&& objectName : groupsObjects) {
+    if (!layout.HasObjectNamed(objectName) &&
+        !project.HasObjectNamed(objectName)) {
+      continue;
+    }
+    if (!HasBehaviorInObjectOrGroup(
+            project, layout, objectName, behaviorName, false)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool GD_CORE_API HasDefaultBehavior(const gd::ObjectsContainer& project,
+                                   const gd::ObjectsContainer& layout,
+                                   gd::String objectOrGroupName,
+                                   gd::String behaviorName,
+                                   bool searchInGroups) {
+  // Search in objects.
+  if (layout.HasObjectNamed(objectOrGroupName)) {
+    auto& object = layout.GetObject(objectOrGroupName);
+    return object.HasBehaviorNamed(behaviorName) &&
+           object.GetBehavior(behaviorName).IsDefaultBehavior();
+  }
+  if (project.HasObjectNamed(objectOrGroupName)) {
+    auto& object = project.GetObject(objectOrGroupName);
+    return object.HasBehaviorNamed(behaviorName) &&
+           object.GetBehavior(behaviorName).IsDefaultBehavior();
+  }
+
+  if (!searchInGroups) {
+    return false;
+  }
+
+  // Search in groups.
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  const gd::ObjectsContainer* container;
+  if (layout.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &layout;
+  } else if (project.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &project;
+  } else {
+    return false;
+  }
+  const vector<gd::String>& groupsObjects =
+      container->GetObjectGroups().Get(objectOrGroupName).GetAllObjectsNames();
+
+  // Empty groups don't contain any behavior.
+  if (groupsObjects.empty()) {
+    return false;
+  }
+
+  // Check that all objects have the same type.
+  for (auto&& objectName : groupsObjects) {
+    if (!layout.HasObjectNamed(objectName) &&
+        !project.HasObjectNamed(objectName)) {
+      continue;
+    }
+    if (!HasDefaultBehavior(project, layout, objectName, behaviorName, false)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+gd::String GD_CORE_API
+GetTypeOfBehaviorInObjectOrGroup(const gd::ObjectsContainer& project,
+                                 const gd::ObjectsContainer& layout,
+                                 const gd::String& objectOrGroupName,
+                                 const gd::String& behaviorName,
+                                 bool searchInGroups) {
+  // Search in objects.
+  if (layout.HasObjectNamed(objectOrGroupName)) {
+    auto& object = layout.GetObject(objectOrGroupName);
+    return object.HasBehaviorNamed(behaviorName)
+               ? object.GetBehavior(behaviorName).GetTypeName()
+               : "";
+  }
+  if (project.HasObjectNamed(objectOrGroupName)) {
+    auto& object = project.GetObject(objectOrGroupName);
+    return object.HasBehaviorNamed(behaviorName)
+               ? object.GetBehavior(behaviorName).GetTypeName()
+               : "";
+  }
+
+  if (!searchInGroups) {
+    return "";
+  }
+
+  // Search in groups.
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  const gd::ObjectsContainer* container;
+  if (layout.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &layout;
+  } else if (project.GetObjectGroups().Has(objectOrGroupName)) {
+    container = &project;
+  } else {
+    return "";
+  }
+  const vector<gd::String>& groupsObjects =
+      container->GetObjectGroups().Get(objectOrGroupName).GetAllObjectsNames();
+
+  // Empty groups don't contain any behavior.
+  if (groupsObjects.empty()) {
+    return "";
+  }
+
+  // Check that all objects have the behavior with the same type.
+  size_t objectIndex = 0;
+  gd::String behaviorType = "";
+  // Look for a first that object exists
+  for (; objectIndex < groupsObjects.size(); objectIndex++) {
+    auto &objectName = groupsObjects[objectIndex];
+    if (layout.HasObjectNamed(objectName) ||
+        project.HasObjectNamed(objectName)) {
+      behaviorType = GetTypeOfBehaviorInObjectOrGroup(
+          project, layout, groupsObjects[objectIndex], behaviorName, false);
+      objectIndex++;
+      break;
+    }
+  }
+  for (; objectIndex < groupsObjects.size(); objectIndex++) {
+    auto &objectName = groupsObjects[objectIndex];
+    if (!layout.HasObjectNamed(objectName) &&
+        !project.HasObjectNamed(objectName)) {
+      continue;
+    }
+    if (GetTypeOfBehaviorInObjectOrGroup(project, layout, objectName,
+                                         behaviorName, false) != behaviorType) {
+      return "";
+    }
+  }
+  return behaviorType;
 }
 
 gd::String GD_CORE_API GetTypeOfBehavior(const gd::ObjectsContainer& project,
@@ -505,18 +731,16 @@ gd::String GD_CORE_API GetTypeOfBehavior(const gd::ObjectsContainer& project,
                                          gd::String name,
                                          bool searchInGroups) {
   for (std::size_t i = 0; i < layout.GetObjectsCount(); ++i) {
-    vector<gd::String> behaviors = layout.GetObject(i).GetAllBehaviorNames();
-    for (std::size_t j = 0; j < behaviors.size(); ++j) {
-      if (layout.GetObject(i).GetBehavior(behaviors[j]).GetName() == name)
-        return layout.GetObject(i).GetBehavior(behaviors[j]).GetTypeName();
+    const auto& object = layout.GetObject(i);
+    if (object.HasBehaviorNamed(name)) {
+      return object.GetBehavior(name).GetTypeName();
     }
   }
 
   for (std::size_t i = 0; i < project.GetObjectsCount(); ++i) {
-    vector<gd::String> behaviors = project.GetObject(i).GetAllBehaviorNames();
-    for (std::size_t j = 0; j < behaviors.size(); ++j) {
-      if (project.GetObject(i).GetBehavior(behaviors[j]).GetName() == name)
-        return project.GetObject(i).GetBehavior(behaviors[j]).GetTypeName();
+    const auto& object = project.GetObject(i);
+    if (object.HasBehaviorNamed(name)) {
+      return object.GetBehavior(name).GetTypeName();
     }
   }
 
@@ -526,7 +750,7 @@ gd::String GD_CORE_API GetTypeOfBehavior(const gd::ObjectsContainer& project,
 vector<gd::String> GD_CORE_API
 GetBehaviorsOfObject(const gd::ObjectsContainer& project,
                      const gd::ObjectsContainer& layout,
-                     gd::String name,
+                     const gd::String& name,
                      bool searchInGroups) {
   bool behaviorsAlreadyInserted = false;
   vector<gd::String> behaviors;
@@ -551,58 +775,44 @@ GetBehaviorsOfObject(const gd::ObjectsContainer& project,
   }
 
   // Search in groups
-  if (searchInGroups) {
-    for (std::size_t i = 0; i < layout.GetObjectGroups().size(); ++i) {
-      if (layout.GetObjectGroups()[i].GetName() == name) {
-        // A group has the name searched
-        // Verifying now that all objects have common behaviors.
-
-        vector<gd::String> groupsObjects =
-            layout.GetObjectGroups()[i].GetAllObjectsNames();
-        for (std::size_t j = 0; j < groupsObjects.size(); ++j) {
-          // Get behaviors of the object of the group and delete behavior which
-          // are not in commons.
-          vector<gd::String> objectBehaviors =
-              GetBehaviorsOfObject(project, layout, groupsObjects[j], false);
-          if (!behaviorsAlreadyInserted) {
-            behaviorsAlreadyInserted = true;
-            behaviors = objectBehaviors;
-          } else {
-            for (std::size_t a = 0; a < behaviors.size(); ++a) {
-              if (find(objectBehaviors.begin(),
-                       objectBehaviors.end(),
-                       behaviors[a]) == objectBehaviors.end()) {
-                behaviors.erase(behaviors.begin() + a);
-                --a;
-              }
-            }
-          }
-        }
-      }
+  // Currently, a group is considered as the "intersection" of all of its
+  // objects. Search "groups is the intersection of its objects" in the
+  // codebase.
+  if (!behaviorsAlreadyInserted && searchInGroups) {
+    // A group of the layout shadows a global group with the same name: only
+    // the most local group is considered (as done for objects, and by
+    // gd::ObjectsContainersList::ExpandObjectName when generating code).
+    const gd::ObjectsContainer* container = nullptr;
+    if (layout.GetObjectGroups().Has(name)) {
+      container = &layout;
+    } else if (project.GetObjectGroups().Has(name)) {
+      container = &project;
     }
-    for (std::size_t i = 0; i < project.GetObjectGroups().size(); ++i) {
-      if (project.GetObjectGroups()[i].GetName() == name) {
-        // A group has the name searched
-        // Verifying now that all objects have common behaviors.
-
-        vector<gd::String> groupsObjects =
-            project.GetObjectGroups()[i].GetAllObjectsNames();
-        for (std::size_t j = 0; j < groupsObjects.size(); ++j) {
-          // Get behaviors of the object of the group and delete behavior which
-          // are not in commons.
-          vector<gd::String> objectBehaviors =
-              GetBehaviorsOfObject(project, layout, groupsObjects[j], false);
-          if (!behaviorsAlreadyInserted) {
-            behaviorsAlreadyInserted = true;
-            behaviors = objectBehaviors;
-          } else {
-            for (std::size_t a = 0; a < behaviors.size(); ++a) {
-              if (find(objectBehaviors.begin(),
-                       objectBehaviors.end(),
-                       behaviors[a]) == objectBehaviors.end()) {
-                behaviors.erase(behaviors.begin() + a);
-                --a;
-              }
+    if (container) {
+      // Verifying now that all objects have common behaviors.
+      const vector<gd::String>& groupsObjects =
+          container->GetObjectGroups().Get(name).GetAllObjectsNames();
+      for (std::size_t objectIndex = 0; objectIndex < groupsObjects.size();
+           ++objectIndex) {
+        auto& objectName = groupsObjects[objectIndex];
+        if (!layout.HasObjectNamed(objectName) &&
+            !project.HasObjectNamed(objectName)) {
+          continue;
+        }
+        // Get behaviors of the object of the group and delete behavior which
+        // are not in commons.
+        vector<gd::String> objectBehaviors =
+            GetBehaviorsOfObject(project, layout, objectName, false);
+        if (!behaviorsAlreadyInserted) {
+          behaviorsAlreadyInserted = true;
+          behaviors = objectBehaviors;
+        } else {
+          for (std::size_t a = 0; a < behaviors.size(); ++a) {
+            if (find(objectBehaviors.begin(),
+                     objectBehaviors.end(),
+                     behaviors[a]) == objectBehaviors.end()) {
+              behaviors.erase(behaviors.begin() + a);
+              --a;
             }
           }
         }
@@ -612,6 +822,5 @@ GetBehaviorsOfObject(const gd::ObjectsContainer& project,
 
   return behaviors;
 }
-#endif
 
 }  // namespace gd

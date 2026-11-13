@@ -5,15 +5,15 @@ Copyright (c) 2010-2016 Florian Rival (Florian.Rival@gmail.com)
 This project is released under the MIT License.
 */
 
-#ifndef PHYSICBEHAVIOR_H
-#define PHYSICBEHAVIOR_H
+#pragma once
 
 #include <map>
 #include <set>
 #include <vector>
 #include "GDCore/Project/Behavior.h"
 #include "GDCore/Project/Object.h"
-#include "SFML/System/Vector2.hpp"
+#include "GDCore/Vector2.h"
+
 namespace gd {
 class Project;
 class SerializerElement;
@@ -23,19 +23,18 @@ class GD_EXTENSION_API PhysicsBehavior : public gd::Behavior {
  public:
   PhysicsBehavior(){};
   virtual ~PhysicsBehavior(){};
-  virtual Behavior *Clone() const override {
-    return new PhysicsBehavior(*this);
+  virtual std::unique_ptr<gd::Behavior> Clone() const override {
+    return gd::make_unique<PhysicsBehavior>(*this);
   }
 
   enum Positioning { OnOrigin = 0, OnCenter = 2 };
 
-#if defined(GD_IDE_ONLY)
   virtual std::map<gd::String, gd::PropertyDescriptor> GetProperties(
       const gd::SerializerElement &behaviorContent) const override;
   virtual bool UpdateProperty(gd::SerializerElement &behaviorContent,
                               const gd::String &name,
                               const gd::String &value) override;
-#endif
+
   /**
    * Serialize the behavior
    */
@@ -43,7 +42,7 @@ class GD_EXTENSION_API PhysicsBehavior : public gd::Behavior {
       gd::SerializerElement &behaviorContent) override;
 
  private:
-  gd::String GetStringFromCoordsVector(const std::vector<sf::Vector2f> &vec,
+  gd::String GetStringFromCoordsVector(const std::vector<gd::Vector2f> &vec,
                                        char32_t coordsSep,
                                        char32_t composantSep);
   enum ShapeType {
@@ -52,5 +51,3 @@ class GD_EXTENSION_API PhysicsBehavior : public gd::Behavior {
     CustomPolygon
   } shapeType;  ///< the kind of hitbox -> Box, Circle or CustomPolygon
 };
-
-#endif  // PHYSICBEHAVIOR_H

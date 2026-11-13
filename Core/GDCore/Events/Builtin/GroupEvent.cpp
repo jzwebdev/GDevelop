@@ -10,7 +10,6 @@
 #include "GDCore/Events/CodeGeneration/EventsCodeGenerator.h"
 #include "GDCore/Events/Serialization.h"
 #include "GDCore/Serialization/SerializerElement.h"
-#include "GDCore/TinyXml/tinyxml.h"
 
 using namespace std;
 
@@ -25,6 +24,13 @@ vector<gd::String> GroupEvent::GetAllSearchableStrings() const {
   allSearchableStrings.push_back(name);
 
   return allSearchableStrings;
+}
+
+bool GroupEvent::ReplaceAllSearchableStrings(
+    std::vector<gd::String> newSearchableString) {
+  if (newSearchableString[0] == name) return false;
+  SetName(newSearchableString[0]);
+  return true;
 }
 
 void GroupEvent::SerializeTo(SerializerElement& element) const {
@@ -55,10 +61,12 @@ void GroupEvent::UnserializeFrom(gd::Project& project,
       project, events, element.GetChild("events"));
 
   parameters.clear();
-  gd::SerializerElement& parametersElement = element.GetChild("parameters");
-  parametersElement.ConsiderAsArrayOf("parameters");
-  for (std::size_t i = 0; i < parametersElement.GetChildrenCount(); ++i)
-    parameters.push_back(parametersElement.GetChild(i).GetValue().GetString());
+  if (element.HasChild("parameters")) {
+    gd::SerializerElement& parametersElement = element.GetChild("parameters");
+    parametersElement.ConsiderAsArrayOf("parameters");
+    for (std::size_t i = 0; i < parametersElement.GetChildrenCount(); ++i)
+      parameters.push_back(parametersElement.GetChild(i).GetValue().GetString());
+  }
 }
 
 void GroupEvent::SetBackgroundColor(unsigned int colorR_,
@@ -68,6 +76,5 @@ void GroupEvent::SetBackgroundColor(unsigned int colorR_,
   colorG = colorG_;
   colorB = colorB_;
 }
-
 
 }  // namespace gd

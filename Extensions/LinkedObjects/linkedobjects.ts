@@ -3,8 +3,10 @@ GDevelop - LinkedObjects Extension
 Copyright (c) 2013-2016 Florian Rival (Florian.Rival@gmail.com)
  */
 namespace gdjs {
+  const logger = new gdjs.Logger('LinkedObjects');
   /**
    * Manages the links between objects.
+   * @category Other extensions > Linked Objects
    */
   export class LinksManager {
     private _links = new Map<integer, IterableLinkedObjects>();
@@ -12,15 +14,17 @@ namespace gdjs {
     /**
      * Get the links manager of a scene.
      */
-    static getManager(runtimeScene: gdjs.RuntimeScene): gdjs.LinksManager {
+    static getManager(
+      instanceContainer: gdjs.RuntimeInstanceContainer
+    ): gdjs.LinksManager {
       // @ts-ignore
-      if (!runtimeScene.linkedObjectsManager) {
+      if (!instanceContainer.linkedObjectsManager) {
         //Create the shared manager if necessary.
         // @ts-ignore
-        runtimeScene.linkedObjectsManager = new gdjs.LinksManager();
+        instanceContainer.linkedObjectsManager = new gdjs.LinksManager();
       }
       // @ts-ignore
-      return runtimeScene.linkedObjectsManager;
+      return instanceContainer.linkedObjectsManager;
     }
 
     /**
@@ -37,7 +41,7 @@ namespace gdjs {
       objA: gdjs.RuntimeObject
     ): Map<string, gdjs.RuntimeObject[]> {
       if (!this._links.has(objA.id)) {
-        this._links.set(objA.id, new IterableLinkedObjects());
+        this._links.set(objA.id, new IterableLinkedObjects(objA));
       }
       return this._links.get(objA.id)!.linkedObjectMap;
     }
@@ -51,7 +55,7 @@ namespace gdjs {
       objA: gdjs.RuntimeObject
     ): Iterable<gdjs.RuntimeObject> {
       if (!this._links.has(objA.id)) {
-        this._links.set(objA.id, new IterableLinkedObjects());
+        this._links.set(objA.id, new IterableLinkedObjects(objA));
       }
       return this._links.get(objA.id)!;
     }
@@ -112,7 +116,14 @@ namespace gdjs {
           if (this._links.has(linkedObject.id)) {
             const otherObjList = this._links
               .get(linkedObject.id)!
-              .linkedObjectMap.get(removedObject.getName())!;
+              .linkedObjectMap.get(removedObject.getName());
+
+            if (!otherObjList) {
+              logger.error(
+                `Can't find link from ${linkedObject.id} (${linkedObject.name}) to ${removedObject.id} (${removedObject.name})`
+              );
+              return;
+            }
 
             const index = otherObjList.indexOf(removedObject);
             if (index !== -1) {
@@ -148,15 +159,83 @@ namespace gdjs {
         }
       }
     }
+
+    clearAllLinks() {
+      this._links.clear();
+    }
+
+    /**
+     * Serialize all links between objects that have a networkId,
+     * so they can be persisted and restored later.
+     * Each link is stored once as a pair of networkIds.
+     */
+    getNetworkSyncData(): Array<[string, string]> {
+      const linkedObjects: Array<[string, string]> = [];
+      const serializedLinks = new Set<string>();
+
+      for (const iterableLinkedObjects of this._links.values()) {
+        const objectA = iterableLinkedObjects.ownerObject;
+        if (!objectA || !objectA.networkId) {
+          continue;
+        }
+
+        for (const objectB of iterableLinkedObjects) {
+          if (!objectB.networkId) continue;
+          const pairKey =
+            objectA.networkId < objectB.networkId
+              ? `${objectA.networkId}|${objectB.networkId}`
+              : `${objectB.networkId}|${objectA.networkId}`;
+          if (serializedLinks.has(pairKey)) continue;
+          serializedLinks.add(pairKey);
+
+          linkedObjects.push([objectA.networkId, objectB.networkId]);
+        }
+      }
+
+      return linkedObjects;
+    }
+
+    /**
+     * Restore links from serialized data. Objects must already exist
+     * in the scene with their networkId set.
+     *
+     * Links for objects managed by the save state should be cleared
+     * before calling this method, so that stale links are removed.
+     * This method only adds the saved links back.
+     */
+    updateFromNetworkSyncData(
+      linksNetworkSyncData: Array<[string, string]>,
+      runtimeScene: gdjs.RuntimeScene
+    ): void {
+      if (!linksNetworkSyncData) return;
+
+      // Build a map from networkId to object instance for quick lookup.
+      const objectsByNetworkId = new Map<string, gdjs.RuntimeObject>();
+      for (const object of runtimeScene.getAdhocListOfAllInstances()) {
+        if (object.networkId) {
+          objectsByNetworkId.set(object.networkId, object);
+        }
+      }
+
+      for (const [networkIdA, networkIdB] of linksNetworkSyncData) {
+        const objectA = objectsByNetworkId.get(networkIdA);
+        const objectB = objectsByNetworkId.get(networkIdB);
+        if (!objectA || !objectB) continue;
+
+        this.linkObjects(objectA, objectB);
+      }
+    }
   }
 
   class IterableLinkedObjects implements Iterable<gdjs.RuntimeObject> {
+    ownerObject: gdjs.RuntimeObject;
     linkedObjectMap: Map<string, gdjs.RuntimeObject[]>;
     static emptyItr: Iterator<gdjs.RuntimeObject> = {
       next: () => ({ value: undefined, done: true }),
     };
 
-    constructor() {
+    constructor(ownerObject: gdjs.RuntimeObject) {
+      this.ownerObject = ownerObject;
       this.linkedObjectMap = new Map<string, gdjs.RuntimeObject[]>();
     }
 
@@ -184,54 +263,90 @@ namespace gdjs {
 
   export namespace evtTools {
     export namespace linkedObjects {
-      gdjs.registerObjectDeletedFromSceneCallback(function (runtimeScene, obj) {
-        LinksManager.getManager(runtimeScene).removeAllLinksOf(obj);
-      });
+      gdjs.registerObjectDeletedFromSceneCallback(
+        function (instanceContainer, obj) {
+          LinksManager.getManager(instanceContainer).removeAllLinksOf(obj);
+        }
+      );
+
+      gdjs.registerRuntimeSceneGetSyncDataCallback(
+        function (runtimeScene, currentLayoutSyncData, syncOptions) {
+          if (!syncOptions.syncLinkedObjects) return;
+
+          currentLayoutSyncData.linkedObjects =
+            LinksManager.getManager(runtimeScene).getNetworkSyncData();
+        }
+      );
+
+      gdjs.registerRuntimeSceneUpdateFromSyncDataCallback(
+        function (runtimeScene, receivedSyncData, _syncOptions) {
+          if (!receivedSyncData.linkedObjects) return;
+
+          const linksManager = LinksManager.getManager(runtimeScene);
+
+          // Clear links only for objects with a networkId (managed by save state).
+          // DoNotSave objects don't have networkIds, so their links are preserved.
+          for (const object of runtimeScene.getAdhocListOfAllInstances()) {
+            if (object.networkId) {
+              linksManager.removeAllLinksOf(object);
+            }
+          }
+
+          linksManager.updateFromNetworkSyncData(
+            receivedSyncData.linkedObjects,
+            runtimeScene
+          );
+        }
+      );
 
       export const linkObjects = function (
-        runtimeScene: gdjs.RuntimeScene,
-        objA: gdjs.RuntimeObject,
-        objB: gdjs.RuntimeObject
+        instanceContainer: gdjs.RuntimeInstanceContainer,
+        objA: gdjs.RuntimeObject | null,
+        objB: gdjs.RuntimeObject | null
       ) {
         if (objA === null || objB === null) {
           return;
         }
-        LinksManager.getManager(runtimeScene).linkObjects(objA, objB);
+        LinksManager.getManager(instanceContainer).linkObjects(objA, objB);
       };
 
       export const removeLinkBetween = function (
-        runtimeScene: gdjs.RuntimeScene,
-        objA: gdjs.RuntimeObject,
-        objB: gdjs.RuntimeObject
+        instanceContainer: gdjs.RuntimeInstanceContainer,
+        objA: gdjs.RuntimeObject | null,
+        objB: gdjs.RuntimeObject | null
       ) {
         if (objA === null || objB === null) {
           return;
         }
-        LinksManager.getManager(runtimeScene).removeLinkBetween(objA, objB);
+        LinksManager.getManager(instanceContainer).removeLinkBetween(
+          objA,
+          objB
+        );
       };
 
       export const removeAllLinksOf = function (
-        runtimeScene: gdjs.RuntimeScene,
+        instanceContainer: gdjs.RuntimeInstanceContainer,
         objA: gdjs.RuntimeObject
       ) {
         if (objA === null) {
           return;
         }
-        LinksManager.getManager(runtimeScene).removeAllLinksOf(objA);
+        LinksManager.getManager(instanceContainer).removeAllLinksOf(objA);
       };
 
       export const pickObjectsLinkedTo = function (
-        runtimeScene: gdjs.RuntimeScene,
+        instanceContainer: gdjs.RuntimeInstanceContainer,
         objectsLists: Hashtable<gdjs.RuntimeObject[]>,
-        obj: gdjs.RuntimeObject,
-        eventsFunctionContext: EventsFunctionContext | undefined
+        obj: gdjs.RuntimeObject | null,
+        eventsFunctionContext: EventsFunctionContext | null | undefined
       ) {
         if (obj === null) {
           return false;
         }
-        const linkedObjectMap = LinksManager.getManager(
-          runtimeScene
-        )._getMapOfObjectsLinkedWith(obj);
+        const linkedObjectMap =
+          LinksManager.getManager(instanceContainer)._getMapOfObjectsLinkedWith(
+            obj
+          );
 
         let pickedSomething = false;
         for (const contextObjectName in objectsLists.items) {
@@ -273,7 +388,7 @@ namespace gdjs {
             // avoid running an intersection with the picked objects later.
             let objectCount = 0;
             for (const objectName of parentEventPickedObjectNames) {
-              objectCount += runtimeScene.getObjects(objectName).length;
+              objectCount += instanceContainer.getObjects(objectName)!.length;
             }
 
             if (parentEventPickedObjects.length === objectCount) {

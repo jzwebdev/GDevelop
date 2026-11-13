@@ -1,94 +1,78 @@
 // @flow
 import * as React from 'react';
-import {
-  type AssetShortHeader,
-  isPixelArt,
-} from '../Utils/GDevelopServices/Asset';
-import { getPixelatedImageRendering } from '../Utils/CssHelpers';
-import ButtonBase from '@material-ui/core/ButtonBase';
+import { type AssetShortHeader } from '../Utils/GDevelopServices/Asset';
 import Text from '../UI/Text';
-import { CorsAwareImage } from '../UI/CorsAwareImage';
 import CheckeredBackground from '../ResourcesList/CheckeredBackground';
+import { textEllipsisStyle } from '../UI/TextEllipsis';
+import { AssetPreviewImage } from './AssetPreviewImage';
 
-const paddingSize = 10;
 const styles = {
   previewContainer: {
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  previewImage: {
-    position: 'relative',
-    objectFit: 'contain',
-    verticalAlign: 'middle',
-    pointerEvents: 'none',
-  },
-  previewImagePixelated: {
     width: '100%',
-    imageRendering: getPixelatedImageRendering(),
-    padding: 15,
-  },
-  icon: {
-    color: '#fff',
+    height: '100%',
   },
   cardContainer: {
     overflow: 'hidden',
     position: 'relative',
+    borderRadius: 8,
+    width: '100%',
+    aspectRatio: '1 / 1',
   },
   titleContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 48,
     color: '#fff',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
     backgroundColor: 'rgb(0,0,0,0.5)',
+    display: 'inline-block', // Necessary to have the text ellipsis working.
+    textAlign: 'center',
+    flexDirection: 'column',
   },
   title: {
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
+    ...textEllipsisStyle,
+    overflowWrap: 'break-word',
   },
 };
 
 type Props = {|
-  size: number,
+  id?: string,
   assetShortHeader: AssetShortHeader,
-  onOpenDetails: () => void,
+  hideShortDescription?: boolean,
 |};
 
-export const AssetCard = ({ assetShortHeader, onOpenDetails, size }: Props) => {
+export const AssetCard = ({
+  id,
+  assetShortHeader,
+  hideShortDescription,
+}: Props): React.MixedElement => {
+  const displayShortDescription =
+    !hideShortDescription && !!assetShortHeader.shortDescription;
+
   return (
-    <ButtonBase onClick={onOpenDetails} focusRipple>
-      <div style={{ ...styles.cardContainer, width: size, height: size }}>
-        <div style={{ ...styles.previewContainer, width: size, height: size }}>
-          <CheckeredBackground />
-          <CorsAwareImage
-            key={assetShortHeader.previewImageUrls[0]}
-            style={{
-              maxWidth: 128 - 2 * paddingSize,
-              maxHeight: 128 - 2 * paddingSize,
-              ...styles.previewImage,
-              ...(isPixelArt(assetShortHeader)
-                ? styles.previewImagePixelated
-                : undefined),
-            }}
-            src={assetShortHeader.previewImageUrls[0]}
-            alt={assetShortHeader.name}
-          />
-        </div>
-        <div style={styles.titleContainer}>
-          <Text noMargin style={styles.title}>
-            {assetShortHeader.name}
-          </Text>
-          <Text noMargin style={styles.title} size="body2">
+    <div id={id} style={styles.cardContainer}>
+      <div style={styles.previewContainer}>
+        <CheckeredBackground />
+        <AssetPreviewImage assetShortHeader={assetShortHeader} loading="lazy" />
+      </div>
+      <div
+        style={{
+          ...styles.titleContainer,
+          height: displayShortDescription ? 40 : 20,
+        }}
+      >
+        <Text noMargin style={styles.title} color="inherit">
+          {assetShortHeader.name}
+        </Text>
+        {displayShortDescription && (
+          <Text noMargin style={styles.title} size="body-small" color="inherit">
             {assetShortHeader.shortDescription}
           </Text>
-        </div>
+        )}
       </div>
-    </ButtonBase>
+    </div>
   );
 };

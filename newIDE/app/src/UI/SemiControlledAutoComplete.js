@@ -13,15 +13,26 @@ import { MarkdownText } from './MarkdownText';
 import Autocomplete from '@material-ui/lab/Autocomplete';
 import ListItem from '@material-ui/core/ListItem';
 import { computeTextFieldStyleProps } from './TextField';
+import { type FieldFocusFunction } from '../EventsSheet/ParameterFields/ParameterFieldCommons';
 import { makeStyles } from '@material-ui/core/styles';
 import muiZIndex from '@material-ui/core/styles/zIndex';
 import {
   shouldCloseOrCancel,
   shouldSubmit,
+  shouldValidate,
 } from './KeyboardShortcuts/InteractionKeys';
-import { textEllispsisStyle } from './TextEllipsis';
+import { textEllipsisStyle } from './TextEllipsis';
+import Popper from '@material-ui/core/Popper';
+import Paper from './Paper';
+import PortalContainerContext from './PortalContainerContext';
 
-type Option =
+export const AutocompletePaperComponent = (props: any): React.Node => (
+  // Use light background so that it's in contrast with background that
+  // is either dark or medium (in dialogs).
+  <Paper {...props} background="light" />
+);
+
+export type AutoCompleteOption =
   | {|
       type: 'separator',
     |}
@@ -29,20 +40,27 @@ type Option =
       text: string, // The text used for filtering. If empty, item is always shown.
       value: string, // The value to show on screen and to be selected
       translatableValue?: MessageDescriptor,
-      onClick?: () => void, // If defined, will be called when the item is clicked. onChange/onChoose won't be called.
+      onClick?: () => void | Promise<void>, // If defined, will be called when the item is clicked. onChange/onChoose won't be called.
+      // $FlowFixMe[prop-missing]
       renderIcon?: ?() => React.Element<typeof ListIcon | typeof SvgIcon>,
+      disabled?: boolean, // If true, the item is disabled and cannot be selected.
+      id?: string,
     |};
 
-export type DataSource = Array<Option>;
+export type DataSource = Array<AutoCompleteOption>;
 
 type Props = {|
   value: string,
   onChange: string => void,
   onChoose?: string => void,
+  onInputValueChange?: string => void,
   dataSource: DataSource,
 
-  id?: string,
+  id?: ?string,
   onBlur?: (event: SyntheticFocusEvent<HTMLInputElement>) => void,
+  onClick?: (event: SyntheticPointerEvent<HTMLInputElement>) => void,
+  onFocus?: (event: SyntheticFocusEvent<HTMLInputElement>) => void,
+  commitOnInputChange?: boolean,
   onRequestClose?: () => void,
   onApply?: () => void,
   errorText?: React.Node,
@@ -55,14 +73,17 @@ type Props = {|
   textFieldStyle?: Object,
   openOnFocus?: boolean,
   style?: Object,
+  inputStyle?: Object,
+  filterOptionById?: string => boolean,
 |};
 
 export type SemiControlledAutoCompleteInterface = {|
-  focus: () => void,
+  focus: FieldFocusFunction,
   forceInputValueTo: (newValue: string) => void,
+  getInputValue: () => string,
 |};
 
-const styles = {
+export const autocompleteStyles = {
   container: {
     position: 'relative',
     width: '100%',
@@ -72,6 +93,7 @@ const styles = {
     padding: 0,
     margin: 0,
   },
+  listbox: { padding: 0, margin: 0 },
   listItemText: {
     margin: '1px 0',
   },
@@ -81,10 +103,7 @@ const useStyles = makeStyles({
   option: {
     cursor: 'default',
   },
-  listbox: {
-    padding: 0,
-    margin: 0,
-  },
+  listbox: autocompleteStyles.listbox,
   input: {
     width: 'auto',
     flexGrow: 1,
@@ -98,7 +117,7 @@ const useStyles = makeStyles({
 });
 
 const makeRenderItem = (i18n: I18nType) => (
-  option: Option,
+  option: AutoCompleteOption,
   state: Object
 ): React.Node => {
   if (option.type && option.type === 'separator') {
@@ -107,7 +126,7 @@ const makeRenderItem = (i18n: I18nType) => (
         divider
         disableGutters
         component={'div'}
-        style={styles.listItem}
+        style={autocompleteStyles.listItem}
       />
     );
   }
@@ -116,12 +135,16 @@ const makeRenderItem = (i18n: I18nType) => (
     ? i18n._(option.translatableValue)
     : option.value;
   return (
-    <ListItem dense={true} component={'div'} style={styles.listItem}>
+    <ListItem
+      dense={true}
+      component={'div'}
+      style={autocompleteStyles.listItem}
+    >
       {option.renderIcon && <ListItemIcon>{option.renderIcon()}</ListItemIcon>}
       <ListItemText
-        style={styles.listItemText}
+        style={autocompleteStyles.listItemText}
         primary={
-          <div title={value} style={textEllispsisStyle}>
+          <div title={value} style={textEllipsisStyle}>
             {value}
           </div>
         }
@@ -130,18 +153,21 @@ const makeRenderItem = (i18n: I18nType) => (
   );
 };
 
-const isOptionDisabled = (option: Option) =>
-  option.type === 'separator' ? true : false;
+const isOptionDisabled = (option: AutoCompleteOption) =>
+  option.type === 'separator' || !!option.disabled;
 
 const filterFunction = (
   options: DataSource,
   state: Object,
-  value: string
+  value: string,
+  filterOptionById: (string => boolean) | null
 ): DataSource => {
   const lowercaseInputValue = value.toLowerCase();
   const optionList = options.filter(option => {
     if (option.type === 'separator') return true;
-    if (!option.text) return true;
+    if (!option.text) {
+      return filterOptionById && option.id ? filterOptionById(option.id) : true;
+    }
     return option.text.toLowerCase().indexOf(lowercaseInputValue) !== -1;
   });
 
@@ -168,10 +194,10 @@ const filterFunction = (
 
 const handleChange = (
   input: HTMLInputElement,
-  option: Option,
+  option: AutoCompleteOption,
   props: Props
 ): void => {
-  if (option.type === 'separator') return;
+  if (option.type === 'separator' || option.disabled) return;
   else if (option.onClick) option.onClick();
   else {
     // Force the input to the selected value. We do this, bypassing inputValue state,
@@ -203,6 +229,7 @@ const getDefaultStylingProps = (params: Object, props: Props): Object => {
       ...InputProps,
       className: null,
       endAdornment: null,
+      style: props.inputStyle,
     },
     inputProps: {
       ...inputProps,
@@ -219,29 +246,47 @@ const getDefaultStylingProps = (params: Object, props: Props): Object => {
 
           if (props.onApply) props.onApply();
           else if (props.onRequestClose) props.onRequestClose();
+        } else if (shouldValidate(event)) {
+          // Make sure the current value is reported to the parent.
+          // Otherwise a parent like an InlineParameterEditor would close when detecting
+          // the validation (Enter key pressed) without having the latest value.
+          props.onChange(event.currentTarget.value);
         }
       },
     },
   };
 };
 
-const getOptionLabel = (option: Option, value: string): string =>
+const getOptionLabel = (option: AutoCompleteOption, value: string): string =>
   option.value ? option.value : value;
 
-export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
-  function SemiControlledAutoComplete(props: Props, ref) {
+export default (React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
+  function SemiControlledAutoComplete(props, ref) {
     const input = React.useRef((null: ?HTMLInputElement));
     const [inputValue, setInputValue] = useState((null: string | null));
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const classes = useStyles();
+    const portalContainer = React.useContext(PortalContainerContext);
+
+    const focus: FieldFocusFunction = options => {
+      const inputElement = input.current;
+      if (inputElement) {
+        inputElement.focus();
+        if (options && options.selectAll) {
+          inputElement.select();
+        }
+      }
+    };
 
     React.useImperativeHandle(ref, () => ({
-      focus: () => {
-        if (input.current) input.current.focus();
-      },
+      focus,
       forceInputValueTo: (newValue: string) => {
         if (inputValue !== null) setInputValue(newValue);
+        if (props.onInputValueChange) {
+          props.onInputValueChange(newValue);
+        }
       },
+      getInputValue: () => (input.current ? input.current.value : ''),
     }));
 
     const currentInputValue = inputValue !== null ? inputValue : props.value;
@@ -256,7 +301,11 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
       reason: string
     ): void => {
       setInputValue(value);
+      if (props.onInputValueChange) {
+        props.onInputValueChange(value);
+      }
       if (!isMenuOpen) setIsMenuOpen(true);
+      if (props.commitOnInputChange) props.onChange(value);
     };
 
     return (
@@ -265,9 +314,16 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
           <Autocomplete
             freeSolo
             classes={classes}
+            PopperComponent={
+              portalContainer
+                ? popperProps => (
+                    <Popper {...popperProps} container={portalContainer} />
+                  )
+                : undefined
+            }
             onChange={(
               event: SyntheticKeyboardEvent<HTMLInputElement>,
-              option: Option | null
+              option: AutoCompleteOption | null
             ) => {
               if (option === null || !input.current) return;
 
@@ -275,23 +331,31 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
               setInputValue(null);
               setIsMenuOpen(false);
             }}
+            onFocus={props.onFocus}
             open={isMenuOpen}
             style={{
               ...props.style,
-              ...styles.container,
+              ...autocompleteStyles.container,
             }}
             inputValue={currentInputValue}
             value={currentInputValue}
             onInputChange={handleInputChange}
+            PaperComponent={AutocompletePaperComponent}
             options={props.dataSource}
             renderOption={makeRenderItem(i18n)}
             getOptionDisabled={isOptionDisabled}
-            getOptionLabel={(option: Option) =>
+            getOptionLabel={(option: AutoCompleteOption) =>
               getOptionLabel(option, currentInputValue)
             }
             filterOptions={(options: DataSource, state) =>
-              filterFunction(options, state, currentInputValue)
+              filterFunction(
+                options,
+                state,
+                currentInputValue,
+                props.filterOptionById || null
+              )
             }
+            id={props.id}
             renderInput={params => {
               const {
                 InputProps,
@@ -300,6 +364,7 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
               } = getDefaultStylingProps(params, props);
               return (
                 <TextField
+                  color="secondary"
                   InputProps={{
                     ...InputProps,
                     placeholder:
@@ -309,6 +374,7 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
                   }}
                   inputProps={{
                     ...inputProps,
+                    onClick: props.onClick,
                     onFocus: (
                       event: SyntheticFocusEvent<HTMLInputElement>
                     ): void => {
@@ -342,6 +408,7 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
                     },
                   }}
                   {...otherStylingProps}
+                  // $FlowFixMe[incompatible-type]
                   {...computeTextFieldStyleProps(props)}
                   style={props.textFieldStyle}
                   label={props.floatingLabelText}
@@ -358,4 +425,7 @@ export default React.forwardRef<Props, SemiControlledAutoCompleteInterface>(
       </I18n>
     );
   }
-);
+): React.ComponentType<{
+  ...Props,
+  +ref?: React.RefSetter<SemiControlledAutoCompleteInterface>,
+}>);

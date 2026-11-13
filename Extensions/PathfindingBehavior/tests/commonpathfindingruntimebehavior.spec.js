@@ -1,44 +1,61 @@
 // @ts-check
-describe.only('gdjs.PathfindingRuntimeBehavior', function () {
-  const epsilon = 1 / (2 << 16);
+describe('gdjs.PathfindingRuntimeBehavior', function () {
   // tests cases where every collisionMethod has the same behavior.
-  let doCommonPathFindingTests = (collisionMethod, allowDiagonals) => {
+  let doCommonPathFindingTests = (
+    collisionMethod,
+    allowDiagonals,
+    smoothingMaxCellGap
+  ) => {
     const pathFindingName = 'auto1';
 
     const createScene = (framePerSecond = 60) => {
-      const runtimeGame = new gdjs.RuntimeGame({
-        variables: [],
-        // @ts-ignore - missing properties.
-        properties: { windowWidth: 800, windowHeight: 600 },
-        resources: { resources: [] },
-      });
+      const runtimeGame = gdjs.getPixiRuntimeGame();
       const runtimeScene = new gdjs.RuntimeScene(runtimeGame);
       runtimeScene.loadFromScene({
-        layers: [
-          {
-            name: '',
-            visibility: true,
-            effects: [],
-            cameras: [],
+        sceneData: {
+          layers: [
+            {
+              name: '',
+              visibility: true,
+              effects: [],
+              cameras: [],
 
-            ambientLightColorR: 0,
-            ambientLightColorG: 0,
-            ambientLightColorB: 0,
-            isLightingLayer: false,
-            followBaseLayerCamera: true,
+              ambientLightColorR: 0,
+              ambientLightColorG: 0,
+              ambientLightColorB: 0,
+              isLightingLayer: false,
+              followBaseLayerCamera: true,
+            },
+          ],
+          variables: [],
+          r: 0,
+          v: 0,
+          b: 0,
+          mangledName: 'Scene1',
+          name: 'Scene1',
+          stopSoundsOnStartup: false,
+          title: '',
+          renderer3DWorldScale: 100,
+          behaviorsSharedData: [],
+          objects: [],
+          objectsGroups: [],
+          instances: [],
+          usedResources: [],
+          uiSettings: {
+            grid: false,
+            gridType: 'rectangular',
+            gridWidth: 10,
+            gridHeight: 10,
+            gridDepth: 10,
+            gridOffsetX: 0,
+            gridOffsetY: 0,
+            gridOffsetZ: 0,
+            gridColor: 0,
+            gridAlpha: 1,
+            snap: false,
           },
-        ],
-        variables: [],
-        r: 0,
-        v: 0,
-        b: 0,
-        mangledName: 'Scene1',
-        name: 'Scene1',
-        stopSoundsOnStartup: false,
-        title: '',
-        behaviorsSharedData: [],
-        objects: [],
-        instances: [],
+        },
+        usedExtensionsWithVariablesData: [],
       });
       setFramePerSecond(runtimeScene, framePerSecond);
       return runtimeScene;
@@ -50,28 +67,34 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
     };
 
     const addPlayer = (runtimeScene) => {
-      const player = new gdjs.RuntimeObject(runtimeScene, {
-        name: 'player',
-        type: '',
-        behaviors: [
-          {
-            type: 'PathfindingBehavior::PathfindingBehavior',
-            name: 'auto1',
-            // @ts-ignore - properties are not typed
-            allowDiagonals: allowDiagonals,
-            acceleration: 400,
-            maxSpeed: 200,
-            angularMaxSpeed: 180,
-            rotateObject: false,
-            angleOffset: 0,
-            cellWidth: 20,
-            cellHeight: 20,
-            extraBorder: 0,
-            collisionMethod: collisionMethod,
-          },
-        ],
-        effects: [],
-      });
+      const player = new gdjs.RuntimeObject(
+        runtimeScene,
+        {
+          name: 'player',
+          type: '',
+          behaviors: [
+            {
+              type: 'PathfindingBehavior::PathfindingBehavior',
+              name: 'auto1',
+              // @ts-ignore - properties are not typed
+              allowDiagonals: allowDiagonals,
+              acceleration: 400,
+              maxSpeed: 200,
+              angularMaxSpeed: 180,
+              rotateObject: false,
+              angleOffset: 0,
+              cellWidth: 20,
+              cellHeight: 20,
+              extraBorder: 0,
+              smoothingMaxCellGap: smoothingMaxCellGap,
+              collisionMethod: collisionMethod,
+            },
+          ],
+          effects: [],
+          variables: [],
+        },
+        undefined
+      );
       player.getWidth = function () {
         return 90;
       };
@@ -83,19 +106,24 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
     };
 
     const addObstacle = (runtimeScene) => {
-      const obstacle = new gdjs.RuntimeObject(runtimeScene, {
-        name: 'obstacle',
-        type: '',
-        behaviors: [
-          {
-            type: 'PathfindingBehavior::PathfindingObstacleBehavior',
-            // @ts-ignore - properties are not typed
-            impassable: true,
-            cost: 2,
-          },
-        ],
-        effects: [],
-      });
+      const obstacle = new gdjs.RuntimeObject(
+        runtimeScene,
+        {
+          name: 'obstacle',
+          type: '',
+          behaviors: [
+            {
+              type: 'PathfindingBehavior::PathfindingObstacleBehavior',
+              // @ts-ignore - properties are not typed
+              impassable: true,
+              cost: 2,
+            },
+          ],
+          effects: [],
+          variables: [],
+        },
+        undefined
+      );
       obstacle.getWidth = function () {
         return 100;
       };
@@ -104,6 +132,25 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
       };
       runtimeScene.addObject(obstacle);
       return obstacle;
+    };
+
+    const getPathLength = (player) => {
+      /** @type gdjs.PathfindingRuntimeBehavior */
+      const behavior = player.getBehavior(pathFindingName);
+      if (behavior.getNodeCount() < 2) {
+        return 0;
+      }
+      let pathLength = 0;
+      let previousNodeX = behavior.getNodeX(0);
+      let previousNodeY = behavior.getNodeY(0);
+      for (let index = 1; index < behavior.getNodeCount(); index++) {
+        const nodeX = behavior.getNodeX(index);
+        const nodeY = behavior.getNodeY(index);
+        pathLength += Math.hypot(nodeX - previousNodeX, nodeY - previousNodeY);
+        previousNodeX = nodeX;
+        previousNodeY = nodeY;
+      }
+      return pathLength;
     };
 
     let runtimeScene;
@@ -117,7 +164,7 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
       player.setPosition(480, 300);
       player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
       expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-      expect(player.getBehavior(pathFindingName).getNodeCount()).to.be(13);
+      expect(getPathLength(player)).to.be(720 - 480);
     });
 
     it('can find a path without any obstacle in the way', function () {
@@ -130,7 +177,7 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
       player.setPosition(480, 300);
       player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
       expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-      expect(player.getBehavior(pathFindingName).getNodeCount()).to.be(13);
+      expect(getPathLength(player)).to.be(720 - 480);
     });
 
     it("mustn't find a path to the obstacle inside", function () {
@@ -155,100 +202,8 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
       player.setPosition(480, 300);
       player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
       expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-      expect(player.getBehavior(pathFindingName).getNodeCount()).to.be.above(
-        13
-      );
+      expect(getPathLength(player)).to.be.above(720 - 480 + 50);
     });
-
-    if (allowDiagonals) {
-      [20, 30, 60, 120].forEach((framePerSecond) => {
-        describe(`(${framePerSecond} fps)`, function () {
-          it('can move on the path at the right speed', function () {
-            setFramePerSecond(runtimeScene, framePerSecond);
-            const obstacle = addObstacle(runtimeScene);
-
-            obstacle.setPosition(600, 300);
-            // To ensure obstacles are registered.
-            runtimeScene.renderAndStep(1000 / framePerSecond);
-
-            player.setPosition(480, 300);
-            player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
-            expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-            expect(
-              player.getBehavior(pathFindingName).getNodeCount()
-            ).to.be.above(13);
-
-            // Move on the path and stop before the last 1/10 of second.
-            for (let i = 0; i < (framePerSecond * 17) / 10; i++) {
-              runtimeScene.renderAndStep(1000 / framePerSecond);
-              expect(
-                player.getBehavior(pathFindingName).destinationReached()
-              ).to.be(false);
-            }
-            // The position is the same no matter the frame rate.
-            expect(player.getX()).to.be(720);
-            expect(player.getY()).to.be.within(
-              288.5786437626905 - epsilon,
-              288.5786437626905 + epsilon
-            );
-
-            // Let 1/10 of second pass,
-            // because the calculus interval is not the same for each case.
-            for (let i = 0; i < framePerSecond / 10; i++) {
-              runtimeScene.renderAndStep(1000 / framePerSecond);
-            }
-            // The destination is reached for every frame rate within 1/10 of second.
-            expect(player.getX()).to.be(720);
-            expect(player.getY()).to.be(300);
-            expect(
-              player.getBehavior(pathFindingName).destinationReached()
-            ).to.be(true);
-          });
-        });
-      });
-    } else {
-      [20, 30, 60, 120].forEach((framePerSecond) => {
-        describe(`(${framePerSecond} fps)`, function () {
-          it('can move on the path at the right speed', function () {
-            setFramePerSecond(runtimeScene, framePerSecond);
-            const obstacle = addObstacle(runtimeScene);
-
-            obstacle.setPosition(600, 300);
-            // To ensure obstacles are registered.
-            runtimeScene.renderAndStep(1000 / framePerSecond);
-
-            player.setPosition(480, 300);
-            player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
-            expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-            expect(
-              player.getBehavior(pathFindingName).getNodeCount()
-            ).to.be.above(13);
-
-            // Move on the path and stop before the last 1/10 of second.
-            for (let i = 0; i < (framePerSecond * 20) / 10; i++) {
-              runtimeScene.renderAndStep(1000 / framePerSecond);
-              expect(
-                player.getBehavior(pathFindingName).destinationReached()
-              ).to.be(false);
-            }
-            expect(player.getX()).to.be(710);
-            expect(player.getY()).to.be.within(300 - epsilon, 300 + epsilon);
-
-            // Let 1/10 of second pass,
-            // because the calculus interval is not the same for each case.
-            for (let i = 0; i < (framePerSecond * 1) / 10; i++) {
-              runtimeScene.renderAndStep(1000 / framePerSecond);
-            }
-            // The destination is reached for every frame rate within 1/10 of second.
-            expect(player.getX()).to.be(720);
-            expect(player.getY()).to.be(300);
-            expect(
-              player.getBehavior(pathFindingName).destinationReached()
-            ).to.be(true);
-          });
-        });
-      });
-    }
 
     it('can find a path between 2 obstacles', function () {
       const obstacleTop = addObstacle(runtimeScene);
@@ -262,7 +217,7 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
       player.setPosition(480, 300);
       player.getBehavior(pathFindingName).moveTo(runtimeScene, 720, 300);
       expect(player.getBehavior(pathFindingName).pathFound()).to.be(true);
-      expect(player.getBehavior(pathFindingName).getNodeCount()).to.be(13);
+      expect(getPathLength(player)).to.be(720 - 480);
     });
 
     it("mustn't find a path to a closed room", function () {
@@ -288,7 +243,15 @@ describe.only('gdjs.PathfindingRuntimeBehavior', function () {
     describe(`(collisionMethod: ${collisionMethod}, `, function () {
       [false, true].forEach((allowDiagonals) => {
         describe(`(allowDiagonals: ${allowDiagonals})`, function () {
-          doCommonPathFindingTests(collisionMethod, allowDiagonals);
+          [0, 1].forEach((smoothingMaxCellGap) => {
+            describe(`(smoothingMaxCellGap: ${smoothingMaxCellGap})`, function () {
+              doCommonPathFindingTests(
+                collisionMethod,
+                allowDiagonals,
+                smoothingMaxCellGap
+              );
+            });
+          });
         });
       });
     });

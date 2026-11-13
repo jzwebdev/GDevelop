@@ -1,54 +1,167 @@
 // @flow
 import {
   addAssetToProject,
-  addSerializedExtensionsToProject,
-  getRequiredBehaviorsFromAsset,
-  filterMissingBehaviors,
-  downloadExtensions,
-  installAsset,
-  getRequiredExtensionsForEventsFromAsset,
-  filterMissingExtensions,
-  sanitizeObjectName,
+  installEffectAsset,
+  getRequiredExtensionsFromAsset,
+  installPublicAsset,
+  checkRequiredExtensionsUpdateForAssets,
 } from './InstallAsset';
+import {
+  addSerializedExtensionsToProject,
+  installRequiredExtensions,
+  checkRequiredExtensionsUpdate,
+} from './ExtensionStore/InstallExtension';
 import { makeTestProject } from '../fixtures/TestProject';
 import { type EventsFunctionsExtensionsState } from '../EventsFunctionsExtensionsLoader/EventsFunctionsExtensionsContext';
 import {
-  fakeAssetShortHeader1,
   fakeAsset1,
-  fakeAssetWithBehaviorCustomizations1,
-  fakeAssetWithUnknownBehaviorCustomizations1,
-  fakeAssetWithFlashBehaviorCustomizations1,
-  fakeAssetWithEventCustomizationsAndFlashExtension1,
+  fakePixelArtAsset1,
+  fakeAssetWithUnknownExtension1,
+  fakeAssetWithFlashExtensionDependency1,
   flashExtensionShortHeader,
+  incompatibleFlashExtensionShortHeader,
   fireBulletExtensionShortHeader,
-  fakeAssetWithEventCustomizationsAndUnknownExtension1,
+  fakeAssetWithCustomObject,
+  fakeSkyboxAsset,
+  buttonV1ExtensionShortHeader,
+  buttonV2ExtensionShortHeader,
+  breakingButtonV3ExtensionShortHeader,
+  incompatibleButtonV4ExtensionShortHeader,
 } from '../fixtures/GDevelopServicesTestData';
 import { makeTestExtensions } from '../fixtures/TestExtensions';
 import {
   getExtensionsRegistry,
   getExtension,
+  type ExtensionShortHeader,
+  type SerializedExtension,
 } from '../Utils/GDevelopServices/Extension';
-import { jssPreset } from '@material-ui/core';
-import { getAsset } from '../Utils/GDevelopServices/Asset';
+import * as Asset from '../Utils/GDevelopServices/Asset';
+
 const gd: libGDevelop = global.gd;
 
 jest.mock('../Utils/GDevelopServices/Extension');
-jest.mock('../Utils/GDevelopServices/Asset');
+
+// $FlowFixMe[incompatible-type] - overriding method to do a mocked network call.
+// $FlowFixMe[cannot-write]
+Asset.getPublicAsset = jest.fn();
 
 const mockFn = (fn: Function): JestMockFn<any, any> => fn;
 
 describe('InstallAsset', () => {
-  test('sanitizeObjectName', () => {
-    expect(sanitizeObjectName('')).toBe('UnnamedObject');
-    expect(sanitizeObjectName('HelloWorld')).toBe('HelloWorld');
-    expect(sanitizeObjectName('Hello World')).toBe('HelloWorld');
-    expect(sanitizeObjectName('hello world')).toBe('HelloWorld');
-    expect(sanitizeObjectName('hello world12')).toBe('HelloWorld12');
-    expect(sanitizeObjectName('12 hello world')).toBe('_12HelloWorld');
-    expect(sanitizeObjectName('/-=hello/-=world/-=')).toBe('HelloWorld');
-    expect(sanitizeObjectName('  hello/-=world/-=')).toBe('HelloWorld');
-    expect(sanitizeObjectName('9hello/-=world/-=')).toBe('_9helloWorld');
-    expect(sanitizeObjectName('  9hello/-=world/-=')).toBe('_9helloWorld');
+  describe('installEffectAsset', () => {
+    it('marks a skybox without a top as legacy and keeps the top of the others', () => {
+      const { project } = makeTestProject(gd);
+      const effectsContainer = project
+        .insertNewLayout('MyTestLayout', 0)
+        .getLayers()
+        .getLayer('')
+        .getEffects();
+      const effectAsset = (fakeSkyboxAsset.effectAssets || [])[0];
+
+      const legacyEffect = installEffectAsset({
+        project,
+        effectsContainer,
+        asset: fakeSkyboxAsset,
+        effectName: 'LegacySky',
+      });
+      const standardEffect = installEffectAsset({
+        project,
+        effectsContainer,
+        asset: {
+          ...fakeSkyboxAsset,
+          effectAssets: [
+            {
+              ...effectAsset,
+              effect: {
+                ...effectAsset.effect,
+                stringParameters: {
+                  ...effectAsset.effect.stringParameters,
+                  top: 'Z+',
+                },
+              },
+            },
+          ],
+        },
+        effectName: 'StandardSky',
+      });
+
+      expect(legacyEffect.getStringParameter('top')).toBe('Legacy');
+      expect(standardEffect.getStringParameter('top')).toBe('Z+');
+    });
+
+    it('installs a skybox as an effect showing its images', () => {
+      const { project } = makeTestProject(gd);
+      const layout = project.insertNewLayout('MyTestLayout', 0);
+      const effectsContainer = layout
+        .getLayers()
+        .getLayer('')
+        .getEffects();
+
+      const effect = installEffectAsset({
+        project,
+        effectsContainer,
+        asset: fakeSkyboxAsset,
+        effectName: 'Sky',
+      });
+
+      expect(effect.getName()).toBe('Sky');
+      expect(effect.getEffectType()).toBe('Scene3D::Skybox');
+      expect(effectsContainer.getEffectsCount()).toBe(1);
+      expect(effect.getStringParameter('topFaceResourceName')).toBe(
+        'Sunny Day_Top.png'
+      );
+      const resourcesManager = project.getResourcesManager();
+      expect(resourcesManager.hasResource('Sunny Day_Top.png')).toBe(true);
+      expect(resourcesManager.getResource('Sunny Day_Top.png').getFile()).toBe(
+        fakeSkyboxAsset.effectAssets
+          ? fakeSkyboxAsset.effectAssets[0].resources[4].file
+          : ''
+      );
+    });
+
+    it('replaces the images of an existing effect instead of adding one', () => {
+      const { project } = makeTestProject(gd);
+      const layout = project.insertNewLayout('MyTestLayout', 0);
+      const effectsContainer = layout
+        .getLayers()
+        .getLayer('')
+        .getEffects();
+      effectsContainer
+        .insertNewEffect('Sky', 0)
+        .setEffectType('Scene3D::Skybox');
+      project.getResourcesManager().addResource(
+        (() => {
+          const resource = new gd.ImageResource();
+          resource.setName('Sunny Day_Top.png');
+          resource.setFile('somewhere/else.png');
+          return resource;
+        })()
+      );
+
+      const effect = installEffectAsset({
+        project,
+        effectsContainer,
+        asset: fakeSkyboxAsset,
+        effectName: 'Sky',
+      });
+
+      expect(effectsContainer.getEffectsCount()).toBe(1);
+      // The project already had a resource with that name: the installed one is renamed.
+      const topFaceResourceName = effect.getStringParameter(
+        'topFaceResourceName'
+      );
+      expect(topFaceResourceName).not.toBe('Sunny Day_Top.png');
+      expect(
+        project
+          .getResourcesManager()
+          .getResource(topFaceResourceName)
+          .getFile()
+      ).toBe(
+        fakeSkyboxAsset.effectAssets
+          ? fakeSkyboxAsset.effectAssets[0].resources[4].file
+          : ''
+      );
+    });
   });
 
   describe('addAssetToProject', () => {
@@ -58,15 +171,14 @@ describe('InstallAsset', () => {
 
       const output = await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
+        objectsContainer: layout.getObjects(),
         asset: fakeAsset1,
       });
 
       expect(output.createdObjects).toHaveLength(1);
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
+      expect(layout.getObjects().hasObjectNamed('PlayerSpaceship')).toBe(true);
       expect(output.createdObjects).toEqual([
-        layout.getObject('PlayerSpaceship'),
+        layout.getObjects().getObject('PlayerSpaceship'),
       ]);
       expect(
         project.getResourcesManager().hasResource('player-ship1.png')
@@ -79,18 +191,19 @@ describe('InstallAsset', () => {
     it('renames the object if name is already used', async () => {
       const { project } = makeTestProject(gd);
       const layout = project.insertNewLayout('MyTestLayout', 0);
-      layout.insertNewObject(project, 'Sprite', 'PlayerSpaceship', 0);
+      layout
+        .getObjects()
+        .insertNewObject(project, 'Sprite', 'PlayerSpaceship', 0);
 
       const output = await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
+        objectsContainer: layout.getObjects(),
         asset: fakeAsset1,
       });
 
       expect(output.createdObjects).toHaveLength(1);
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
-      expect(layout.hasObjectNamed('PlayerSpaceship2')).toBe(true);
+      expect(layout.getObjects().hasObjectNamed('PlayerSpaceship')).toBe(true);
+      expect(layout.getObjects().hasObjectNamed('PlayerSpaceship2')).toBe(true);
       expect(
         project.getResourcesManager().hasResource('player-ship1.png')
       ).toBe(true);
@@ -122,8 +235,7 @@ describe('InstallAsset', () => {
       // Install the spaceship
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
+        objectsContainer: layout.getObjects(),
         asset: fakeAsset1,
       });
 
@@ -164,8 +276,7 @@ describe('InstallAsset', () => {
       // Install the spaceship
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
+        objectsContainer: layout.getObjects(),
         asset: fakeAsset1,
       });
 
@@ -203,8 +314,7 @@ describe('InstallAsset', () => {
       // Install the spaceship
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
+        objectsContainer: layout.getObjects(),
         asset: fakeAsset1,
       });
 
@@ -228,11 +338,13 @@ describe('InstallAsset', () => {
       ).toBe('https://example.com/player-ship1.png');
 
       // Verify the resource names used by the object
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
-      const object = layout.getObject('PlayerSpaceship');
+      expect(layout.getObjects().hasObjectNamed('PlayerSpaceship')).toBe(true);
+      const object = layout.getObjects().getObject('PlayerSpaceship');
 
-      const resourcesInUse = new gd.ResourcesInUseHelper();
-      object.exposeResources(resourcesInUse);
+      const resourcesInUse = new gd.ResourcesInUseHelper(
+        project.getResourcesManager()
+      );
+      object.getConfiguration().exposeResources(resourcesInUse);
       const objectResourceNames = resourcesInUse
         .getAllImages()
         .toNewVectorString()
@@ -245,244 +357,652 @@ describe('InstallAsset', () => {
       ]);
     });
 
-    it('installs an object asset in the project, adding the required behaviors', async () => {
-      makeTestExtensions(gd);
+    it('installs an object asset in the project, smoothing the resources by default', async () => {
       const { project } = makeTestProject(gd);
       const layout = project.insertNewLayout('MyTestLayout', 0);
 
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: layout.getEvents(),
-        asset: fakeAssetWithBehaviorCustomizations1,
+        objectsContainer: layout.getObjects(),
+        asset: fakeAsset1,
       });
 
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
       expect(
-        layout
-          .getObject('PlayerSpaceship')
-          .getAllBehaviorNames()
-          .toJSArray()
-      ).toEqual(['MyBehavior']);
+        project.getResourcesManager().hasResource('player-ship1.png')
+      ).toBe(true);
       expect(
-        layout
-          .getObject('PlayerSpaceship')
-          .getBehavior('MyBehavior')
-          .getTypeName()
-      ).toBe('FakeBehavior::FakeBehavior');
+        project.getResourcesManager().hasResource('player-ship2.png')
+      ).toBe(true);
 
-      // Check that the properties from customization were set.
       expect(
-        gd.Serializer.toJSON(
-          layout
-            .getObject('PlayerSpaceship')
-            .getBehavior('MyBehavior')
-            .getContent()
-        )
-      ).toBe('{"property1":"Overriden value","property2":true}');
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship1.png')
+          )
+          .isSmooth()
+      ).toBe(true);
+      expect(
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship2.png')
+          )
+          .isSmooth()
+      ).toBe(true);
     });
 
-    it('installs an object asset in the project, adding the required events', async () => {
-      makeTestExtensions(gd);
+    it('installs an object asset in the project, unsmoothing the resources if the asset is pixel art', async () => {
       const { project } = makeTestProject(gd);
       const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
 
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: eventsList,
-        asset: fakeAssetWithEventCustomizationsAndFlashExtension1,
+        objectsContainer: layout.getObjects(),
+        asset: fakePixelArtAsset1,
       });
 
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
-      expect(eventsList.getEventsCount()).toBe(1);
-
-      // Check that the events had their customization parameters properly applied
-      const serializedEvents = new gd.SerializerElement();
-      eventsList.serializeTo(serializedEvents);
-      const serializedEventsJson = gd.Serializer.toJSON(serializedEvents);
-      expect(serializedEventsJson).toMatch(
-        '3 + PlayerSpaceship.Variable(test)'
-      );
-      expect(serializedEventsJson).toMatch(
-        '3 + PlayerSpaceship.Variable(test2)'
-      );
+      expect(
+        project.getResourcesManager().hasResource('player-ship1.png')
+      ).toBe(true);
+      expect(
+        project.getResourcesManager().hasResource('player-ship2.png')
+      ).toBe(true);
+      expect(
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship1.png')
+          )
+          .isSmooth()
+      ).toBe(false);
+      expect(
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship2.png')
+          )
+          .isSmooth()
+      ).toBe(false);
     });
 
-    it('renames the object if name is already used, including in events', async () => {
-      makeTestExtensions(gd);
+    it('installs an object asset in the project, unsmoothing the resources if the project is pixel art', async () => {
       const { project } = makeTestProject(gd);
+      project.setScaleMode('nearest');
       const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-
-      // Add an object with the same name as the object asset.
-      layout.insertNewObject(project, 'Sprite', 'PlayerSpaceship', 0);
-      expect(layout.hasObjectNamed('PlayerSpaceship')).toBe(true);
 
       await addAssetToProject({
         project,
-        objectsContainer: layout,
-        events: eventsList,
-        asset: fakeAssetWithEventCustomizationsAndFlashExtension1,
+        objectsContainer: layout.getObjects(),
+        asset: fakeAsset1,
       });
 
-      expect(layout.hasObjectNamed('PlayerSpaceship2')).toBe(true);
-      expect(eventsList.getEventsCount()).toBe(1);
+      expect(
+        project.getResourcesManager().hasResource('player-ship1.png')
+      ).toBe(true);
+      expect(
+        project.getResourcesManager().hasResource('player-ship2.png')
+      ).toBe(true);
+      expect(
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship1.png')
+          )
+          .isSmooth()
+      ).toBe(false);
+      expect(
+        gd
+          .asImageResource(
+            project.getResourcesManager().getResource('player-ship2.png')
+          )
+          .isSmooth()
+      ).toBe(false);
+    });
+  });
 
-      // Check that the events had their customization parameters properly applied
-      // and the object renamed.
-      const serializedEvents = new gd.SerializerElement();
-      eventsList.serializeTo(serializedEvents);
-      const serializedEventsJson = gd.Serializer.toJSON(serializedEvents);
-      expect(serializedEventsJson).toMatch(
-        '3 + PlayerSpaceship2.Variable(test)'
+  describe('getRequiredExtensionsFromAsset', () => {
+    it('get the required extensions for custom objects in an asset', () => {
+      expect(getRequiredExtensionsFromAsset(fakeAssetWithCustomObject)).toEqual(
+        [
+          {
+            extensionName: 'Button',
+            extensionVersion: '1.0.0',
+          },
+        ]
       );
-      expect(serializedEventsJson).toMatch(
-        '3 + PlayerSpaceship2.Variable(test2)'
-      );
     });
   });
 
-  describe('getRequiredBehaviorsFromAsset', () => {
-    it('get the behaviors required for an asset', () => {
-      expect(
-        getRequiredBehaviorsFromAsset(
-          fakeAssetWithEventCustomizationsAndFlashExtension1
-        )
-      ).toEqual([]);
-      expect(
-        getRequiredBehaviorsFromAsset(fakeAssetWithBehaviorCustomizations1)
-      ).toEqual([
-        {
-          behaviorType: 'FakeBehavior::FakeBehavior',
-          extensionName: 'FakeBehavior',
-          extensionVersion: '1.0.0',
-        },
-      ]);
-    });
-  });
+  const emptyExtensionShortHeader: ExtensionShortHeader = {
+    tier: 'reviewed',
+    shortDescription: '',
+    authorIds: [],
+    extensionNamespace: '',
+    fullName: '',
+    name: 'NotExistingExtension',
+    version: '1.0.0',
+    url: '',
+    headerUrl: '',
+    tags: [],
+    category: '',
+    previewIconUrl: '',
+    eventsBasedBehaviorsCount: 0,
+    eventsFunctionsCount: 0,
+    helpPath: '',
+  };
 
-  describe('getRequiredExtensionsForEventsFromAsset', () => {
-    it('get the extensions required for an asset', () => {
-      expect(
-        getRequiredExtensionsForEventsFromAsset(
-          fakeAssetWithBehaviorCustomizations1
-        )
-      ).toEqual([]);
-      expect(
-        getRequiredExtensionsForEventsFromAsset(
-          fakeAssetWithEventCustomizationsAndFlashExtension1
-        )
-      ).toEqual([
-        {
-          extensionName: 'Flash',
-          extensionVersion: '1.0.0',
-        },
-      ]);
-    });
-  });
+  // TODO Find a way to test this
 
-  describe('filterMissingBehaviors', () => {
-    it('filters behaviors that are not loaded ', () => {
+  // describe('fetchAssets', () => {
+  //   it("throws if asset can't be downloaded", async () => {
+  //     mockFn(Asset.getPublicAsset).mockImplementationOnce(() => {
+  //       throw new Error('Fake error - unable to download');
+  //     });
+
+  //     const fetchAssets = useFetchAssets();
+  //     await expect(fetchAssets([fakeAssetShortHeader1])).rejects.toMatchObject({
+  //       message: 'Fake error - unable to download',
+  //     });
+
+  //     expect(getExtensionsRegistry).not.toHaveBeenCalled();
+  //     expect(getExtension).not.toHaveBeenCalled();
+  //   });
+  // });
+
+  const createExtensionRegistry = (
+    ...extensionShortHeaders: Array<ExtensionShortHeader>
+  ) => {
+    const extensionShortHeadersByName: {
+      [name: string]: ExtensionShortHeader,
+    } = {};
+    for (const extensionShortHeader of extensionShortHeaders) {
+      extensionShortHeadersByName[
+        extensionShortHeader.name
+      ] = extensionShortHeader;
+    }
+    return extensionShortHeadersByName;
+  };
+
+  describe('checkRequiredExtensionsUpdate', () => {
+    it('can find an extension to install', async () => {
       makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Flash')).toBe(false);
 
-      expect(
-        filterMissingBehaviors(gd, [
-          // An unknown behavior not loaded:
-          {
-            extensionName: 'NotExistingExtension',
-            extensionVersion: '1.0.0',
-            behaviorType: 'NotExistingExtension::MissingBehavior',
-          },
-          // A fake behavior loaded in makeTestExtensions:
-          {
-            behaviorType: 'FakeBehavior::FakeBehavior',
-            extensionName: 'FakeBehavior',
-            extensionVersion: '1.0.0',
-          },
-        ])
-      ).toEqual([
-        {
-          extensionName: 'NotExistingExtension',
-          extensionVersion: '1.0.0',
-          behaviorType: 'NotExistingExtension::MissingBehavior',
-        },
-      ]);
-    });
-  });
-
-  describe('filterMissingExtensions', () => {
-    it('filters extensions that are not loaded ', () => {
-      makeTestExtensions(gd);
-
-      expect(
-        filterMissingExtensions(gd, [
-          // An unknown behavior not loaded:
-          {
-            extensionName: 'NotExistingExtension',
-            extensionVersion: '1.0.0',
-          },
-          // A fake extension loaded in makeTestExtensions:
-          {
-            extensionName: 'FakeBehavior',
-            extensionVersion: '1.0.0',
-          },
-        ])
-      ).toEqual([
-        {
-          extensionName: 'NotExistingExtension',
-          extensionVersion: '1.0.0',
-        },
-      ]);
-    });
-  });
-
-  describe('downloadExtensions', () => {
-    it('loads the required extensions ', async () => {
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
-        version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
-      }));
-
-      mockFn(getExtension).mockImplementationOnce(
-        () => fireBulletExtensionShortHeader
-      );
-
-      await expect(downloadExtensions(['FireBullet'])).resolves.toEqual([
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
         fireBulletExtensionShortHeader,
-      ]);
-    });
-
-    it('errors if an extension is not found ', async () => {
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
-        version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
-      }));
+        flashExtensionShortHeader
+      );
 
       await expect(
-        downloadExtensions(['NotFoundExtension'])
-      ).rejects.toMatchObject({
-        message: 'Unable to find extension NotFoundExtension in the registry.',
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: flashExtensionShortHeader.name,
+              extensionVersion: flashExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [flashExtensionShortHeader],
+        missingExtensionShortHeaders: [flashExtensionShortHeader],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
       });
     });
 
-    it("errors if the registry can't be loaded ", async () => {
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => {
-        throw new Error('Fake error');
-      });
+    it('can find an up to date extension from the project', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
 
-      await expect(downloadExtensions(['FakeExtension'])).rejects.toMatchObject(
-        { message: 'Fake error' }
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
+        buttonV1ExtensionShortHeader
       );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: buttonV1ExtensionShortHeader.name,
+              extensionVersion: buttonV1ExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [buttonV1ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
+        buttonV2ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: buttonV2ExtensionShortHeader.name,
+              extensionVersion: buttonV2ExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [buttonV2ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [buttonV2ExtensionShortHeader],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [buttonV2ExtensionShortHeader],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update with breaking changes', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
+        breakingButtonV3ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: breakingButtonV3ExtensionShortHeader.name,
+              extensionVersion: breakingButtonV3ExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [breakingButtonV3ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [breakingButtonV3ExtensionShortHeader],
+        breakingChangesExtensionShortHeaders: [
+          breakingButtonV3ExtensionShortHeader,
+        ],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update incompatible with the editor', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
+        incompatibleButtonV4ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: incompatibleButtonV4ExtensionShortHeader.name,
+              extensionVersion:
+                incompatibleButtonV4ExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to install incompatible with the editor', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Flash')).toBe(false);
+
+      // The extension is in the registry.
+      const extensionShortHeadersByName = createExtensionRegistry(
+        incompatibleFlashExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: incompatibleFlashExtensionShortHeader.name,
+              extensionVersion: incompatibleFlashExtensionShortHeader.version,
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [incompatibleFlashExtensionShortHeader],
+        missingExtensionShortHeaders: [incompatibleFlashExtensionShortHeader],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [
+          incompatibleFlashExtensionShortHeader,
+        ],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: true,
+      });
+    });
+
+    it('errors if an extension is not found in the registry', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdate({
+          requiredExtensions: [
+            {
+              extensionName: 'UnknownExtension',
+              extensionVersion: '1.0.0',
+            },
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).rejects.toMatchObject({
+        message: 'Unable to find extension UnknownExtension in the registry.',
+      });
+    });
+  });
+
+  describe('checkRequiredExtensionsUpdateForAssets', () => {
+    it('can find an extension to install', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Flash')).toBe(false);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithFlashExtensionDependency1
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [
+            fakeAssetWithFlashExtensionDependency1,
+            fakeAssetWithFlashExtensionDependency1,
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [flashExtensionShortHeader],
+        missingExtensionShortHeaders: [flashExtensionShortHeader],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an up to date extension from the project', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithCustomObject
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader,
+        // The project contains the 1.0.0 of this extension.
+        buttonV1ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [fakeAssetWithCustomObject, fakeAssetWithCustomObject],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [buttonV1ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithCustomObject
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader,
+        // The project contains the 1.0.0 of this extension.
+        buttonV2ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [fakeAssetWithCustomObject, fakeAssetWithCustomObject],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [buttonV2ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [buttonV2ExtensionShortHeader],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [buttonV2ExtensionShortHeader],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update with breaking changes', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithCustomObject
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader,
+        // The project contains the 1.0.0 of this extension.
+        breakingButtonV3ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [fakeAssetWithCustomObject, fakeAssetWithCustomObject],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [breakingButtonV3ExtensionShortHeader],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [breakingButtonV3ExtensionShortHeader],
+        breakingChangesExtensionShortHeaders: [
+          breakingButtonV3ExtensionShortHeader,
+        ],
+        incompatibleWithIdeExtensionShortHeaders: [],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: false,
+      });
+    });
+
+    it('can find an extension to update incompatible with the editor', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithCustomObject
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader,
+        // The project contains the 1.0.0 of this extension.
+        incompatibleButtonV4ExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [fakeAssetWithCustomObject, fakeAssetWithCustomObject],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        missingExtensionShortHeaders: [],
+        outOfDateExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [
+          incompatibleButtonV4ExtensionShortHeader,
+        ],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: true,
+      });
+    });
+
+    it('can find an extension to install incompatible with the editor', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Flash')).toBe(false);
+
+      // Get an asset that uses an extension...
+      mockFn(Asset.getPublicAsset).mockImplementationOnce(
+        () => fakeAssetWithFlashExtensionDependency1
+      );
+
+      // ...and this extension is in the registry
+      const extensionShortHeadersByName = createExtensionRegistry(
+        incompatibleFlashExtensionShortHeader,
+        fireBulletExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [
+            fakeAssetWithFlashExtensionDependency1,
+            fakeAssetWithFlashExtensionDependency1,
+          ],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).resolves.toEqual({
+        requiredExtensionShortHeaders: [incompatibleFlashExtensionShortHeader],
+        missingExtensionShortHeaders: [incompatibleFlashExtensionShortHeader],
+        outOfDateExtensionShortHeaders: [],
+        breakingChangesExtensionShortHeaders: [],
+        incompatibleWithIdeExtensionShortHeaders: [
+          incompatibleFlashExtensionShortHeader,
+        ],
+        safeToUpdateExtensions: [],
+        unknownExtensionDependencies: [],
+        isGDevelopUpdateNeeded: true,
+      });
+    });
+
+    it('errors if an extension is not found in the registry', async () => {
+      makeTestExtensions(gd);
+      const { project } = makeTestProject(gd);
+
+      const extensionShortHeadersByName = createExtensionRegistry(
+        flashExtensionShortHeader,
+        fireBulletExtensionShortHeader
+      );
+
+      await expect(
+        checkRequiredExtensionsUpdateForAssets({
+          assets: [fakeAssetWithUnknownExtension1],
+          project,
+          extensionShortHeadersByName,
+        })
+      ).rejects.toMatchObject({
+        message: 'Unable to find extension UnknownExtension in the registry.',
+      });
     });
   });
 
@@ -492,6 +1012,7 @@ describe('InstallAsset', () => {
       loadProjectEventsFunctionsExtensions: () => Promise.resolve(),
       unloadProjectEventsFunctionsExtensions: () => {},
       reloadProjectEventsFunctionsExtensions: () => Promise.resolve(),
+      reloadProjectEventsFunctionsExtensionMetadata: () => {},
       unloadProjectEventsFunctionsExtension: () => {},
       getEventsFunctionsExtensionWriter: () => null,
       getEventsFunctionsExtensionOpener: () => null,
@@ -499,7 +1020,7 @@ describe('InstallAsset', () => {
       getIncludeFileHashs: () => ({}),
     };
 
-    const serializedExtension = { name: 'ExtensionName' };
+    const serializedExtension: SerializedExtension = { name: 'ExtensionName' };
 
     it('adds an extension with origin set if it comes from the store', () => {
       makeTestExtensions(gd);
@@ -507,7 +1028,8 @@ describe('InstallAsset', () => {
       addSerializedExtensionsToProject(
         mockEventsFunctionsExtensionsState,
         project,
-        [serializedExtension]
+        [serializedExtension],
+        [serializedExtension.name]
       );
 
       expect(
@@ -532,7 +1054,7 @@ describe('InstallAsset', () => {
         mockEventsFunctionsExtensionsState,
         project,
         [serializedExtension],
-        false
+        []
       );
 
       expect(
@@ -553,7 +1075,7 @@ describe('InstallAsset', () => {
 
   describe('installAsset', () => {
     beforeEach(() => {
-      mockFn(getAsset).mockReset();
+      mockFn(Asset.getPublicAsset).mockReset();
       mockFn(getExtensionsRegistry).mockReset();
       mockFn(getExtension).mockReset();
     });
@@ -563,6 +1085,7 @@ describe('InstallAsset', () => {
       loadProjectEventsFunctionsExtensions: () => Promise.resolve(),
       unloadProjectEventsFunctionsExtensions: () => {},
       reloadProjectEventsFunctionsExtensions: () => Promise.resolve(),
+      reloadProjectEventsFunctionsExtensionMetadata: () => {},
       unloadProjectEventsFunctionsExtension: () => {},
       getEventsFunctionsExtensionWriter: () => null,
       getEventsFunctionsExtensionOpener: () => null,
@@ -570,227 +1093,164 @@ describe('InstallAsset', () => {
       getIncludeFileHashs: () => ({}),
     };
 
-    it("throws if asset can't be downloaded", async () => {
+    it('loads the required extensions ', async () => {
       makeTestExtensions(gd);
       const { project } = makeTestProject(gd);
-      const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-      mockFn(getAsset).mockImplementationOnce(() => {
-        throw new Error('Fake error - unable to download');
-      });
-
-      await expect(
-        installAsset({
-          assetShortHeader: fakeAssetShortHeader1,
-          events: eventsList,
-          project,
-          objectsContainer: layout,
-          eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
-        })
-      ).rejects.toMatchObject({
-        message: 'Fake error - unable to download',
-      });
-
-      expect(getExtensionsRegistry).not.toHaveBeenCalled();
-      expect(getExtension).not.toHaveBeenCalled();
-    });
-
-    it("throws if an extension for a behavior can't be found in the registry", async () => {
-      makeTestExtensions(gd);
-      const { project } = makeTestProject(gd);
-      const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-
-      // Get an asset that uses a behavior...
-      mockFn(getAsset).mockImplementationOnce(
-        () => fakeAssetWithUnknownBehaviorCustomizations1
+      expect(project.hasEventsFunctionsExtensionNamed('FireBullet')).toBe(
+        false
       );
 
-      // ...but this behavior extension does not exist in the registry
       mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
         version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
-      }));
-
-      // Check that the extension is stated as not found in the registry
-      await expect(
-        installAsset({
-          assetShortHeader: fakeAssetShortHeader1,
-          events: eventsList,
-          project,
-          objectsContainer: layout,
-          eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
-        })
-      ).rejects.toMatchObject({
-        message: 'Unable to find extension UnknownBehavior in the registry.',
-      });
-
-      expect(getExtensionsRegistry).toHaveBeenCalledTimes(1);
-      expect(getExtension).not.toHaveBeenCalled();
-    });
-
-    it("throws if an extension can't be found in the registry", async () => {
-      makeTestExtensions(gd);
-      const { project } = makeTestProject(gd);
-      const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-
-      // Get an asset that uses an extension...
-      mockFn(getAsset).mockImplementationOnce(
-        () => fakeAssetWithEventCustomizationsAndUnknownExtension1
-      );
-
-      // ...but this extension does not exist in the registry
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
-        version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
-      }));
-
-      // Check that the extension is stated as not found in the registry
-      await expect(
-        installAsset({
-          assetShortHeader: fakeAssetShortHeader1,
-          events: eventsList,
-          project,
-          objectsContainer: layout,
-          eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
-        })
-      ).rejects.toMatchObject({
-        message: 'Unable to find extension UnknownExtension in the registry.',
-      });
-
-      expect(getExtensionsRegistry).toHaveBeenCalledTimes(1);
-      expect(getExtension).not.toHaveBeenCalled();
-    });
-
-    it("throws if a behavior can't be installed, even if its extension was properly found in the registry", async () => {
-      makeTestExtensions(gd);
-      const { project } = makeTestProject(gd);
-      const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-
-      // Get an asset that uses a behavior...
-      mockFn(getAsset).mockImplementationOnce(
-        () => fakeAssetWithFlashBehaviorCustomizations1
-      );
-
-      // ...and this behavior extension is in the registry
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
-        version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
+        headers: [flashExtensionShortHeader, fireBulletExtensionShortHeader],
       }));
 
       mockFn(getExtension).mockImplementationOnce(
-        () => flashExtensionShortHeader
+        () => fireBulletExtensionShortHeader
       );
 
-      // Verify that, because we use `mockEventsFunctionsExtensionsState`, the
-      // extension won't be loaded, so the behavior won't be installed.
+      // Install the extension
       await expect(
-        installAsset({
-          assetShortHeader: fakeAssetShortHeader1,
-          events: eventsList,
-          project,
-          objectsContainer: layout,
+        installRequiredExtensions({
+          requiredExtensionInstallation: {
+            requiredExtensionShortHeaders: [
+              {
+                ...emptyExtensionShortHeader,
+                name: 'FireBullet',
+                version: '1.0.0',
+              },
+            ],
+            missingExtensionShortHeaders: [
+              {
+                ...emptyExtensionShortHeader,
+                name: 'FireBullet',
+                version: '1.0.0',
+              },
+            ],
+            outOfDateExtensionShortHeaders: [],
+            breakingChangesExtensionShortHeaders: [],
+            incompatibleWithIdeExtensionShortHeaders: [],
+            safeToUpdateExtensions: [],
+            unknownExtensionDependencies: [],
+            isGDevelopUpdateNeeded: false,
+          },
+          shouldUpdateExtension: true,
           eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
+          project,
+          onWillInstallExtension: () => {},
+          onExtensionInstalled: () => {},
+          importedSerializedExtensions: [],
         })
       ).rejects.toMatchObject({
-        message: 'These behaviors could not be installed: Flash::Flash (Flash)',
+        // It's just because the mock doesn't reloadProjectEventsFunctionsExtensions.
+        message: 'These extensions could not be installed: FireBullet',
       });
 
-      expect(getExtensionsRegistry).toHaveBeenCalledTimes(1);
       expect(getExtension).toHaveBeenCalledTimes(1);
+      expect(project.hasEventsFunctionsExtensionNamed('FireBullet')).toBe(true);
     });
 
-    it("throws if an extension can't be installed, even if it was properly found in the registry", async () => {
+    it("throws if an extension can't be installed, even if its extension was properly found in the registry", async () => {
       makeTestExtensions(gd);
       const { project } = makeTestProject(gd);
-      const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
-
-      // Get an asset that uses an extension...
-      mockFn(getAsset).mockImplementationOnce(
-        () => fakeAssetWithEventCustomizationsAndFlashExtension1
-      );
-
-      // ...and this extension is in the registry
-      mockFn(getExtensionsRegistry).mockImplementationOnce(() => ({
-        version: '1.0.0',
-        allTags: [''],
-        extensionShortHeaders: [
-          flashExtensionShortHeader,
-          fireBulletExtensionShortHeader,
-        ],
-      }));
 
       mockFn(getExtension).mockImplementationOnce(
         () => flashExtensionShortHeader
       );
 
       // Verify that, because we use `mockEventsFunctionsExtensionsState`, the
-      // extension won't be loaded, so the extension won't be installed.
+      // extension won't be loaded.
       await expect(
-        installAsset({
-          assetShortHeader: fakeAssetShortHeader1,
-          events: eventsList,
-          project,
-          objectsContainer: layout,
+        installRequiredExtensions({
+          // An asset that uses an extension
+          requiredExtensionInstallation: {
+            requiredExtensionShortHeaders: [flashExtensionShortHeader],
+            missingExtensionShortHeaders: [flashExtensionShortHeader],
+            outOfDateExtensionShortHeaders: [],
+            breakingChangesExtensionShortHeaders: [],
+            incompatibleWithIdeExtensionShortHeaders: [],
+            safeToUpdateExtensions: [],
+            unknownExtensionDependencies: [],
+            isGDevelopUpdateNeeded: false,
+          },
+          shouldUpdateExtension: true,
           eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
+          project,
+          onWillInstallExtension: () => {},
+          onExtensionInstalled: () => {},
+          importedSerializedExtensions: [],
         })
       ).rejects.toMatchObject({
         message: 'These extensions could not be installed: Flash',
       });
 
-      expect(getExtensionsRegistry).toHaveBeenCalledTimes(1);
       expect(getExtension).toHaveBeenCalledTimes(1);
     });
 
-    it('install an asset, with a behavior that is already installed', async () => {
+    // TODO EBO Add a test for a custom object that contains another custom objet.
+    // There are 2 cases:
+    // - an event-based object from the same extension (this should already work).
+    // - an event-based object from another extension (this won't work because
+    //   it needs extension dependencies).
+
+    it('install an asset with an event-based object that is already installed', async () => {
       makeTestExtensions(gd);
       const { project } = makeTestProject(gd);
+      expect(project.hasEventsFunctionsExtensionNamed('Button')).toBe(true);
       const layout = project.insertNewLayout('MyTestLayout', 0);
-      const eventsList = new gd.EventsList();
 
-      // Fake an asset with a behavior of type "FakeBehavior::FakeBehavior",
-      // that is installed already.
-      mockFn(getAsset).mockImplementationOnce(
-        () => fakeAssetWithBehaviorCustomizations1
-      );
-
-      // Install the asset
-      await installAsset({
-        assetShortHeader: fakeAssetShortHeader1,
-        events: eventsList,
-        project,
-        objectsContainer: layout,
+      // Install the extension
+      await installRequiredExtensions({
+        requiredExtensionInstallation: {
+          requiredExtensionShortHeaders: [
+            {
+              ...emptyExtensionShortHeader,
+              name: 'Button',
+              version: '1.0.0',
+            },
+          ],
+          missingExtensionShortHeaders: [],
+          outOfDateExtensionShortHeaders: [],
+          breakingChangesExtensionShortHeaders: [],
+          incompatibleWithIdeExtensionShortHeaders: [],
+          safeToUpdateExtensions: [],
+          unknownExtensionDependencies: [],
+          isGDevelopUpdateNeeded: false,
+        },
+        shouldUpdateExtension: true,
         eventsFunctionsExtensionsState: mockEventsFunctionsExtensionsState,
+        project,
+        onWillInstallExtension: () => {},
+        onExtensionInstalled: () => {},
+        importedSerializedExtensions: [],
       });
 
-      // No extensions fetched because the behavior is already installed.
+      // No extensions fetched because the extension is already installed.
       expect(getExtension).not.toHaveBeenCalled();
-      expect(getExtensionsRegistry).not.toHaveBeenCalled();
 
-      // Check that the object was created, with the proper behavior:
-      expect(layout.getObjectsCount()).toBe(1);
-      expect(layout.getObjectAt(0).getName()).toBe('PlayerSpaceship');
+      // Install the asset
+      await installPublicAsset({
+        // Fake an asset with a custom object of type "Button::PanelSpriteButton",
+        // that is installed already.
+        asset: fakeAssetWithCustomObject,
+        project,
+        objectsContainer: layout.getObjects(),
+      });
+
+      // Check that the object was created.
+      expect(layout.getObjects().getObjectsCount()).toBe(1);
       expect(
         layout
+          .getObjects()
           .getObjectAt(0)
-          .getAllBehaviorNames()
-          .toJSArray()
-      ).toEqual(['MyBehavior']);
+          .getName()
+      ).toBe('YellowButton');
+      expect(
+        layout
+          .getObjects()
+          .getObjectAt(0)
+          .getType()
+      ).toEqual('Button::PanelSpriteButton');
     });
   });
 });

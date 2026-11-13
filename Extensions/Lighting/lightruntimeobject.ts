@@ -1,4 +1,7 @@
 namespace gdjs {
+  /**
+   * @category Objects > Light
+   */
   export type LightObjectDataType = {
     /** The base parameters of light object. */
     content: {
@@ -13,10 +16,28 @@ namespace gdjs {
     };
   };
 
+  /**
+   * @category Objects > Light
+   */
   export type LightObjectData = ObjectData & LightObjectDataType;
 
   /**
+   * @category Objects > Light
+   */
+  export type LightNetworkSyncDataType = {
+    rad: number;
+    col: string;
+  };
+
+  /**
+   * @category Objects > Light
+   */
+  export type LightNetworkSyncData = ObjectNetworkSyncData &
+    LightNetworkSyncDataType;
+
+  /**
    * Displays a Light object.
+   * @category Objects > Light
    */
   export class LightRuntimeObject extends gdjs.RuntimeObject {
     _radius: number;
@@ -27,23 +48,23 @@ namespace gdjs {
     _texture: string;
     _obstaclesManager: gdjs.LightObstaclesManager;
     _renderer: gdjs.LightRuntimeObjectRenderer;
-    _runtimeScene: gdjs.RuntimeScene;
+    _instanceContainer: gdjs.RuntimeScene;
 
     constructor(
       runtimeScene: gdjs.RuntimeScene,
-      lightObjectData: LightObjectData
+      lightObjectData: LightObjectData,
+      instanceData?: InstanceData
     ) {
-      super(runtimeScene, lightObjectData);
+      super(runtimeScene, lightObjectData, instanceData);
       this._radius =
         lightObjectData.content.radius > 0 ? lightObjectData.content.radius : 1;
       this._color = gdjs.rgbOrHexToRGBColor(lightObjectData.content.color);
       this._debugMode = lightObjectData.content.debugMode;
       this._texture = lightObjectData.content.texture;
-      this._obstaclesManager = gdjs.LightObstaclesManager.getManager(
-        runtimeScene
-      );
+      this._obstaclesManager =
+        gdjs.LightObstaclesManager.getManager(runtimeScene);
       this._renderer = new gdjs.LightRuntimeObjectRenderer(this, runtimeScene);
-      this._runtimeScene = runtimeScene;
+      this._instanceContainer = runtimeScene;
 
       // *ALWAYS* call `this.onCreated()` at the very end of your object constructor.
       this.onCreated();
@@ -54,11 +75,11 @@ namespace gdjs {
       return [(hexNumber >> 16) & 255, (hexNumber >> 8) & 255, hexNumber & 255];
     }
 
-    getRendererObject() {
+    override getRendererObject() {
       return this._renderer.getRendererObject();
     }
 
-    updateFromObjectData(
+    override updateFromObjectData(
       oldObjectData: LightObjectData,
       newObjectData: LightObjectData
     ): boolean {
@@ -80,8 +101,37 @@ namespace gdjs {
       return true;
     }
 
-    updatePreRender(): void {
+    override getNetworkSyncData(
+      syncOptions: GetNetworkSyncDataOptions
+    ): LightNetworkSyncData {
+      return {
+        ...super.getNetworkSyncData(syncOptions),
+        rad: this.getRadius(),
+        col: this.getColor(),
+      };
+    }
+
+    override updateFromNetworkSyncData(
+      networkSyncData: LightNetworkSyncData,
+      options: UpdateFromNetworkSyncDataOptions
+    ): void {
+      super.updateFromNetworkSyncData(networkSyncData, options);
+
+      if (networkSyncData.rad !== undefined) {
+        this.setRadius(networkSyncData.rad);
+      }
+      if (networkSyncData.col !== undefined) {
+        this.setColor(networkSyncData.col);
+      }
+    }
+
+    override updatePreRender(): void {
       this._renderer.ensureUpToDate();
+    }
+
+    override onDestroyed(): void {
+      super.onDestroyed();
+      this._renderer.destroy();
     }
 
     /**
@@ -100,19 +150,11 @@ namespace gdjs {
       this._renderer.updateRadius();
     }
 
-    /**
-     * Get the height of the light object.
-     * @returns height of light object.
-     */
-    getHeight(): float {
+    override getHeight(): float {
       return 2 * this._radius;
     }
 
-    /**
-     * Get the width of the light object.
-     * @returns width of light object.
-     */
-    getWidth(): float {
+    override getWidth(): float {
       return 2 * this._radius;
     }
 

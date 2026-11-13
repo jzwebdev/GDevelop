@@ -8,6 +8,7 @@ import { AutoSizer, Grid } from 'react-virtualized';
 import EmptyMessage from '../EmptyMessage';
 
 type Props<SearchItem> = {|
+  disableAutoTranslate?: boolean,
   searchItems: ?Array<SearchItem>,
   getSearchItemUniqueId: (item: SearchItem) => string,
   renderSearchItem: (
@@ -20,19 +21,28 @@ type Props<SearchItem> = {|
 
 const styles = {
   container: { flex: 1 },
-  grid: { overflowX: 'hidden' },
+  grid: {
+    overflowX: 'hidden',
+  },
 };
 
 const ESTIMATED_ROW_HEIGHT = 90;
 
+// Keep overscanCount relatively high so that:
+// - during in-app tutorials we make sure the tooltip displayer finds
+//   the elements to highlight
+const OVERSCAN_CELLS_COUNT = 25;
+
 /** A virtualized list of search results, caching the searched item heights. */
 export const ListSearchResults = <SearchItem>({
+  disableAutoTranslate,
   searchItems,
   getSearchItemUniqueId,
   renderSearchItem,
   error,
   onRetry,
-}: Props<SearchItem>) => {
+}: Props<SearchItem>): any => {
+  // $FlowFixMe[value-as-type]
   const grid = React.useRef<?Grid>(null);
 
   // Height of each item is initially unknown. When rendered, the items
@@ -40,21 +50,26 @@ export const ListSearchResults = <SearchItem>({
   const cachedHeightsForWidth = React.useRef(0);
   const cachedHeights = React.useRef({});
   const onItemHeightComputed = React.useCallback(
+    // $FlowFixMe[missing-local-annot]
     (searchItem, height) => {
-      if (cachedHeights.current[getSearchItemUniqueId(searchItem)] === height)
-        return false;
+      const uniqueId = getSearchItemUniqueId(searchItem);
+      // $FlowFixMe[invalid-computed-prop]
+      if (cachedHeights.current[uniqueId] === height) return false;
 
-      cachedHeights.current[getSearchItemUniqueId(searchItem)] = height;
+      // $FlowFixMe[prop-missing]
+      cachedHeights.current[uniqueId] = height;
       return true;
     },
     [getSearchItemUniqueId]
   );
   const getRowHeight = React.useCallback(
+    // $FlowFixMe[missing-local-annot]
     ({ index }) => {
       if (!searchItems || !searchItems[index]) return ESTIMATED_ROW_HEIGHT;
 
       const searchItem = searchItems[index];
       return (
+        // $FlowFixMe[invalid-computed-prop]
         cachedHeights.current[getSearchItemUniqueId(searchItem)] ||
         ESTIMATED_ROW_HEIGHT
       );
@@ -64,6 +79,7 @@ export const ListSearchResults = <SearchItem>({
 
   // Render an item, and update the cached height when it's reported
   const renderRow = React.useCallback(
+    // $FlowFixMe[missing-local-annot]
     ({ key, rowIndex, style }) => {
       if (!searchItems) return null;
 
@@ -75,7 +91,7 @@ export const ListSearchResults = <SearchItem>({
           {renderSearchItem(searchItem, height => {
             const heightWasUpdated = onItemHeightComputed(searchItem, height);
             if (heightWasUpdated && grid.current) {
-              grid.current.recomputeGridSize(0, rowIndex);
+              grid.current.recomputeGridSize({ rowIndex });
             }
           })}
         </div>
@@ -100,20 +116,24 @@ export const ListSearchResults = <SearchItem>({
     return (
       <EmptyMessage>
         <Trans>
-          No results returned for your search. Try something else or browse the
-          categories.
+          No results returned for your search. Try something else or typing at
+          least 2 characters.
         </Trans>
       </EmptyMessage>
     );
   }
 
   return (
-    <ErrorBoundary>
-      <div style={styles.container}>
+    <ErrorBoundary
+      componentTitle={<Trans>Search results</Trans>}
+      scope="list-search-result"
+    >
+      <div
+        style={styles.container}
+        className={disableAutoTranslate ? 'notranslate' : ''}
+      >
         <AutoSizer>
           {({ width, height }) => {
-            if (!width || !height) return null;
-
             // Reset the cached heights in case the width changed.
             if (cachedHeightsForWidth.current !== width) {
               cachedHeights.current = {};
@@ -125,7 +145,7 @@ export const ListSearchResults = <SearchItem>({
                 ref={el => {
                   if (el) {
                     // Ensure the grid is recomputed for heights once it is rendered.
-                    el.recomputeGridSize(0, 0);
+                    el.recomputeGridSize();
                   }
                   grid.current = el;
                 }}
@@ -137,6 +157,24 @@ export const ListSearchResults = <SearchItem>({
                 rowCount={searchItems.length}
                 cellRenderer={renderRow}
                 style={styles.grid}
+                // We override this function to avoid a bug in react-virtualized
+                // where the overscanCellsCount is not taken into account after a scroll
+                // see https://github.com/bvaughn/react-virtualized/issues/1582#issuecomment-785073746
+                overscanIndicesGetter={({
+                  cellCount,
+                  overscanCellsCount,
+                  startIndex,
+                  stopIndex,
+                }) => ({
+                  overscanStartIndex: Math.max(
+                    0,
+                    startIndex - OVERSCAN_CELLS_COUNT
+                  ),
+                  overscanStopIndex: Math.min(
+                    cellCount - 1,
+                    stopIndex + OVERSCAN_CELLS_COUNT
+                  ),
+                })}
               />
             );
           }}

@@ -1,37 +1,19 @@
 // @flow
+import { type I18n as I18nType } from '@lingui/core';
 import {
   type EnumeratedExpressionMetadata,
   type InstructionOrExpressionScope,
-} from './EnumeratedInstructionOrExpressionMetadata.js';
+} from './EnumeratedInstructionOrExpressionMetadata';
 import { mapVector } from '../Utils/MapFor';
 import flatten from 'lodash/flatten';
+import { getExtensionPrefix } from './EnumerateInstructions';
+import { shouldHideExtension } from '../Version';
+
 const gd: libGDevelop = global.gd;
 
-const GROUP_DELIMITER = '/';
+const GROUP_DELIMITER = ' ❯ ';
 
-// Support enumerate expressions that can be string, number or both ("number|string").
-// "number|string" has limited support in the codebase, enough to be used in expressions but not
-// in parameters and this is not a generic feature (you can't do "string|variable" or this kind of things).
-// This may be improved in the future if really necessary.
-const isPotentiallyStringType = (type: string) =>
-  type === 'string' || type === 'number|string';
-const isPotentiallyNumberType = (type: string) =>
-  type === 'number' || type === 'number|string';
-
-const getExtensionPrefix = (extension: gdPlatformExtension): string => {
-  const allObjectsTypes = extension.getExtensionObjectsTypes();
-  const allBehaviorsTypes = extension.getBehaviorsTypes();
-
-  if (allObjectsTypes.size() > 0 || allBehaviorsTypes.size() > 0) {
-    return (
-      (extension.getName() === 'BuiltinObject'
-        ? 'Common expressions for all objects'
-        : extension.getFullName()) + GROUP_DELIMITER
-    );
-  }
-
-  return '';
-};
+const shouldOnlyBeNumberType = (type: string) => type === 'number';
 
 const enumerateExpressionMetadataMap = (
   prefix: string,
@@ -44,8 +26,8 @@ const enumerateExpressionMetadataMap = (
       return null; // Skip hidden expressions
     }
 
-    var parameters = [];
-    for (var i = 0; i < exprMetadata.getParametersCount(); i++) {
+    let parameters = [];
+    for (let i = 0; i < exprMetadata.getParametersCount(); i++) {
       if (scope.objectMetadata && i === 0) continue;
       if (scope.behaviorMetadata && i <= 1) continue; //Skip object and behavior parameters
       if (exprMetadata.getParameter(i).isCodeOnly()) continue;
@@ -53,54 +35,62 @@ const enumerateExpressionMetadataMap = (
       parameters.push(exprMetadata.getParameter(i));
     }
 
+    const groupName = exprMetadata.getGroup();
+
     return {
       type: expressionType,
       name: expressionType,
       displayedName: exprMetadata.getFullName(),
-      fullGroupName: prefix + exprMetadata.getGroup(),
+      description: exprMetadata.getDescription(),
+      fullGroupName: [prefix, groupName].filter(Boolean).join(GROUP_DELIMITER),
       iconFilename: exprMetadata.getSmallIconFilename(),
       metadata: exprMetadata,
       parameters: parameters,
       scope,
       isPrivate: exprMetadata.isPrivate(),
+      isRelevantForLayoutEvents: exprMetadata.isRelevantForLayoutEvents(),
+      isRelevantForFunctionEvents: exprMetadata.isRelevantForFunctionEvents(),
+      isRelevantForAsynchronousFunctionEvents: exprMetadata.isRelevantForAsynchronousFunctionEvents(),
+      isRelevantForCustomObjectEvents: exprMetadata.isRelevantForCustomObjectEvents(),
     };
   }).filter(Boolean);
 };
 
 /** Enumerate all the free expressions available. */
 export const enumerateFreeExpressions = (
-  type: string
+  type: string,
+  project: gdProject,
+  i18n: I18nType
 ): Array<EnumeratedExpressionMetadata> => {
   const allExtensions = gd
     .asPlatform(gd.JsPlatform.get())
     .getAllPlatformExtensions();
-  const returnNumber = isPotentiallyNumberType(type);
-  const returnString = isPotentiallyStringType(type);
 
   return flatten(
     mapVector(allExtensions, extension => {
-      const prefix = getExtensionPrefix(extension);
-      const scope = {
-        extension,
+      if (shouldHideExtension(project, extension)) {
+        return [];
+      }
+      const prefix = getExtensionPrefix(extension, i18n);
+      const scope: InstructionOrExpressionScope = {
+        extension: { name: extension.getName() },
         objectMetadata: undefined,
         behaviorMetadata: undefined,
       };
 
       return [
-        ...(returnString
+        ...(!shouldOnlyBeNumberType(type)
           ? enumerateExpressionMetadataMap(
               prefix,
               extension.getAllStrExpressions(),
               scope
             )
           : []),
-        ...(returnNumber
-          ? enumerateExpressionMetadataMap(
-              prefix,
-              extension.getAllExpressions(),
-              scope
-            )
-          : []),
+        ...enumerateExpressionMetadataMap(
+          prefix,
+          extension.getAllExpressions(),
+          scope
+        ),
       ];
     })
   );
@@ -117,23 +107,29 @@ export const enumerateObjectExpressions = (
   );
   const extension = extensionAndObjectMetadata.getExtension();
   const objectMetadata = extensionAndObjectMetadata.getMetadata();
-  const scope = { extension, objectMetadata };
+  const scope = {
+    extension: { name: extension.getName() },
+    objectMetadata: {
+      name: objectMetadata.getName(),
+      isPrivate: objectMetadata.isPrivate(),
+    },
+  };
 
   let objectsExpressions = [
-    ...(isPotentiallyStringType(type)
-      ? enumerateExpressionMetadataMap(
+    ...(shouldOnlyBeNumberType(type)
+      ? []
+      : enumerateExpressionMetadataMap(
           '',
           extension.getAllStrExpressionsForObject(objectType),
+          // $FlowFixMe[incompatible-type]
           scope
-        )
-      : []),
-    ...(isPotentiallyNumberType(type)
-      ? enumerateExpressionMetadataMap(
-          '',
-          extension.getAllExpressionsForObject(objectType),
-          scope
-        )
-      : []),
+        )),
+    ...enumerateExpressionMetadataMap(
+      '',
+      extension.getAllExpressionsForObject(objectType),
+      // $FlowFixMe[incompatible-type]
+      scope
+    ),
   ];
 
   const baseObjectType = ''; /* An empty string means the base object */
@@ -146,20 +142,20 @@ export const enumerateObjectExpressions = (
 
     objectsExpressions = [
       ...objectsExpressions,
-      ...(isPotentiallyStringType(type)
-        ? enumerateExpressionMetadataMap(
+      ...(shouldOnlyBeNumberType(type)
+        ? []
+        : enumerateExpressionMetadataMap(
             '',
             extension.getAllStrExpressionsForObject(baseObjectType),
+            // $FlowFixMe[incompatible-type]
             scope
-          )
-        : []),
-      ...(isPotentiallyNumberType(type)
-        ? enumerateExpressionMetadataMap(
-            '',
-            extension.getAllExpressionsForObject(baseObjectType),
-            scope
-          )
-        : []),
+          )),
+      ...enumerateExpressionMetadataMap(
+        '',
+        extension.getAllExpressionsForObject(baseObjectType),
+        // $FlowFixMe[incompatible-type]
+        scope
+      ),
     ];
   }
 
@@ -177,91 +173,105 @@ export const enumerateBehaviorExpressions = (
   );
   const extension = extensionAndBehaviorMetadata.getExtension();
   const behaviorMetadata = extensionAndBehaviorMetadata.getMetadata();
-  const scope = { extension, behaviorMetadata };
+  const scope = {
+    extension: { name: extension.getName() },
+    behaviorMetadata: {
+      name: behaviorMetadata.getName(),
+      isPrivate: behaviorMetadata.isPrivate(),
+    },
+  };
 
   return [
-    ...(isPotentiallyStringType(type)
-      ? enumerateExpressionMetadataMap(
+    ...(shouldOnlyBeNumberType(type)
+      ? []
+      : enumerateExpressionMetadataMap(
           '',
           extension.getAllStrExpressionsForBehavior(behaviorType),
+          // $FlowFixMe[incompatible-type]
           scope
-        )
-      : []),
-    ...(isPotentiallyNumberType(type)
-      ? enumerateExpressionMetadataMap(
-          '',
-          extension.getAllExpressionsForBehavior(behaviorType),
-          scope
-        )
-      : []),
+        )),
+    ...enumerateExpressionMetadataMap(
+      '',
+      extension.getAllExpressionsForBehavior(behaviorType),
+      // $FlowFixMe[incompatible-type]
+      scope
+    ),
   ];
 };
 
 /** Enumerate all the expressions available. */
 export const enumerateAllExpressions = (
-  type: string
+  type: string,
+  project: gdProject,
+  i18n: I18nType
 ): Array<EnumeratedExpressionMetadata> => {
-  const returnNumber = isPotentiallyNumberType(type);
-  const returnString = isPotentiallyStringType(type);
-
-  const objectsExpressions = [];
-  const behaviorsExpressions = [];
-  const freeExpressions = enumerateFreeExpressions(type);
+  const objectsExpressions: Array<EnumeratedExpressionMetadata> = [];
+  const behaviorsExpressions: Array<EnumeratedExpressionMetadata> = [];
+  const freeExpressions = enumerateFreeExpressions(type, project, i18n);
 
   const allExtensions = gd
     .asPlatform(gd.JsPlatform.get())
     .getAllPlatformExtensions();
   mapVector(allExtensions, extension => {
-    const prefix = getExtensionPrefix(extension);
+    if (shouldHideExtension(project, extension)) {
+      return;
+    }
+    const prefix = getExtensionPrefix(extension, i18n);
 
     //Objects expressions:
     mapVector(extension.getExtensionObjectsTypes(), objectType => {
       const objectMetadata = extension.getObjectMetadata(objectType);
-      const scope = { extension, objectMetadata };
+      const scope: InstructionOrExpressionScope = {
+        extension: { name: extension.getName() },
+        objectMetadata: {
+          name: objectMetadata.getName(),
+          isPrivate: objectMetadata.isPrivate(),
+        },
+      };
 
-      if (returnString)
-        objectsExpressions.push.apply(
-          objectsExpressions,
-          enumerateExpressionMetadataMap(
+      if (!shouldOnlyBeNumberType(type))
+        objectsExpressions.push(
+          ...enumerateExpressionMetadataMap(
             prefix,
             extension.getAllStrExpressionsForObject(objectType),
             scope
           )
         );
-      if (returnNumber)
-        objectsExpressions.push.apply(
-          objectsExpressions,
-          enumerateExpressionMetadataMap(
-            prefix,
-            extension.getAllExpressionsForObject(objectType),
-            scope
-          )
-        );
+      objectsExpressions.push(
+        ...enumerateExpressionMetadataMap(
+          prefix,
+          extension.getAllExpressionsForObject(objectType),
+          scope
+        )
+      );
     });
 
     //Behaviors expressions:
     mapVector(extension.getBehaviorsTypes(), behaviorType => {
       const behaviorMetadata = extension.getBehaviorMetadata(behaviorType);
-      const scope = { extension, behaviorMetadata };
+      const scope: InstructionOrExpressionScope = {
+        extension: { name: extension.getName() },
+        behaviorMetadata: {
+          name: behaviorMetadata.getName(),
+          isPrivate: behaviorMetadata.isPrivate(),
+        },
+      };
 
-      if (returnString)
-        behaviorsExpressions.push.apply(
-          behaviorsExpressions,
-          enumerateExpressionMetadataMap(
+      if (!shouldOnlyBeNumberType(type))
+        behaviorsExpressions.push(
+          ...enumerateExpressionMetadataMap(
             prefix,
             extension.getAllStrExpressionsForBehavior(behaviorType),
             scope
           )
         );
-      if (returnNumber)
-        behaviorsExpressions.push.apply(
-          behaviorsExpressions,
-          enumerateExpressionMetadataMap(
-            prefix,
-            extension.getAllExpressionsForBehavior(behaviorType),
-            scope
-          )
-        );
+      behaviorsExpressions.push(
+        ...enumerateExpressionMetadataMap(
+          prefix,
+          extension.getAllExpressionsForBehavior(behaviorType),
+          scope
+        )
+      );
     });
   });
 
@@ -286,6 +296,7 @@ export const filterExpressions = (
   const favorExactMatch = (
     list: Array<EnumeratedExpressionMetadata>
   ): Array<EnumeratedExpressionMetadata> => {
+    // $FlowFixMe[constant-condition]
     if (!searchText) {
       return list;
     }

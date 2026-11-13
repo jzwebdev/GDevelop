@@ -5,8 +5,7 @@
  * project is released under the MIT License.
  */
 
-#ifndef GDCORE_PLATFORMEXTENSION_H
-#define GDCORE_PLATFORMEXTENSION_H
+#pragma once
 #include <map>
 #include <memory>
 #include <vector>
@@ -16,7 +15,9 @@
 #include "GDCore/Extensions/Metadata/DependencyMetadata.h"
 #include "GDCore/Extensions/Metadata/EffectMetadata.h"
 #include "GDCore/Extensions/Metadata/EventMetadata.h"
+#include "GDCore/Extensions/Metadata/InstructionOrExpressionGroupMetadata.h"
 #include "GDCore/Extensions/Metadata/ObjectMetadata.h"
+#include "GDCore/Extensions/Metadata/SourceFileMetadata.h"
 #include "GDCore/Project/PropertyDescriptor.h"
 #include "GDCore/String.h"
 #include "GDCore/Tools/VersionPriv.h"
@@ -37,10 +38,10 @@ class ArbitraryResourceWorker;
 class BehaviorsSharedData;
 class Behavior;
 class Object;
+class ObjectConfiguration;
 }  // namespace gd
 
-typedef std::function<std::unique_ptr<gd::Object>(gd::String name)>
-    CreateFunPtr;
+typedef std::function<std::unique_ptr<gd::ObjectConfiguration>()> CreateFunPtr;
 
 namespace gd {
 
@@ -50,25 +51,29 @@ namespace gd {
  */
 class GD_CORE_API CompilationInfo {
  public:
-  CompilationInfo() : informationCompleted(false){};
-  virtual ~CompilationInfo(){};
+  CompilationInfo() {};
+  virtual ~CompilationInfo() {};
 
-  bool informationCompleted;
+  bool informationCompleted = false;
 
-  bool runtimeOnly;  ///< True if the extension was compiled for a runtime use
-                     ///< only
+  bool runtimeOnly = false;  ///< True if the extension was compiled for a
+                             ///< runtime use only
 
 #if defined(__GNUC__)
-  int gccMajorVersion;
-  int gccMinorVersion;
-  int gccPatchLevel;
+  int gccMajorVersion = 0;
+  int gccMinorVersion = 0;
+  int gccPatchLevel = 0;
 #endif
 
-  int sfmlMajorVersion;
-  int sfmlMinorVersion;
+  int sfmlMajorVersion = 0;
+  int sfmlMinorVersion = 0;
 
   gd::String gdCoreVersion;
-  int sizeOfpInt;
+  int sizeOfpInt = 0;
+};
+
+struct GD_CORE_API DuplicatedInstructionOptions {
+  bool unscoped;
 };
 
 /**
@@ -106,9 +111,33 @@ class GD_CORE_API PlatformExtension {
   }
 
   /**
+   * \brief Set a short description for the extension, used by AI/LLM agents.
+   */
+  PlatformExtension& SetShortDescription(const gd::String& shortDescription_) {
+    shortDescription = shortDescription_;
+    return *this;
+  }
+
+  /**
+   * \brief Set the dimension of the extension ("2D", "3D", "2D/3D" or empty).
+   */
+  PlatformExtension& SetDimension(const gd::String& dimension_) {
+    dimension = dimension_;
+    return *this;
+  }
+
+  /**
+   * \brief Set the category of the extension.
+   */
+  PlatformExtension& SetCategory(const gd::String& category_) {
+    category = category_;
+    return *this;
+  }
+
+  /**
    * \brief Set the path to the help, relative to the GDevelop documentation
    * root. For example, "/all-features/collisions" for
-   * "http://wiki.compilgames.net/doku.php/gdevelop5/all-features/collisions".
+   * "https://wiki.gdevelop.io/gdevelop5/all-features/collisions".
    *
    * The instructions, objects and behaviors will have this help path set by
    * default, unless you call SetHelpPath on them.
@@ -119,10 +148,14 @@ class GD_CORE_API PlatformExtension {
   }
 
   /**
-   * \brief Mark this extension as deprecated: the IDE will hide it from the
-   * user.
+   * \brief Mark this extension as deprecated: the IDE will hide it from users
+   * in new projects.
    */
-  void MarkAsDeprecated() { deprecated = true; }
+  PlatformExtension& MarkAsDeprecatedSince(const gd::String& version) {
+    deprecated = true;
+    deprecationGDVersion = version;
+    return *this;
+  }
 
   ///@}
 
@@ -202,6 +235,27 @@ class GD_CORE_API PlatformExtension {
       const gd::String& icon);
 
   gd::DependencyMetadata& AddDependency();
+  gd::SourceFileMetadata& AddSourceFile();
+
+  /**
+   * \brief Add a file to include only in the games running gameplay tests
+   * (previews), after the other files of the extension. It can add helpers
+   * to the gameplay test harness (see
+   * `gdjs.gameplayTests.registerHarnessExtension`). Exported games never
+   * include it.
+   */
+  PlatformExtension& AddGameplayTestIncludeFile(const gd::String& includeFile) {
+    gameplayTestIncludeFiles.push_back(includeFile);
+    return *this;
+  }
+
+  /**
+   * \brief The files to include only in the games running gameplay tests.
+   * \see AddGameplayTestIncludeFile
+   */
+  const std::vector<gd::String>& GetGameplayTestIncludeFiles() const {
+    return gameplayTestIncludeFiles;
+  }
 
   /**
    * \brief Declare a new object as being part of the extension.
@@ -226,19 +280,36 @@ class GD_CORE_API PlatformExtension {
    * \param instance The "blueprint" object to be copied when a new object is
    asked for.
    */
-  gd::ObjectMetadata& AddObject(const gd::String& name_,
-                                const gd::String& fullname_,
-                                const gd::String& description_,
-                                const gd::String& icon_,
-                                std::shared_ptr<gd::Object> instance);
+  gd::ObjectMetadata& AddObject(
+      const gd::String& name_,
+      const gd::String& fullname_,
+      const gd::String& description_,
+      const gd::String& icon_,
+      std::shared_ptr<gd::ObjectConfiguration> instance);
+
+  /**
+   * \brief Declare a new events based object as being part of the extension.
+   *
+   * \param name The name of the object
+   * \param fullname The user friendly name of the object
+   * \param description The user friendly description of the object
+   * \param icon The icon of the object.
+   */
+  gd::ObjectMetadata& AddEventsBasedObject(const gd::String& name_,
+                                           const gd::String& fullname_,
+                                           const gd::String& description_,
+                                           const gd::String& icon_);
 
   /**
    * \brief Declare a new behavior as being part of the extension.
    *
    * \param name The name of the behavior
    * \param fullname The user friendly name of the behavior
+   * \param defaultName The default name of behavior instances
    * \param description The user friendly description of the behavior
+   * \param group The behavior category label
    * \param icon The icon of the behavior.
+   * \param className The name of the class implementing the behavior
    * \param instance An instance of the behavior that
    * will be used to create the behavior
    * \param sharedDatasInstance Optional
@@ -271,7 +342,6 @@ class GD_CORE_API PlatformExtension {
                               const gd::String& smallicon_,
                               std::shared_ptr<gd::BaseEvent> instance);
 
-#if defined(GD_IDE_ONLY)
   /**
    * \brief Create a new action which is the duplicate of the specified one.
    *
@@ -288,7 +358,8 @@ class GD_CORE_API PlatformExtension {
    */
   gd::InstructionMetadata& AddDuplicatedCondition(
       const gd::String& newConditionName,
-      const gd::String& copiedConditionName);
+      const gd::String& copiedConditionName,
+      gd::DuplicatedInstructionOptions options = {.unscoped = false});
   /**
    * \brief Create a new expression which is the duplicate of the specified one.
    *
@@ -315,13 +386,31 @@ class GD_CORE_API PlatformExtension {
   gd::PropertyDescriptor& RegisterProperty(const gd::String& name) {
     return extensionPropertiesMetadata[name];
   };
-#endif
+
+  /**
+   * \brief Add some metadata (icon, etc...) for a group used for instructions
+   * or expressions.
+   */
+  InstructionOrExpressionGroupMetadata& AddInstructionOrExpressionGroupMetadata(
+      const gd::String& name) {
+    return instructionOrExpressionGroupMetadata[name];
+  }
 
   /**
    * \brief Delete all instructions having no function name or custom code
    * generator.
    */
   void StripUnimplementedInstructionsAndExpressions();
+
+
+  /**
+   * \brief Declare a new resource to be used in the in-game editor.
+   */
+  InGameEditorResourceMetadata& AddInGameEditorResource() {
+    InGameEditorResourceMetadata newInGameEditorResource;
+    inGameEditorResources.push_back(newInGameEditorResource);
+    return inGameEditorResources.back();
+  }
   ///@}
 
   /** \name Extension accessors
@@ -340,9 +429,24 @@ class GD_CORE_API PlatformExtension {
   const gd::String& GetName() const { return name; }
 
   /**
+   * \brief Return the category of the extension
+   */
+  const gd::String& GetCategory() const { return category; }
+
+  /**
    * \brief Return a description of the extension
    */
   const gd::String& GetDescription() const { return informations; }
+
+  /**
+   * \brief Return a short description of the extension, used by AI/LLM agents.
+   */
+  const gd::String& GetShortDescription() const { return shortDescription; }
+
+  /**
+   * \brief Return the dimension of the extension ("2D", "3D", "2D/3D" or empty).
+   */
+  const gd::String& GetDimension() const { return dimension; }
 
   /**
    * \brief Return the name of the extension developer
@@ -367,15 +471,41 @@ class GD_CORE_API PlatformExtension {
   const gd::String& GetIconUrl() const { return iconUrl; }
 
   /**
+   * \brief Return keywords that help search engines find this extension.
+   */
+  const std::vector<gd::String>& GetTags() const { return tags; }
+
+  /**
+   * \brief Set keywords that help search engines find this extension.
+   */
+  PlatformExtension& SetTags(const gd::String& csvTags) {
+    tags.clear();
+    tags = csvTags.Split(',');
+    for (size_t i = 0; i < tags.size(); i++) {
+      tags[i] = tags[i].Trim().LowerCase();
+    }
+    return *this;
+  }
+
+  /**
+   * \brief Add a keyword that help search engines find this extension.
+   */
+  PlatformExtension& AddTag(const gd::String& tag) {
+    tags.push_back(tag);
+    return *this;
+  }
+
+  /**
    * \brief Check if the extension is flagged as being deprecated.
    */
   bool IsDeprecated() const { return deprecated; }
 
   /**
-   * \brief Return true if the extension is a standard extension that cannot be
-   * deactivated
+   * Get the version of GDevelop when this extension got deprecated.
    */
-  bool IsBuiltin() const;
+  const gd::String& GetDeprecationGDVersion() {
+    return deprecationGDVersion;
+  };
 
   /**
    * \brief Get the namespace of the extension.
@@ -443,6 +573,12 @@ class GD_CORE_API PlatformExtension {
   BehaviorMetadata& GetBehaviorMetadata(const gd::String& behaviorType);
 
   /**
+   * \brief Return true if the extension contains a behavior associated to \a
+   * behaviorType
+   */
+  bool HasBehavior(const gd::String& behaviorType) const;
+
+  /**
    * \brief Return the metadata for the effect with the given name.
    */
   EffectMetadata& GetEffectMetadata(const gd::String& effectName);
@@ -452,7 +588,6 @@ class GD_CORE_API PlatformExtension {
    */
   std::map<gd::String, gd::EventMetadata>& GetAllEvents();
 
-#if defined(GD_IDE_ONLY)
   /**
    * \brief Return a reference to a map containing the names of the actions
    * (as keys) and the metadata associated with (as values).
@@ -479,6 +614,24 @@ class GD_CORE_API PlatformExtension {
    * dependencies of the extension.
    */
   std::vector<gd::DependencyMetadata>& GetAllDependencies();
+
+  /**
+   * \brief Return a reference to a vector containing the metadata of all the
+   * dependencies of the extension.
+   */
+  const std::vector<gd::DependencyMetadata>& GetAllDependencies() const;
+
+  /**
+   * \brief Return a reference to a vector containing the metadata of all the
+   * dependencies of the extension.
+   */
+  std::vector<gd::SourceFileMetadata>& GetAllSourceFiles();
+
+  /**
+   * \brief Return a reference to a vector containing the metadata of all the
+   * dependencies of the extension.
+   */
+  const std::vector<gd::SourceFileMetadata>& GetAllSourceFiles() const;
 
   /**
    * \brief Return a reference to a map containing the names of the actions,
@@ -537,20 +690,66 @@ class GD_CORE_API PlatformExtension {
   std::map<gd::String, gd::PropertyDescriptor>& GetAllProperties() {
     return extensionPropertiesMetadata;
   }
-  ///@}
-#endif
 
   /**
-   * \brief Return the name of all the extensions which are considered provided
-   * by platforms.
+   * \brief Get the metadata (icon, etc...) for groups used for instructions
+   * or expressions.
    */
-  static std::vector<gd::String> GetBuiltinExtensionsNames();
+  const std::map<gd::String, InstructionOrExpressionGroupMetadata>&
+  GetAllInstructionOrExpressionGroupMetadata() const {
+    return instructionOrExpressionGroupMetadata;
+  }
+
+  const std::vector<gd::InGameEditorResourceMetadata>& GetInGameEditorResources() const {
+    return inGameEditorResources;
+  }
+  ///@}
 
   /**
    * \brief Get the string used to separate the name of the
    * instruction/expression and the extension.
    */
   static gd::String GetNamespaceSeparator() { return "::"; }
+
+  static gd::String GetEventsFunctionFullType(const gd::String& extensionName,
+                                              const gd::String& functionName);
+
+  static gd::String GetBehaviorEventsFunctionFullType(
+      const gd::String& extensionName,
+      const gd::String& behaviorName,
+      const gd::String& functionName);
+
+  static gd::String GetBehaviorFullType(const gd::String& extensionName,
+                                        const gd::String& behaviorName);
+
+  static gd::String GetExtensionFromFullBehaviorType(const gd::String& type);
+
+  static gd::String GetBehaviorNameFromFullBehaviorType(const gd::String& type);
+
+  static gd::String GetObjectEventsFunctionFullType(
+      const gd::String& extensionName,
+      const gd::String& objectName,
+      const gd::String& functionName);
+
+  static gd::String GetObjectFullType(const gd::String& extensionName,
+                                      const gd::String& objectName);
+
+static gd::String GetVariantFullType(const gd::String& extensionName,
+                                                const gd::String& objectName,
+                                                const gd::String& variantName);
+
+  static gd::String GetExtensionFromFullObjectType(const gd::String& type);
+
+  static gd::String GetObjectNameFromFullObjectType(const gd::String& type);
+
+  /**
+   * \brief Get the instruction name from a full type
+   * (e.g. "MyExtension::DoSomething" -> "DoSomething").
+   *
+   * If no namespace separator is found or the name after the separator is
+   * empty, the full type is returned as-is.
+   */
+  static gd::String GetInstructionNameFromFullType(const gd::String& type);
 
  private:
   /**
@@ -566,31 +765,38 @@ class GD_CORE_API PlatformExtension {
                   ///< actions/conditions/expressions/objects/behavior/event.
   gd::String fullname;      ///< Name displayed to users in the editor.
   gd::String informations;  ///< Description displayed to users in the editor.
-  gd::String author;        ///< Author displayed to users in the editor.
-  gd::String license;       ///< License name displayed to users in the editor.
-  bool deprecated;  ///< true if the extension is deprecated and shouldn't be
-                    ///< shown in IDE.
+  gd::String shortDescription;  ///< Short description for AI/LLM agents.
+  gd::String dimension;  ///< "2D", "3D", "2D/3D" or empty.
+  gd::String category;
+  gd::String author;   ///< Author displayed to users in the editor.
+  gd::String license;  ///< License name displayed to users in the editor.
+  bool deprecated = false; ///< true if the extension is deprecated and
+                           ///< shouldn't be shown in IDE.
+  gd::String deprecationGDVersion;
   gd::String helpPath;  ///< The relative path to the help for this extension in
                         ///< the documentation.
   gd::String iconUrl;   ///< The URL to the icon to be shown for this extension.
+  std::vector<gd::String> tags;
 
   std::map<gd::String, gd::ObjectMetadata> objectsInfos;
   std::map<gd::String, gd::BehaviorMetadata> behaviorsInfo;
   std::map<gd::String, gd::EffectMetadata> effectsMetadata;
-#if defined(GD_IDE_ONLY)
   std::map<gd::String, gd::InstructionMetadata> conditionsInfos;
   std::map<gd::String, gd::InstructionMetadata> actionsInfos;
   std::map<gd::String, gd::ExpressionMetadata> expressionsInfos;
   std::map<gd::String, gd::ExpressionMetadata> strExpressionsInfos;
   std::vector<gd::DependencyMetadata> extensionDependenciesMetadata;
+  std::vector<gd::SourceFileMetadata> extensionSourceFilesMetadata;
+  std::vector<gd::String> gameplayTestIncludeFiles;
   std::map<gd::String, gd::EventMetadata> eventsInfos;
   std::map<gd::String, gd::PropertyDescriptor> extensionPropertiesMetadata;
-#endif
+  std::map<gd::String, InstructionOrExpressionGroupMetadata>
+      instructionOrExpressionGroupMetadata;
+  std::vector<gd::InGameEditorResourceMetadata> inGameEditorResources;
 
   ObjectMetadata badObjectMetadata;
   BehaviorMetadata badBehaviorMetadata;
   EffectMetadata badEffectMetadata;
-#if defined(GD_IDE_ONLY)
   static std::map<gd::String, gd::InstructionMetadata>
       badConditionsMetadata;  ///< Used when a condition is not found in the
                               ///< extension
@@ -600,12 +806,10 @@ class GD_CORE_API PlatformExtension {
   static std::map<gd::String, gd::ExpressionMetadata>
       badExpressionsMetadata;  ///< Used when an expression is not found in the
                                ///< extension
-#endif
 };
 
 }  // namespace gd
 
-#if defined(GD_IDE_ONLY)
 /** \brief Macro used by extensions in their constructor to declare how they
  * have been compiled. \see gd::CompilationInfo
  */
@@ -619,23 +823,5 @@ class GD_CORE_API PlatformExtension {
   compilationInfo.gccMinorVersion = __GNUC_MINOR__;     \
   compilationInfo.gccPatchLevel = __GNUC_PATCHLEVEL__;  \
   compilationInfo.informationCompleted = true;
-#else
-/** \brief Macro used by extensions in their constructor to declare how they
- * have been compiled. \see gd::CompilationInfo
- */
-#define GD_COMPLETE_EXTENSION_COMPILATION_INFORMATION() \
-  compilationInfo.runtimeOnly = true;                   \
-  compilationInfo.sfmlMajorVersion = 2;                 \
-  compilationInfo.sfmlMinorVersion = 0;                 \
-  compilationInfo.gdCoreVersion = GD_VERSION_STRING;    \
-  compilationInfo.sizeOfpInt = sizeof(int*);            \
-  compilationInfo.gccMajorVersion = __GNUC__;           \
-  compilationInfo.gccMinorVersion = __GNUC_MINOR__;     \
-  compilationInfo.gccPatchLevel = __GNUC_PATCHLEVEL__;  \
-  compilationInfo.informationCompleted = true;
-
-#endif
 
 #include "GDCore/Extensions/PlatformExtension.inl"
-
-#endif  // GDCORE_PLATFORMEXTENSION_H

@@ -1,11 +1,11 @@
 namespace gdjs {
   class TextEntryRuntimeObjectPixiRenderer {
-    _object: any;
+    _object: gdjs.TextEntryRuntimeObject;
     _pressHandler: any;
     _upHandler: any;
     _downHandler: any;
 
-    constructor(runtimeObject) {
+    constructor(runtimeObject: gdjs.TextEntryRuntimeObject) {
       this._object = runtimeObject;
       this._pressHandler = function (evt) {
         if (!runtimeObject.isActivated()) {
@@ -75,6 +75,16 @@ namespace gdjs {
     }
   }
 
-  export const TextEntryRuntimeObjectRenderer = TextEntryRuntimeObjectPixiRenderer;
-  export type TextEntryRuntimeObjectRenderer = TextEntryRuntimeObjectPixiRenderer;
+  /**
+   * @category Renderers > Text Entry
+   * @deprecated
+   */
+  export const TextEntryRuntimeObjectRenderer =
+    TextEntryRuntimeObjectPixiRenderer;
+  /**
+   * @category Renderers > Text Entry
+   * @deprecated
+   */
+  export type TextEntryRuntimeObjectRenderer =
+    TextEntryRuntimeObjectPixiRenderer;
 }

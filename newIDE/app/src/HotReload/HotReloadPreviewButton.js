@@ -1,34 +1,40 @@
 // @flow
 import { Trans } from '@lingui/macro';
 import * as React from 'react';
-import FlatButton from '../UI/FlatButton';
-import PlayCircleFilledIcon from '@material-ui/icons/PlayCircleFilled';
-import OfflineBoltIcon from '@material-ui/icons/OfflineBolt';
+import PreviewIcon from '../UI/CustomSvgIcons/Preview';
+import UpdateIcon from '../UI/CustomSvgIcons/Update';
+import ResponsiveFlatButton from '../UI/ResponsiveFlatButton';
 
 export type HotReloadPreviewButtonProps = {|
   hasPreviewsRunning: boolean,
-  launchProjectDataOnlyPreview: () => void,
-  launchProjectWithLoadingScreenPreview: () => void,
+  launchProjectDataOnlyPreview: () => Promise<void>,
+  launchProjectWithLoadingScreenPreview: () => Promise<void>,
+  launchProjectCodeAndDataPreview: () => Promise<void>,
+  isCodeGenerationRequired?: boolean,
 |};
-
-export const NewPreviewIcon = PlayCircleFilledIcon;
-export const HotReloadPreviewIcon = OfflineBoltIcon;
 
 export default function HotReloadPreviewButton({
   launchProjectDataOnlyPreview,
+  launchProjectCodeAndDataPreview,
   hasPreviewsRunning,
-}: HotReloadPreviewButtonProps) {
+  isCodeGenerationRequired,
+}: HotReloadPreviewButtonProps): React.Node {
+  const icon = hasPreviewsRunning ? <UpdateIcon /> : <PreviewIcon />;
+  const label = hasPreviewsRunning ? (
+    <Trans>Apply changes to preview</Trans>
+  ) : (
+    <Trans>Run a preview</Trans>
+  );
+  const launchProjectPreview = isCodeGenerationRequired
+    ? launchProjectCodeAndDataPreview
+    : launchProjectDataOnlyPreview;
+
+  // Hide the text on mobile, to avoid taking too much space.
   return (
-    <FlatButton
-      icon={hasPreviewsRunning ? <HotReloadPreviewIcon /> : <NewPreviewIcon />}
-      label={
-        hasPreviewsRunning ? (
-          <Trans>Apply changes to preview</Trans>
-        ) : (
-          <Trans>Run a preview</Trans>
-        )
-      }
-      onClick={() => launchProjectDataOnlyPreview()}
+    <ResponsiveFlatButton
+      label={label}
+      onClick={launchProjectPreview}
+      leftIcon={icon}
     />
   );
 }

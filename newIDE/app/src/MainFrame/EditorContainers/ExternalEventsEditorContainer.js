@@ -8,11 +8,37 @@ import {
   type RenderEditorContainerProps,
   type RenderEditorContainerPropsWithRef,
 } from './BaseEditor';
+import {
+  type SceneEventsOutsideEditorChanges,
+  type InstancesOutsideEditorChanges,
+  type ObjectsOutsideEditorChanges,
+  type ObjectGroupsOutsideEditorChanges,
+  type WillDeleteObjectChanges,
+  type ExtensionsOutsideEditorChanges,
+} from '../../EditorFunctions/OutsideEditorChanges';
 import ExternalPropertiesDialog, {
   type ExternalProperties,
 } from './ExternalPropertiesDialog';
 import Text from '../../UI/Text';
 import { Line } from '../../UI/Grid';
+import { sendEventsExtractedAsFunction } from '../../Utils/Analytics/EventSender';
+import HelpButton from '../../UI/HelpButton';
+import TutorialButton from '../../UI/TutorialButton';
+import EditSceneIcon from '../../UI/CustomSvgIcons/EditScene';
+import {
+  registerOnResourceExternallyChangedCallback,
+  unregisterOnResourceExternallyChangedCallback,
+} from '../ResourcesWatcher';
+import { ProjectScopedContainersAccessor } from '../../InstructionOrExpression/EventsScope';
+import { type ObjectWithContext } from '../../ObjectsList/EnumerateObjects';
+import {
+  setEditorHotReloadNeeded,
+  type HotReloadSteps,
+} from '../../EmbeddedGame/EmbeddedGameFrame';
+import Background from '../../UI/Background';
+import type { EventPath } from '../../Utils/EventPath';
+import type { SearchFilterParams } from '../../Utils/Search';
+import { type EventsScope } from '../../InstructionOrExpression/EventsScope';
 
 const styles = {
   container: {
@@ -20,6 +46,8 @@ const styles = {
     flex: 1,
   },
 };
+
+const editSceneIconReactNode = <EditSceneIcon />;
 
 type State = {|
   externalPropertiesDialogOpen: boolean,
@@ -30,27 +58,182 @@ export class ExternalEventsEditorContainer extends React.Component<
   State
 > {
   editor: ?EventsSheetInterface;
+  _projectScopedContainersAccessor: ProjectScopedContainersAccessor | null = null;
+  _scope: EventsScope | null = null;
+  _associatedLayoutName: string | null = null;
+  resourceExternallyChangedCallbackId: ?string;
 
+  // $FlowFixMe[missing-local-annot]
   state = {
     externalPropertiesDialogOpen: false,
   };
 
-  shouldComponentUpdate(nextProps: RenderEditorContainerProps) {
-    // Prevent any update to the editor if the editor is not active,
-    // and so not visible to the user.
-    return nextProps.isActive;
+  constructor(props: RenderEditorContainerProps) {
+    super(props);
+    this._rebuildProjectScopedContainersAccessor();
   }
+
+  shouldComponentUpdate(nextProps: RenderEditorContainerProps): any {
+    // We stop updates when the component is inactive.
+    // If it's active, was active or becoming active again we let update propagate.
+    // Especially important to note that when becoming inactive, a "last" update is allowed.
+    return this.props.isActive || nextProps.isActive;
+  }
+
+  componentDidUpdate(prevProps: RenderEditorContainerProps): void {
+    const associatedLayoutName = this.getAssociatedLayoutName();
+    if (
+      this.props.project !== prevProps.project ||
+      this.props.projectItemName !== prevProps.projectItemName ||
+      this._associatedLayoutName !== associatedLayoutName
+    ) {
+      this._associatedLayoutName = associatedLayoutName;
+      this._rebuildProjectScopedContainersAccessor();
+    }
+  }
+
+  componentDidMount() {
+    this.resourceExternallyChangedCallbackId = registerOnResourceExternallyChangedCallback(
+      this.onResourceExternallyChanged.bind(this)
+    );
+  }
+
+  _rebuildProjectScopedContainersAccessor() {
+    const { project } = this.props;
+    if (project) {
+      // The scene can be null when users didn't choose an associated scene yet.
+      const externalEvents = this.getExternalEvents();
+      const scene = this.getLayout();
+      this._scope = {
+        project,
+        layout: scene,
+        externalEvents,
+      };
+      this._projectScopedContainersAccessor = new ProjectScopedContainersAccessor(
+        {
+          project,
+          layout: scene,
+        }
+      );
+    } else {
+      this._projectScopedContainersAccessor = null;
+    }
+  }
+
+  componentWillUnmount() {
+    unregisterOnResourceExternallyChangedCallback(
+      this.resourceExternallyChangedCallbackId
+    );
+  }
+
+  onResourceExternallyChanged = (resourceInfo: {| identifier: string |}) => {
+    if (this.editor) this.editor.onResourceExternallyChanged(resourceInfo);
+  };
 
   getProject(): ?gdProject {
     return this.props.project;
   }
 
   updateToolbar() {
-    if (this.editor) this.editor.updateToolbar();
+    if (this.editor) {
+      this.editor.updateToolbar();
+    } else {
+      // Clear the toolbar if the editor is not ready yet to avoid showing stale toolbar
+      // from the previous editor (e.g., HomePage)
+      this.props.setToolbar(null);
+    }
+  }
+
+  scrollToEventPath(eventPath: EventPath) {
+    if (this.editor) this.editor.scrollToEventPath(eventPath);
+  }
+
+  setGlobalSearchResults(
+    eventPaths: Array<EventPath>,
+    focusedEventPath: EventPath,
+    searchText: string,
+    searchFilters?: SearchFilterParams
+  ) {
+    if (this.editor) {
+      this.editor.setGlobalSearchResults(
+        eventPaths,
+        focusedEventPath,
+        searchText,
+        searchFilters
+      );
+    }
+  }
+
+  clearGlobalSearchResults() {
+    if (this.editor) this.editor.clearGlobalSearchResults();
+  }
+
+  selectAllInsideEditor() {
+    if (this.editor) this.editor.selectAllEvents();
   }
 
   forceUpdateEditor() {
     // No updates to be done.
+  }
+
+  onEventsBasedObjectChildrenEdited(
+    eventsBasedObject: gdEventsBasedObject,
+    options?: {| editedObject?: ?gdObject, hasResourceChanged?: boolean |}
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectEdited(
+    scene: gdLayout,
+    objectWithContext: ObjectWithContext,
+    hasResourceChanged?: boolean
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectsDeleted(scene: gdLayout) {
+    // No thing to be done.
+  }
+
+  onSceneEventsModifiedOutsideEditor(changes: SceneEventsOutsideEditorChanges) {
+    if (
+      changes.externalEvents &&
+      this.getExternalEvents() === changes.externalEvents
+    ) {
+      if (this.editor)
+        this.editor.onEventsModifiedOutsideEditor({
+          newOrChangedAiGeneratedEventIds:
+            changes.newOrChangedAiGeneratedEventIds,
+        });
+    }
+  }
+
+  notifyChangesToInGameEditor(hotReloadSteps: HotReloadSteps) {
+    setEditorHotReloadNeeded(hotReloadSteps);
+  }
+
+  switchInGameEditorIfNoHotReloadIsNeeded() {}
+
+  onInstancesModifiedOutsideEditor(changes: InstancesOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectsModifiedOutsideEditor(changes: ObjectsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onWillDeleteObject(changes: WillDeleteObjectChanges) {
+    // No thing to be done.
+  }
+
+  onExtensionsModifiedOutsideEditor(changes: ExtensionsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectGroupsModifiedOutsideEditor(
+    changes: ObjectGroupsOutsideEditorChanges
+  ) {
+    // No thing to be done.
   }
 
   getExternalEvents(): ?gdExternalEvents {
@@ -73,7 +256,7 @@ export class ExternalEventsEditorContainer extends React.Component<
     return project.getLayout(layoutName);
   }
 
-  getAssociatedLayoutName(): ?string {
+  getAssociatedLayoutName(): string | null {
     const { project } = this.props;
     if (!project) return null;
 
@@ -99,6 +282,7 @@ export class ExternalEventsEditorContainer extends React.Component<
       },
       () => this.updateToolbar()
     );
+    this._rebuildProjectScopedContainersAccessor();
   };
 
   openExternalPropertiesDialog = () => {
@@ -107,12 +291,38 @@ export class ExternalEventsEditorContainer extends React.Component<
     });
   };
 
-  render() {
+  onBeginCreateEventsFunction = () => {
+    sendEventsExtractedAsFunction({
+      step: 'begin',
+      parentEditor: 'external-events-editor',
+    });
+  };
+
+  onCreateEventsFunction = async (
+    extensionName: string,
+    eventsFunction: gdEventsFunction
+  ) => {
+    await this.props.onCreateEventsFunction(
+      extensionName,
+      eventsFunction,
+      'external-events-editor'
+    );
+  };
+
+  render(): any {
     const { project, projectItemName } = this.props;
     const externalEvents = this.getExternalEvents();
     const layout = this.getLayout();
+    const scope = this._scope;
+    const projectScopedContainersAccessor = this
+      ._projectScopedContainersAccessor;
 
-    if (!externalEvents || !project) {
+    if (
+      !externalEvents ||
+      !project ||
+      !scope ||
+      !projectScopedContainersAccessor
+    ) {
       //TODO: Error component
       return <div>No external events called {projectItemName} found!</div>;
     }
@@ -124,40 +334,59 @@ export class ExternalEventsEditorContainer extends React.Component<
             ref={editor => (this.editor = editor)}
             setToolbar={this.props.setToolbar}
             onOpenLayout={this.props.onOpenLayout}
-            resourceSources={this.props.resourceSources}
-            onChooseResource={this.props.onChooseResource}
-            resourceExternalEditors={this.props.resourceExternalEditors}
+            resourceManagementProps={this.props.resourceManagementProps}
             openInstructionOrExpression={this.props.openInstructionOrExpression}
-            onCreateEventsFunction={this.props.onCreateEventsFunction}
+            onCreateEventsFunction={this.onCreateEventsFunction}
+            onBeginCreateEventsFunction={this.onBeginCreateEventsFunction}
             unsavedChanges={this.props.unsavedChanges}
             project={project}
-            scope={{
-              layout,
-              externalEvents,
-            }}
-            globalObjectsContainer={project}
-            objectsContainer={layout}
+            scope={scope}
+            globalObjectsContainer={project.getObjects()}
+            objectsContainer={layout.getObjects()}
+            projectScopedContainersAccessor={projectScopedContainersAccessor}
             events={externalEvents.getEvents()}
             onOpenSettings={this.openExternalPropertiesDialog}
+            settingsIcon={editSceneIconReactNode}
             onOpenExternalEvents={this.props.onOpenExternalEvents}
+            isActive={this.props.isActive}
+            hotReloadPreviewButtonProps={this.props.hotReloadPreviewButtonProps}
+            onWillInstallExtension={this.props.onWillInstallExtension}
+            onExtensionInstalled={this.props.onExtensionInstalled}
+            onCreateNewExtensionWithBehavior={
+              this.props.onCreateNewExtensionWithBehavior
+            }
+            // Scene events don't have parameters nor properties
+            editEventsFunctionParameter={null}
+            openEventsBasedEntityPropertyEditorDialog={null}
           />
         )}
         {!layout && (
-          <PlaceholderMessage>
-            <Text>
-              <Trans>
-                To edit the external events, choose the scene in which it will
-                be included:
-              </Trans>
-            </Text>
-            <Line justifyContent="center">
-              <RaisedButton
-                label={<Trans>Choose the scene</Trans>}
-                primary
-                onClick={this.openExternalPropertiesDialog}
-              />
-            </Line>
-          </PlaceholderMessage>
+          <Background>
+            <PlaceholderMessage>
+              <Text>
+                <Trans>
+                  To edit the external events, choose the scene in which it will
+                  be included
+                </Trans>
+              </Text>
+              <Line justifyContent="center">
+                <RaisedButton
+                  label={<Trans>Choose the scene</Trans>}
+                  primary
+                  onClick={this.openExternalPropertiesDialog}
+                />
+              </Line>
+              <Line justifyContent="flex-start" noMargin>
+                <TutorialButton
+                  tutorialId="Intermediate-externals"
+                  label={<Trans>Watch tutorial</Trans>}
+                  renderIfNotFound={
+                    <HelpButton helpPagePath="/interface/events-editor/external-events" />
+                  }
+                />
+              </Line>
+            </PlaceholderMessage>
+          </Background>
         )}
         <ExternalPropertiesDialog
           title={<Trans>Configure the external events</Trans>}
@@ -180,4 +409,4 @@ export class ExternalEventsEditorContainer extends React.Component<
 
 export const renderExternalEventsEditorContainer = (
   props: RenderEditorContainerPropsWithRef
-) => <ExternalEventsEditorContainer {...props} />;
+): React.Node => <ExternalEventsEditorContainer {...props} />;

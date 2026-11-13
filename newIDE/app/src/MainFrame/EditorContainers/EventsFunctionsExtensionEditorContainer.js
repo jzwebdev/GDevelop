@@ -5,16 +5,38 @@ import {
   type RenderEditorContainerProps,
   type RenderEditorContainerPropsWithRef,
 } from './BaseEditor';
+import {
+  type SceneEventsOutsideEditorChanges,
+  type InstancesOutsideEditorChanges,
+  type ObjectsOutsideEditorChanges,
+  type ObjectGroupsOutsideEditorChanges,
+  type WillDeleteObjectChanges,
+  type ExtensionsOutsideEditorChanges,
+  type WillDeleteExtensionItemChanges,
+} from '../../EditorFunctions/OutsideEditorChanges';
+import { type ObjectWithContext } from '../../ObjectsList/EnumerateObjects';
+import {
+  setEditorHotReloadNeeded,
+  type HotReloadSteps,
+} from '../../EmbeddedGame/EmbeddedGameFrame';
+import type { EventPath } from '../../Utils/EventPath';
+import type { SearchFilterParams } from '../../Utils/Search';
 
 const styles = {
   container: {
     display: 'flex',
     flex: 1,
+    // In some cases, if some flex children cannot contract to
+    // within the div, it is possible for the div to overflow
+    // outside its parent. Setting min-width to 0 avoids this.
+    // See: https://stackoverflow.com/a/36247448/6199068
+    minWidth: 0,
   },
 };
 
 export class EventsFunctionsExtensionEditorContainer extends React.Component<RenderEditorContainerProps> {
   editor: ?EventsFunctionsExtensionEditor;
+  _blurTimeOutId: any = null;
 
   getProject(): ?gdProject {
     return this.props.project;
@@ -25,29 +47,152 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
   }
 
   updateToolbar() {
-    if (this.editor) this.editor.updateToolbar();
+    if (this.editor) {
+      this.editor.updateToolbar();
+    } else {
+      // Clear the toolbar if the editor is not ready yet to avoid showing stale toolbar
+      // from the previous editor (e.g., HomePage)
+      this.props.setToolbar(null);
+    }
+  }
+
+  setGlobalSearchResults(
+    eventPaths: Array<EventPath>,
+    focusedEventPath: EventPath,
+    searchText: string,
+    searchFilters?: SearchFilterParams
+  ) {
+    if (this.editor) {
+      this.editor.setGlobalSearchResults(
+        eventPaths,
+        focusedEventPath,
+        searchText,
+        searchFilters
+      );
+    }
+  }
+
+  clearGlobalSearchResults() {
+    if (this.editor) {
+      this.editor.clearGlobalSearchResults();
+    }
+  }
+
+  scrollToEventPath(eventPath: EventPath) {
+    if (this.editor) {
+      this.editor.scrollToEventPath(eventPath);
+    }
+  }
+
+  selectAllInsideEditor() {
+    if (this.editor) {
+      this.editor.selectAllEvents();
+    }
   }
 
   forceUpdateEditor() {
     // No updates to be done.
   }
 
-  shouldComponentUpdate(nextProps: RenderEditorContainerProps) {
-    // This optimization is a bit more cautious than the traditional one,
-    // to still be notified when isActive goes from true to false.
-    if (!this.props.isActive && !nextProps.isActive) {
-      return false;
-    }
-
-    return true;
+  onEventsBasedObjectChildrenEdited(
+    eventsBasedObject: gdEventsBasedObject,
+    options?: {| editedObject?: ?gdObject, hasResourceChanged?: boolean |}
+  ) {
+    // No thing to be done.
   }
 
+  onSceneObjectEdited(
+    scene: gdLayout,
+    objectWithContext: ObjectWithContext,
+    hasResourceChanged?: boolean
+  ) {
+    // No thing to be done.
+  }
+
+  onSceneObjectsDeleted(scene: gdLayout) {
+    // No thing to be done.
+  }
+
+  // The events of a function of this extension were changed outside of the
+  // editor (by the AI): refresh the events sheet showing them.
+  onSceneEventsModifiedOutsideEditor(changes: SceneEventsOutsideEditorChanges) {
+    const { eventsFunction, extensionName } = changes;
+    if (
+      !this.editor ||
+      !eventsFunction ||
+      !extensionName ||
+      extensionName !== this.getEventsFunctionsExtensionName()
+    ) {
+      return;
+    }
+    this.editor.onEventsModifiedOutsideEditor(
+      eventsFunction,
+      changes.newOrChangedAiGeneratedEventIds
+    );
+  }
+
+  notifyChangesToInGameEditor(hotReloadSteps: HotReloadSteps) {
+    setEditorHotReloadNeeded(hotReloadSteps);
+  }
+
+  switchInGameEditorIfNoHotReloadIsNeeded() {}
+
+  onInstancesModifiedOutsideEditor(changes: InstancesOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onObjectsModifiedOutsideEditor(changes: ObjectsOutsideEditorChanges) {
+    // No thing to be done.
+  }
+
+  onWillDeleteObject(changes: WillDeleteObjectChanges) {
+    // No thing to be done.
+  }
+
+  onObjectGroupsModifiedOutsideEditor(
+    changes: ObjectGroupsOutsideEditorChanges
+  ) {
+    // No thing to be done.
+  }
+
+  onExtensionsModifiedOutsideEditor(changes: ExtensionsOutsideEditorChanges) {
+    const extensionName = this.getEventsFunctionsExtensionName();
+    if (!extensionName || !changes.extensionNames.includes(extensionName)) {
+      return;
+    }
+    if (this.editor) this.editor.refreshAfterOutsideChanges();
+  }
+
+  // Called before the item is removed from the extension, so the editor can
+  // release a selection pointing at it (it would be dangling afterwards).
+  // A variant is not selectable here: only its object would match.
+  onWillDeleteExtensionItem(changes: WillDeleteExtensionItemChanges) {
+    if (!this.editor || changes.kind === 'custom-object-variant') return;
+    this.editor.deselectIfSelected({
+      functionName: changes.functionName,
+      behaviorName: changes.behaviorName,
+      objectName: changes.objectName,
+    });
+  }
+
+  shouldComponentUpdate(nextProps: RenderEditorContainerProps): any {
+    // We stop updates when the component is inactive.
+    // If it's active, was active or becoming active again we let update propagate.
+    // Especially important to note that when becoming inactive, a "last" update is allowed.
+    return this.props.isActive || nextProps.isActive;
+  }
+
+  // $FlowFixMe[unsupported-syntax]
   componentDidUpdate(prevProps: *) {
     // Ensure that the editor will trigger the
     // reload/regeneration of extensions when the user
     // is focusing another editor
     if (prevProps.isActive && !this.props.isActive) {
-      this.props.onLoadEventsFunctionsExtensions();
+      this.props.onLoadEventsFunctionsExtensions({
+        // Extensions without any events-based object are unlikely to have any
+        // impact on the editor.
+        shouldHotReloadEditor: this.hasAnyEventBasedObject(),
+      });
     }
   }
 
@@ -56,16 +201,26 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
     // reload/regeneration of extensions, as changes can have
     // been made inside before it's closed.
     if (this.props.isActive) {
-      this.props.onLoadEventsFunctionsExtensions();
+      this.props.onLoadEventsFunctionsExtensions({
+        shouldHotReloadEditor: this.hasAnyEventBasedObject(),
+      });
     }
   }
 
-  _onBehaviorEdited = async () => {
-    // Immediately trigger the reload/regeneration of extensions
-    // as a change in the properties of a behavior can create changes
-    // in actions/conditions/expressions to manipulate these properties.
+  hasAnyEventBasedObject(): any {
+    const extension = this.getEventsFunctionsExtension();
+    return extension ? extension.getEventsBasedObjects().getCount() > 0 : false;
+  }
+
+  _reloadExtensionMetadata = () => {
+    // Immediately trigger the reload/regeneration of the extension
+    // as a change in function declaration must be seen in the instructions
+    // especially to avoid to show "unsupported instructions".
     try {
-      await this.props.onLoadEventsFunctionsExtensions();
+      const extension = this.getEventsFunctionsExtension();
+      if (extension) {
+        this.props.onReloadEventsFunctionsExtensionMetadata(extension);
+      }
     } catch (error) {
       console.warn(
         'Error while loading events functions extensions - ignoring this in the context of the EventsFunctionsExtensionEditorContainer.',
@@ -74,13 +229,15 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
     }
   };
 
-  previewWillStart = () => {
+  previewOrExportWillStart = () => {
     // Immediately trigger the reload/regeneration of extensions
     // if a preview is about to start, as changes chan have been made
-    // inside. The preview is responsible for waiting for extensions
-    // to be loaded before starting.
+    // inside. The preview or export is responsible for waiting
+    // for extensions to be loaded before starting.
     if (this.props.isActive) {
-      this.props.onLoadEventsFunctionsExtensions();
+      this.props.onLoadEventsFunctionsExtensions({
+        shouldHotReloadEditor: false,
+      });
     }
   };
 
@@ -94,15 +251,54 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
     return project.getEventsFunctionsExtension(projectItemName);
   }
 
-  selectEventsFunctionByName(
-    eventsFunctionName: string,
-    behaviorName: ?string
-  ) {
-    if (this.editor)
-      this.editor.selectEventsFunctionByName(eventsFunctionName, behaviorName);
+  getEventsFunctionsExtensionName(): ?string {
+    const { project, projectItemName } = this.props;
+    if (!project || !projectItemName) return null;
+
+    return projectItemName;
   }
 
-  render() {
+  selectEventsFunctionByName(
+    eventsFunctionName: string,
+    eventBasedBehaviorName: ?string,
+    eventBasedObjectName: ?string
+  ) {
+    if (this.editor)
+      this.editor.selectEventsFunctionByName(
+        eventsFunctionName,
+        eventBasedBehaviorName,
+        eventBasedObjectName
+      );
+  }
+
+  selectEventsBasedBehaviorByName(eventBasedBehaviorName: string) {
+    if (this.editor)
+      this.editor.selectEventsBasedBehaviorByName(eventBasedBehaviorName);
+  }
+
+  selectEventsBasedObjectByName(eventBasedObjectName: string) {
+    if (this.editor)
+      this.editor.selectEventsBasedObjectByName(eventBasedObjectName);
+  }
+
+  _onBlur = () => {
+    // We forward the event on the next tick by using setTimeout.
+    // This is necessary because we need to first check if
+    // another child of the element has received focus as
+    // the blur event fires prior to the new focus event.
+    this._blurTimeOutId = setTimeout(() => {
+      if (this.editor) {
+        this.editor.onFocusLost();
+      }
+    });
+  };
+
+  _onFocus = () => {
+    // If a child receives focus, do not forward the onBlur.
+    clearTimeout(this._blurTimeOutId);
+  };
+
+  render(): any {
     const { project, projectItemName } = this.props;
     const eventsFunctionsExtension = this.getEventsFunctionsExtension();
 
@@ -111,26 +307,56 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
       return <div>No extension called {projectItemName} found!</div>;
     }
 
-    const { initiallyFocusedFunctionName, initiallyFocusedBehaviorName } =
-      this.props.extraEditorProps || {};
+    const {
+      initiallyFocusedFunctionName,
+      initiallyFocusedBehaviorName,
+      initiallyFocusedObjectName,
+    } = this.props.extraEditorProps || {};
 
     return (
-      <div style={styles.container}>
+      <div
+        style={styles.container}
+        onBlur={this._onBlur}
+        onFocus={this._onFocus}
+      >
         <EventsFunctionsExtensionEditor
           key={eventsFunctionsExtension.ptr}
           project={project}
           eventsFunctionsExtension={eventsFunctionsExtension}
           setToolbar={this.props.setToolbar}
-          resourceSources={this.props.resourceSources}
-          onChooseResource={this.props.onChooseResource}
-          resourceExternalEditors={this.props.resourceExternalEditors}
+          resourceManagementProps={this.props.resourceManagementProps}
           openInstructionOrExpression={this.props.openInstructionOrExpression}
           onCreateEventsFunction={this.props.onCreateEventsFunction}
           initiallyFocusedFunctionName={initiallyFocusedFunctionName}
           initiallyFocusedBehaviorName={initiallyFocusedBehaviorName}
-          onBehaviorEdited={this._onBehaviorEdited}
+          initiallyFocusedObjectName={initiallyFocusedObjectName}
+          onBehaviorEdited={this._reloadExtensionMetadata}
+          onObjectEdited={this._reloadExtensionMetadata}
+          onFunctionEdited={this._reloadExtensionMetadata}
+          gameplayTestsCallbacks={this.props.gameplayTestsCallbacks}
           ref={editor => (this.editor = editor)}
           unsavedChanges={this.props.unsavedChanges}
+          onOpenCustomObjectEditor={eventsBasedObject => {
+            this.props.onOpenCustomObjectEditor(
+              eventsFunctionsExtension,
+              eventsBasedObject,
+              ''
+            );
+          }}
+          hotReloadPreviewButtonProps={this.props.hotReloadPreviewButtonProps}
+          onEventsBasedObjectChildrenEdited={
+            this.props.onEventsBasedObjectChildrenEdited
+          }
+          onRenamedEventsBasedObject={this.props.onRenamedEventsBasedObject}
+          onDeletedEventsBasedObject={this.props.onDeletedEventsBasedObject}
+          onEventsBasedObjectMoved={this.props.onEventsBasedObjectMoved}
+          onEventsBasedBehaviorMoved={this.props.onEventsBasedBehaviorMoved}
+          onEventsFunctionMoved={this.props.onEventsFunctionMoved}
+          onWillInstallExtension={this.props.onWillInstallExtension}
+          onExtensionInstalled={this.props.onExtensionInstalled}
+          onEventBasedObjectTypeChanged={
+            this.props.onEventBasedObjectTypeChanged
+          }
         />
       </div>
     );
@@ -139,4 +365,4 @@ export class EventsFunctionsExtensionEditorContainer extends React.Component<Ren
 
 export const renderEventsFunctionsExtensionEditorContainer = (
   props: RenderEditorContainerPropsWithRef
-) => <EventsFunctionsExtensionEditorContainer {...props} />;
+): React.Node => <EventsFunctionsExtensionEditorContainer {...props} />;

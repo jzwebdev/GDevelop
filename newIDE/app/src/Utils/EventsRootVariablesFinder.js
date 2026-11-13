@@ -2,7 +2,7 @@
 const gd: libGDevelop = global.gd;
 
 /** Naive way to check if a variable expression is not using a structure/array. */
-const isRootVariableName = fullName =>
+const isRootVariableName = (fullName: string) =>
   !fullName.includes('.') && !fullName.includes('[') && fullName.length > 0;
 
 /**
@@ -48,13 +48,13 @@ export default class EventsRootVariablesFinder {
     platform: gdPlatform,
     project: gdProject,
     layout: gdLayout,
-    object: gdObject
+    objectName: string
   ): string[] {
     return gd.EventsVariablesFinder.findAllObjectVariables(
       project.getCurrentPlatform(),
       project,
       layout,
-      object
+      objectName
     )
       .toNewVectorString()
       .toJSArray()

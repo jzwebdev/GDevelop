@@ -1,8 +1,8 @@
 // @flow
 import { mapFor } from '../Utils/MapFor';
-import { type Schema } from '../PropertiesEditor';
-import { type ResourceKind } from '../ResourcesList/ResourceSource';
+import { type Schema } from '../PropertiesEditor/PropertiesEditorSchema';
 import flatten from 'lodash/flatten';
+import { effectPropertiesMapToSchema } from '../PropertiesEditor/PropertiesMapToSchema';
 
 export type EnumeratedEffectMetadata = {|
   extension: gdPlatformExtension,
@@ -12,6 +12,8 @@ export type EnumeratedEffectMetadata = {|
   description: string,
   parametersSchema: Schema,
   isMarkedAsNotWorkingForObjects: boolean,
+  isMarkedAsOnlyWorkingFor2D: boolean,
+  isMarkedAsOnlyWorkingFor3D: boolean,
 |};
 
 /**
@@ -36,80 +38,9 @@ export const enumerateEffectsMetadata = (
           const effectType = effectMetadata.getType();
 
           // Convert the effect type properties to a PropertiesEditor Schema.
-          const properties = effectMetadata.getProperties();
-          const parameterNames = properties.keys().toJSArray();
-          const parametersSchema: Schema = parameterNames
-            .map((parameterName: string) => {
-              const property = properties.get(parameterName);
-              const valueType = property.getType().toLowerCase();
-              const propertyLabel = property.getLabel();
-              const propertyDescription = property.getDescription();
-              const getLabel = () => propertyLabel;
-              const getDescription = () => propertyDescription;
-              const getExtraDescription = () => parameterName;
-
-              if (valueType === 'number') {
-                return {
-                  name: parameterName,
-                  valueType: 'number',
-                  getValue: (effect: gdEffect) =>
-                    effect.getDoubleParameter(parameterName),
-                  setValue: (effect: gdEffect, newValue: number) =>
-                    effect.setDoubleParameter(parameterName, newValue),
-                  getLabel,
-                  getDescription,
-                  getExtraDescription,
-                };
-              } else if (valueType === 'boolean') {
-                return {
-                  name: parameterName,
-                  valueType: 'boolean',
-                  getValue: (effect: gdEffect) =>
-                    effect.getBooleanParameter(parameterName),
-                  setValue: (effect: gdEffect, newValue: boolean) =>
-                    effect.setBooleanParameter(parameterName, newValue),
-                  getLabel,
-                  getDescription,
-                  getExtraDescription,
-                };
-              } else if (valueType === 'resource') {
-                // Resource is a "string" (with a selector in the UI)
-                const kind: ResourceKind =
-                  // $FlowFixMe - assume the passed resource kind is always valid.
-                  property.getExtraInfo().toJSArray()[0] || '';
-                return {
-                  name: parameterName,
-                  valueType: 'resource',
-                  resourceKind: kind,
-                  getValue: (effect: gdEffect) =>
-                    effect.getStringParameter(parameterName),
-                  setValue: (effect: gdEffect, newValue: string) =>
-                    effect.setStringParameter(parameterName, newValue),
-                  getLabel,
-                  getDescription,
-                  getExtraDescription,
-                };
-              } else if (valueType === 'color') {
-                return {
-                  name: parameterName,
-                  valueType: 'color',
-                  getValue: (effect: gdEffect) =>
-                    effect.getStringParameter(parameterName),
-                  setValue: (effect: gdEffect, newValue: string) =>
-                    effect.setStringParameter(parameterName, newValue),
-                  getLabel,
-                  getDescription,
-                  getExtraDescription,
-                };
-              } else {
-                console.error(
-                  `A property with type=${valueType} could not be mapped to a field for effect ${effectType}. Ensure that this type is correct.`
-                );
-                return null;
-              }
-            })
-            .filter(Boolean);
-
+          const parametersSchema: Schema = effectPropertiesMapToSchema({
+            defaultValueProperties: effectMetadata.getProperties(),
+          });
           return {
             extension,
             type: effectType,
@@ -117,6 +48,8 @@ export const enumerateEffectsMetadata = (
             fullName: effectMetadata.getFullName(),
             description: effectMetadata.getDescription(),
             isMarkedAsNotWorkingForObjects: effectMetadata.isMarkedAsNotWorkingForObjects(),
+            isMarkedAsOnlyWorkingFor2D: effectMetadata.isMarkedAsOnlyWorkingFor2D(),
+            isMarkedAsOnlyWorkingFor3D: effectMetadata.isMarkedAsOnlyWorkingFor3D(),
             parametersSchema,
           };
         });
@@ -142,6 +75,26 @@ export const enumerateEffectNames = (
   });
 };
 
+/**
+ * Values given to new effects instead of the default values of their
+ * properties.
+ *
+ * The default values are also the ones displayed for effects saved without
+ * these parameters, so they must stay the values that the game engine uses for
+ * them.
+ */
+const parameterValuesForNewEffects: {
+  [effectType: string]: {|
+    stringParameters?: { [string]: string },
+    doubleParameters?: { [string]: number },
+  |},
+} = {
+  'Scene3D::DirectionalLight': {
+    stringParameters: { shadowRenderingMode: 'fittedToCameraView' },
+    doubleParameters: { shadowNormalBias: 1 },
+  },
+};
+
 export const setEffectDefaultParameters = (
   effect: gdEffect,
   effectMetadata: gdEffectMetadata
@@ -165,4 +118,25 @@ export const setEffectDefaultParameters = (
       effect.setStringParameter(parameterName, property.getValue());
     }
   });
+
+  const parameterValues = parameterValuesForNewEffects[effect.getEffectType()];
+  if (parameterValues) {
+    const { stringParameters, doubleParameters } = parameterValues;
+    if (stringParameters) {
+      Object.keys(stringParameters).forEach(parameterName => {
+        effect.setStringParameter(
+          parameterName,
+          stringParameters[parameterName]
+        );
+      });
+    }
+    if (doubleParameters) {
+      Object.keys(doubleParameters).forEach(parameterName => {
+        effect.setDoubleParameter(
+          parameterName,
+          doubleParameters[parameterName]
+        );
+      });
+    }
+  }
 };

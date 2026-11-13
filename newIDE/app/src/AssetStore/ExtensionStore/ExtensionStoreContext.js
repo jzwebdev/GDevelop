@@ -1,5 +1,6 @@
 // @flow
 import * as React from 'react';
+import { type I18n as I18nType } from '@lingui/core';
 import { type FiltersState, useFilters } from '../../UI/Search/FiltersChooser';
 import {
   getExtensionsRegistry,
@@ -7,102 +8,136 @@ import {
   type ExtensionShortHeader,
 } from '../../Utils/GDevelopServices/Extension';
 import { type Filters } from '../../Utils/GDevelopServices/Filters';
-import { useSearchItem } from '../../UI/Search/UseSearchItem';
+import {
+  useSearchStructuredItem,
+  type SearchResult,
+} from '../../UI/Search/UseSearchStructuredItem';
+import PreferencesContext from '../../MainFrame/Preferences/PreferencesContext';
+import { EXTENSIONS_FETCH_TIMEOUT } from '../../Utils/GlobalFetchTimeouts';
 
-const defaultSearchText = '';
+const emptySearchText = '';
+
+const noExcludedTiers = new Set<string>();
+const excludedExperimentalTiers = new Set(['experimental']);
 
 type ExtensionStoreState = {|
   filters: ?Filters,
-  searchResults: ?Array<ExtensionShortHeader>,
+  searchResults: ?Array<SearchResult<ExtensionShortHeader>>,
   fetchExtensionsAndFilters: () => void,
   error: ?Error,
   searchText: string,
   setSearchText: string => void,
+  allCategories: string[],
+  chosenCategory: string,
+  setChosenCategory: string => void,
+  translatedExtensionShortHeadersByName: {
+    [name: string]: ExtensionShortHeader,
+  },
   filtersState: FiltersState,
+  hasExtensionNamed: (extensionName: string) => boolean,
 |};
 
-export const ExtensionStoreContext = React.createContext<ExtensionStoreState>({
-  filters: null,
-  searchResults: null,
-  fetchExtensionsAndFilters: () => {},
-  error: null,
-  searchText: '',
-  setSearchText: () => {},
-  filtersState: {
-    chosenFilters: new Set(),
-    addFilter: () => {},
-    removeFilter: () => {},
-    chosenCategory: null,
+export const ExtensionStoreContext: React.Context<ExtensionStoreState> = React.createContext<ExtensionStoreState>(
+  {
+    filters: null,
+    searchResults: null,
+    fetchExtensionsAndFilters: () => {},
+    error: null,
+    searchText: '',
+    setSearchText: () => {},
+    allCategories: [],
+    // '' means all categories.
+    chosenCategory: '',
     setChosenCategory: () => {},
-  },
-});
+    translatedExtensionShortHeadersByName: {},
+    filtersState: {
+      chosenFilters: new Set(),
+      addFilter: () => {},
+      removeFilter: () => {},
+      chosenCategory: null,
+      setChosenCategory: () => {},
+    },
+    hasExtensionNamed: () => false,
+  }
+);
 
 type ExtensionStoreStateProviderProps = {|
   children: React.Node,
+  i18n: I18nType,
+  defaultSearchText?: string,
 |};
-
-const getExtensionSearchTerms = (extension: ExtensionShortHeader) => {
-  return (
-    extension.name +
-    '\n' +
-    extension.shortDescription +
-    '\n' +
-    extension.tags.join(',')
-  );
-};
 
 export const ExtensionStoreStateProvider = ({
   children,
-}: ExtensionStoreStateProviderProps) => {
+  i18n,
+  defaultSearchText,
+}: ExtensionStoreStateProviderProps): React.MixedElement => {
   const [
-    extensionShortHeadersByName,
-    setExtensionShortHeadersByName,
-  ] = React.useState<?{
+    translatedExtensionShortHeadersByName,
+    setTranslatedExtensionShortHeadersByName,
+  ] = React.useState<{
     [string]: ExtensionShortHeader,
-  }>(null);
-  const [filters, setFilters] = React.useState<?Filters>(null);
+  }>({});
+  const preferences = React.useContext(PreferencesContext);
+  const { showExperimentalExtensions, language } = preferences.values;
+  const [firstExtensionIds, setFirstExtensionIds] = React.useState<
+    Array<string>
+  >([]);
+  const [loadedLanguage, setLoadedLanguage] = React.useState<?string>(null);
   const [error, setError] = React.useState<?Error>(null);
   const isLoading = React.useRef<boolean>(false);
 
-  const [searchText, setSearchText] = React.useState(defaultSearchText);
+  const [searchText, setSearchText] = React.useState(
+    defaultSearchText || emptySearchText
+  );
+  const [chosenCategory, setChosenCategory] = React.useState('');
   const filtersState = useFilters();
 
   const fetchExtensionsAndFilters = React.useCallback(
     () => {
       // Don't attempt to load again resources and filters if they
-      // were loaded already.
-      if (extensionShortHeadersByName || isLoading.current) return;
+      // are loading or were loaded already in the current language.
+      if (
+        (Object.keys(translatedExtensionShortHeadersByName).length &&
+          loadedLanguage === language) ||
+        isLoading.current
+      )
+        return;
 
       (async () => {
         setError(null);
+        // Reset the search text to avoid showing the previous search results
+        // in case they were on a different language.
+        setSearchText(emptySearchText);
         isLoading.current = true;
 
         try {
           const extensionRegistry: ExtensionsRegistry = await getExtensionsRegistry();
-          const { extensionShortHeaders, allTags } = extensionRegistry;
+          const { headers } = extensionRegistry;
 
-          const sortedTags = allTags
-            .slice()
-            .sort((tag1, tag2) =>
-              tag1.toLowerCase().localeCompare(tag2.toLowerCase())
-            );
-
-          const extensionShortHeadersByName = {};
-          extensionShortHeaders.forEach(extension => {
-            extensionShortHeadersByName[extension.name] = extension;
+          const translatedExtensionShortHeadersByName = {};
+          headers.forEach(extensionShortHeader => {
+            const translatedExtensionShortHeader: ExtensionShortHeader = {
+              ...extensionShortHeader,
+              fullName: i18n._(extensionShortHeader.fullName),
+              shortDescription: i18n._(extensionShortHeader.shortDescription),
+            };
+            translatedExtensionShortHeadersByName[
+              // $FlowFixMe[prop-missing]
+              extensionShortHeader.name
+            ] = translatedExtensionShortHeader;
           });
 
           console.info(
             `Loaded ${
-              extensionShortHeaders.length
+              headers ? headers.length : 0
             } extensions from the extension store.`
           );
-          setExtensionShortHeadersByName(extensionShortHeadersByName);
-          setFilters({
-            allTags: sortedTags,
-            defaultTags: sortedTags,
-            tagsTree: [],
-          });
+          setTranslatedExtensionShortHeadersByName(
+            translatedExtensionShortHeadersByName
+          );
+          setLoadedLanguage(language);
+          setFirstExtensionIds(extensionRegistry.views.default.firstIds);
         } catch (error) {
           console.error(
             `Unable to load the extensions from the extension store:`,
@@ -114,31 +149,93 @@ export const ExtensionStoreStateProvider = ({
         isLoading.current = false;
       })();
     },
-    [extensionShortHeadersByName, isLoading]
+    [
+      translatedExtensionShortHeadersByName,
+      isLoading,
+      i18n,
+      language,
+      loadedLanguage,
+    ]
   );
 
   React.useEffect(
     () => {
       // Don't attempt to load again extensions and filters if they
       // were loaded already.
-      if (extensionShortHeadersByName || isLoading.current) return;
+      if (
+        (Object.keys(translatedExtensionShortHeadersByName).length &&
+          loadedLanguage === language) ||
+        isLoading.current
+      )
+        return;
 
       const timeoutId = setTimeout(() => {
         console.info('Pre-fetching extensions from extension store...');
         fetchExtensionsAndFilters();
-      }, 5000);
+      }, EXTENSIONS_FETCH_TIMEOUT);
       return () => clearTimeout(timeoutId);
     },
-    [fetchExtensionsAndFilters, extensionShortHeadersByName, isLoading]
+    [
+      fetchExtensionsAndFilters,
+      translatedExtensionShortHeadersByName,
+      isLoading,
+      language,
+      loadedLanguage,
+    ]
   );
 
-  const { chosenCategory, chosenFilters } = filtersState;
-  const searchResults: ?Array<ExtensionShortHeader> = useSearchItem(
-    extensionShortHeadersByName,
-    getExtensionSearchTerms,
+  const allCategories = React.useMemo(
+    () => {
+      const categoriesSet = new Set<string>();
+      for (const name in translatedExtensionShortHeadersByName) {
+        categoriesSet.add(translatedExtensionShortHeadersByName[name].category);
+      }
+      const sortedCategories = [...categoriesSet].sort((tag1, tag2) =>
+        tag1.toLowerCase().localeCompare(tag2.toLowerCase())
+      );
+      return sortedCategories;
+    },
+    [translatedExtensionShortHeadersByName]
+  );
+
+  const filters: Filters = React.useMemo(
+    () => {
+      const tagsSet = new Set<string>();
+      for (const name in translatedExtensionShortHeadersByName) {
+        translatedExtensionShortHeadersByName[name].tags.forEach(tag =>
+          tagsSet.add(tag)
+        );
+      }
+      const sortedTags = [...tagsSet].sort((tag1, tag2) =>
+        tag1.toLowerCase().localeCompare(tag2.toLowerCase())
+      );
+      return {
+        allTags: sortedTags,
+        defaultTags: sortedTags,
+        tagsTree: [],
+      };
+    },
+    [translatedExtensionShortHeadersByName]
+  );
+
+  const searchResults: ?Array<
+    SearchResult<ExtensionShortHeader>
+  > = useSearchStructuredItem(translatedExtensionShortHeadersByName, {
     searchText,
-    chosenCategory,
-    chosenFilters
+    chosenItemCategory: chosenCategory,
+    chosenCategory: filtersState.chosenCategory,
+    chosenFilters: filtersState.chosenFilters,
+    excludedTiers: showExperimentalExtensions
+      ? noExcludedTiers
+      : excludedExperimentalTiers,
+    defaultFirstSearchItemIds: firstExtensionIds,
+  });
+
+  const hasExtensionNamed = React.useCallback(
+    (extensionName: string) => {
+      return !!translatedExtensionShortHeadersByName[extensionName];
+    },
+    [translatedExtensionShortHeadersByName]
   );
 
   const extensionStoreState = React.useMemo(
@@ -146,22 +243,33 @@ export const ExtensionStoreStateProvider = ({
       searchResults,
       fetchExtensionsAndFilters,
       filters,
+      allCategories,
+      chosenCategory,
+      setChosenCategory,
       error,
       searchText,
       setSearchText,
+      translatedExtensionShortHeadersByName,
       filtersState,
+      hasExtensionNamed,
     }),
     [
       searchResults,
       error,
       filters,
+      allCategories,
+      chosenCategory,
+      setChosenCategory,
       searchText,
+      translatedExtensionShortHeadersByName,
       filtersState,
       fetchExtensionsAndFilters,
+      hasExtensionNamed,
     ]
   );
 
   return (
+    // $FlowFixMe[incompatible-type]
     <ExtensionStoreContext.Provider value={extensionStoreState}>
       {children}
     </ExtensionStoreContext.Provider>

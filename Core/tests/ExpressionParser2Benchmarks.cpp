@@ -12,6 +12,7 @@
 #include "GDCore/IDE/Events/ExpressionValidator.h"
 #include "GDCore/Project/Layout.h"
 #include "GDCore/Project/Project.h"
+#include "GDCore/Project/ProjectScopedContainers.h"
 #include "catch.hpp"
 
 TEST_CASE("ExpressionParser2 - Benchmarks", "[common][events]") {
@@ -19,15 +20,20 @@ TEST_CASE("ExpressionParser2 - Benchmarks", "[common][events]") {
   gd::Platform platform;
   SetupProjectWithDummyPlatform(project, platform);
   auto &layout1 = project.InsertNewLayout("Layout1", 0);
-  layout1.InsertNewObject(project, "MyExtension::Sprite", "MySpriteObject", 0);
+  layout1.GetObjects().InsertNewObject(project, "MyExtension::Sprite",
+                                                "MySpriteObject", 0);
 
-  gd::ExpressionParser2 parser(platform, project, layout1);
+  auto projectScopedContainers = gd::ProjectScopedContainers::MakeNewProjectScopedContainersForProjectAndLayout(project, layout1);
 
-  auto parseExpression = [&parser](const gd::String &expression) {
-    auto parseExpressionWithType = [&parser,
+  gd::ExpressionParser2 parser;
+
+  auto parseExpression = [&parser, &platform, &projectScopedContainers](const gd::String &expression) {
+    auto parseExpressionWithType = [&parser, &platform, &projectScopedContainers,
                                     &expression](const gd::String &type) {
-      auto node = parser.ParseExpression(type, expression);
+      auto node = parser.ParseExpression(expression);
       REQUIRE(node != nullptr);
+      gd::ExpressionValidator validator(platform, projectScopedContainers, type);
+      node->Visit(validator);
     };
 
     parseExpressionWithType("number");

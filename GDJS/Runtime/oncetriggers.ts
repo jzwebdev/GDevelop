@@ -7,6 +7,15 @@ namespace gdjs {
   /**
    * OnceTriggers is used to store the status of the conditions "Trigger once",
    * that are used in events to have conditions that are only valid for one frame in a row.
+   * @category Core Engine > Events interfacing
+   */
+
+  type OnceTriggersSyncData = {
+    onceTriggers: Record<integer, boolean>;
+    lastFrameOnceTriggers: Record<integer, boolean>;
+  };
+  /**
+   * @category Core Engine > Events interfacing
    */
   export class OnceTriggers {
     _onceTriggers: Record<integer, boolean> = {};
@@ -39,6 +48,18 @@ namespace gdjs {
     triggerOnce(triggerId: integer): boolean {
       this._onceTriggers[triggerId] = true;
       return !this._lastFrameOnceTrigger.hasOwnProperty(triggerId);
+    }
+
+    getNetworkSyncData(): OnceTriggersSyncData {
+      return {
+        onceTriggers: this._onceTriggers,
+        lastFrameOnceTriggers: this._lastFrameOnceTrigger,
+      };
+    }
+
+    updateNetworkSyncData(data: OnceTriggersSyncData): void {
+      this._onceTriggers = data.onceTriggers;
+      this._lastFrameOnceTrigger = data.lastFrameOnceTriggers;
     }
   }
 }

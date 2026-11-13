@@ -1,4 +1,8 @@
 namespace gdjs {
+  /**
+   * @category Other extensions > Inventory
+   * @deprecated use the extension from the extension store instead.
+   */
   export class Inventory {
     _items: any = {};
 
@@ -21,6 +25,13 @@ namespace gdjs {
         return 0;
       }
       return this._items[itemName].count;
+    }
+
+    maximum(itemName) {
+      if (!this._items.hasOwnProperty(itemName)) {
+        return 0;
+      }
+      return this._items[itemName].maxCount;
     }
 
     add(itemName) {
@@ -80,6 +91,7 @@ namespace gdjs {
       if (!this._items.hasOwnProperty(itemName)) {
         this._makeItemEntry(itemName);
       }
+      this._items[itemName].maxCount = 0;
       this._items[itemName].unlimited = enable;
     }
 

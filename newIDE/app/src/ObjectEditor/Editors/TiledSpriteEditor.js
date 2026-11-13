@@ -12,40 +12,44 @@ export default class TiledSpriteEditor extends React.Component<
   EditorProps,
   void
 > {
-  render() {
+  render(): any {
     const {
-      object,
+      objectConfiguration,
       project,
-      resourceSources,
-      onChooseResource,
-      resourceExternalEditors,
+      resourceManagementProps,
+      projectScopedContainersAccessor,
+      objectName,
+      renderObjectNameField,
     } = this.props;
-    const tiledSpriteObject = gd.asTiledSpriteObject(object);
+    const tiledSpriteConfiguration = gd.asTiledSpriteConfiguration(
+      objectConfiguration
+    );
 
     return (
-      <ColumnStackLayout>
+      <ColumnStackLayout noMargin>
+        {renderObjectNameField && renderObjectNameField()}
         <ResourceSelectorWithThumbnail
           project={project}
-          resourceSources={resourceSources}
-          onChooseResource={onChooseResource}
+          resourceManagementProps={resourceManagementProps}
+          projectScopedContainersAccessor={projectScopedContainersAccessor}
           resourceKind="image"
-          resourceName={tiledSpriteObject.getTexture()}
-          resourceExternalEditors={resourceExternalEditors}
+          resourceName={tiledSpriteConfiguration.getTexture()}
+          defaultNewResourceName={objectName}
           onChange={resourceName => {
-            tiledSpriteObject.setTexture(resourceName);
+            tiledSpriteConfiguration.setTexture(resourceName);
             this.forceUpdate();
           }}
           floatingLabelText={<Trans>Select an image</Trans>}
         />
-        <ResponsiveLineStackLayout noMargin>
+        <ResponsiveLineStackLayout noMargin noResponsiveLandscape>
           <SemiControlledTextField
             commitOnBlur
             floatingLabelText={<Trans>Default width (in pixels)</Trans>}
             fullWidth
             type="number"
-            value={tiledSpriteObject.getWidth()}
+            value={tiledSpriteConfiguration.getWidth()}
             onChange={value => {
-              tiledSpriteObject.setWidth(parseInt(value, 10) || 0);
+              tiledSpriteConfiguration.setWidth(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />
@@ -54,9 +58,9 @@ export default class TiledSpriteEditor extends React.Component<
             floatingLabelText={<Trans>Default height (in pixels)</Trans>}
             fullWidth
             type="number"
-            value={tiledSpriteObject.getHeight()}
+            value={tiledSpriteConfiguration.getHeight()}
             onChange={value => {
-              tiledSpriteObject.setHeight(parseInt(value, 10) || 0);
+              tiledSpriteConfiguration.setHeight(parseInt(value, 10) || 0);
               this.forceUpdate();
             }}
           />

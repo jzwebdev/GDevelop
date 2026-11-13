@@ -1,48 +1,70 @@
 // @flow
 import * as React from 'react';
-import { Trans } from '@lingui/macro';
 import { action } from '@storybook/addon-actions';
 
-import muiDecorator from '../../ThemeDecorator';
-import paperDecorator from '../../PaperDecorator';
+import { getPaperDecorator } from '../../PaperDecorator';
 
 import UserChipComponent from '../../../UI/User/UserChip';
-import { indieUserProfile } from '../../../fixtures/GDevelopServicesTestData';
-import { type Profile } from '../../../Utils/GDevelopServices/Authentication';
+import {
+  fakeSilverAuthenticatedUser,
+  fakeNotAuthenticatedUser,
+  fakeAuthenticatedUserLoggingIn,
+  defaultAuthenticatedUserWithNoSubscription,
+} from '../../../fixtures/GDevelopServicesTestData';
+import AuthenticatedUserContext from '../../../Profile/AuthenticatedUserContext';
+import { ColumnStackLayout } from '../../../UI/Layout';
+import Text from '../../../UI/Text';
 
 export default {
   title: 'User chips/UserChip',
   component: UserChipComponent,
-  decorators: [paperDecorator, muiDecorator],
-  argTypes: {
-    withNotifications: {
-      name: 'With notifications',
-      type: { name: 'boolean', required: true },
-      defaultValue: false,
-    },
-    profile: {
-      name: 'User profile',
-      control: { type: 'radio' },
-      options: ['Signed in', 'Anonymous'],
-      defaultValue: 'Signed in',
-      mapping: {
-        'Signed in': indieUserProfile,
-        Anonymous: null,
-      },
-    },
-  },
+  // $FlowFixMe[cannot-resolve-name]
+  decorators: [(getPaperDecorator('medium'): StoryDecorator)],
 };
 
-export const UserChip = ({
-  withNotifications,
-  profile,
-}: {|
-  withNotifications: boolean,
-  profile: ?Profile,
-|}) => (
-  <UserChipComponent
-    profile={profile}
-    onClick={() => action('click user chip')}
-    displayNotificationBadge={withNotifications}
-  />
+const LoggedOut = () => {
+  return (
+    <AuthenticatedUserContext.Provider value={fakeNotAuthenticatedUser}>
+      <UserChipComponent onOpenProfile={action('open profile')} />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+const LoggingIn = () => {
+  return (
+    <AuthenticatedUserContext.Provider value={fakeAuthenticatedUserLoggingIn}>
+      <UserChipComponent onOpenProfile={action('open profile')} />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+const SignedInNoSubscription = () => {
+  return (
+    <AuthenticatedUserContext.Provider
+      value={defaultAuthenticatedUserWithNoSubscription}
+    >
+      <UserChipComponent onOpenProfile={action('open profile')} />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+const SignedInWithSubscription = () => {
+  return (
+    <AuthenticatedUserContext.Provider value={fakeSilverAuthenticatedUser}>
+      <UserChipComponent onOpenProfile={action('open profile')} />
+    </AuthenticatedUserContext.Provider>
+  );
+};
+
+export const UserChips = (): React.Node => (
+  <ColumnStackLayout>
+    <Text>Logged Out</Text>
+    <LoggedOut />
+    <Text>Logging In</Text>
+    <LoggingIn />
+    <Text>Signed in - No Subscription</Text>
+    <SignedInNoSubscription />
+    <Text>Signed in - With Subscription</Text>
+    <SignedInWithSubscription />
+  </ColumnStackLayout>
 );

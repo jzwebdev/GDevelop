@@ -3,42 +3,51 @@ import * as PIXI from 'pixi.js-legacy';
 import PixiResourcesLoader from '../../ObjectsRendering/PixiResourcesLoader';
 
 /**
- * RenderedInstance is the base class used for creating renderers of instances,
+ * RenderedInstance is the base class used for creating 2D renderers of instances,
  * which display on the scene editor, using Pixi.js, the instance of an object (see InstancesEditor).
  */
 export default class RenderedInstance {
   _project: gdProject;
-  _layout: gdLayout;
   _instance: gdInitialInstance;
-  _associatedObject: gdObject;
+  _associatedObjectConfiguration: gdObjectConfiguration;
+  // $FlowFixMe[value-as-type]
   _pixiContainer: PIXI.Container;
-  _pixiResourcesLoader: PixiResourcesLoader;
-  _pixiObject: any;
+  _pixiResourcesLoader: Class<PixiResourcesLoader>;
+  // $FlowFixMe[value-as-type]
+  _pixiObject: PIXI.DisplayObject;
   wasUsed: boolean;
+  _wasDestroyed: boolean;
+  _getPropertyOverridings: (() => Map<string, string>) | null;
 
   constructor(
     project: gdProject,
-    layout: gdLayout,
     instance: gdInitialInstance,
-    associatedObject: gdObject,
+    associatedObjectConfiguration: gdObjectConfiguration,
+    // $FlowFixMe[value-as-type]
     pixiContainer: PIXI.Container,
-    pixiResourcesLoader: PixiResourcesLoader
+    pixiResourcesLoader: Class<PixiResourcesLoader>,
+    getPropertyOverridings: (() => Map<string, string>) | null = null
   ) {
     this._pixiObject = null;
     this._instance = instance;
-    this._associatedObject = associatedObject;
+    this._associatedObjectConfiguration = associatedObjectConfiguration;
     this._pixiContainer = pixiContainer;
     this._project = project;
-    this._layout = layout;
     this._pixiResourcesLoader = pixiResourcesLoader;
+    this._getPropertyOverridings = getPropertyOverridings;
     this.wasUsed = true; //Used by InstancesRenderer to track rendered instance that are not used anymore.
+    this._wasDestroyed = false;
+  }
+
+  isRenderedIn3D(): boolean {
+    return false;
   }
 
   /**
    * Convert an angle from degrees to radians.
    */
-  static toRad(angleInDegrees: number) {
-    return (angleInDegrees / 180) * 3.14159;
+  static toRad(angleInDegrees: number): any {
+    return (angleInDegrees / 180) * Math.PI;
   }
 
   /**
@@ -48,11 +57,12 @@ export default class RenderedInstance {
     //Nothing to do.
   }
 
-  getPixiObject() {
+  // $FlowFixMe[value-as-type]
+  getPixiObject(): PIXI.DisplayObject | null {
     return this._pixiObject;
   }
 
-  getInstance() {
+  getInstance(): gdInitialInstance {
     return this._instance;
   }
 
@@ -61,30 +71,83 @@ export default class RenderedInstance {
    * the scene. The PIXI object should probably be removed from the container: This is what
    * the default implementation of the method does.
    */
-  onRemovedFromScene() {
+  onRemovedFromScene(): void {
+    this._wasDestroyed = true;
     if (this._pixiObject !== null)
       this._pixiContainer.removeChild(this._pixiObject);
   }
 
-  getOriginX() {
+  /**
+   * Tear down any child renderer for the given object name (typically because
+   * its resources were reloaded). The default is a no-op; composite renderers
+   * (e.g. for custom objects) override this to recurse into their children.
+   */
+  // eslint-disable-next-line no-unused-vars
+  resetInstanceRenderersFor(objectName: string): void {}
+
+  getOriginX(): number {
     return 0;
   }
 
-  getOriginY() {
+  getOriginY(): number {
+    return 0;
+  }
+
+  getOriginZ(): number {
+    return 0;
+  }
+
+  getCenterX(): number {
+    return this.getWidth() / 2;
+  }
+
+  getCenterY(): number {
+    return this.getHeight() / 2;
+  }
+
+  getCustomWidth(): number {
+    return this._instance.getCustomWidth();
+  }
+
+  getCustomHeight(): number {
+    return this._instance.getCustomHeight();
+  }
+
+  getWidth(): number {
+    return this._instance.hasCustomSize()
+      ? this.getCustomWidth()
+      : this.getDefaultWidth();
+  }
+
+  getHeight(): number {
+    return this._instance.hasCustomSize()
+      ? this.getCustomHeight()
+      : this.getDefaultHeight();
+  }
+
+  getDepth(): number {
     return 0;
   }
 
   /**
    * Return the width of the instance when the instance doesn't have a custom size.
    */
-  getDefaultWidth() {
+  getDefaultWidth(): number {
     return 32;
   }
 
   /**
    * Return the height of the instance when the instance doesn't have a custom size.
    */
-  getDefaultHeight() {
+  getDefaultHeight(): number {
     return 32;
+  }
+
+  getDefaultDepth(): number {
+    return 0;
+  }
+
+  getPropertyOverridings(): Map<string, string> | null {
+    return this._getPropertyOverridings && this._getPropertyOverridings();
   }
 }
